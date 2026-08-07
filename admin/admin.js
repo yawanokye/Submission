@@ -1,9 +1,12 @@
 const department = location.pathname.split('/').filter(Boolean)[1] || '';
 const apiBase = `/api/admin/${encodeURIComponent(department)}`;
 let submissions=[];
+let dissertationAssignments=[];
 const search=document.getElementById('search');
 const dialog=document.getElementById('detailDialog');
 const selectedDissertations=new Set();
+const assignmentDialog=document.getElementById('assignmentDialog');
+const assignmentForm=document.getElementById('assignmentForm');
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 const fmt=v=>{try{return new Date(v).toLocaleString()}catch{return v||''}};
@@ -15,9 +18,9 @@ const matchesSearch=s=>{
 };
 
 async function load(){
-  const [infoRes,subRes,sumRes]=await Promise.all([fetch(`${apiBase}/info`),fetch(`${apiBase}/submissions`),fetch(`${apiBase}/summary`)]);
-  if(!infoRes.ok||!subRes.ok||!sumRes.ok)throw new Error('Could not load this department portal.');
-  const info=await infoRes.json(); submissions=await subRes.json(); const s=await sumRes.json();
+  const [infoRes,subRes,sumRes,assignRes]=await Promise.all([fetch(`${apiBase}/info`),fetch(`${apiBase}/submissions`),fetch(`${apiBase}/summary`),fetch(`${apiBase}/dissertation-assignments`)]);
+  if(!infoRes.ok||!subRes.ok||!sumRes.ok||!assignRes.ok)throw new Error('Could not load this department portal.');
+  const info=await infoRes.json(); submissions=await subRes.json(); dissertationAssignments=await assignRes.json(); const s=await sumRes.json();
   document.getElementById('departmentName').textContent=info.departmentName;
   document.title=`${info.departmentName} · Submission Administration`;
   for(const k of ['total','project','dissertation','assessor','scoreRows'])document.getElementById(k).textContent=s[k]??0;
@@ -28,7 +31,7 @@ async function load(){
   render();
 }
 
-function render(){renderProject();renderDissertations();renderAssessors();updateSelectedCount();}
+function render(){renderProject();renderDissertations();renderAssignments();renderAssessors();updateSelectedCount();}
 
 function renderProject(){
   const rows=byType('project-work').filter(matchesSearch);
@@ -45,6 +48,20 @@ function renderDissertations(){
   tbody.querySelectorAll('.row-check').forEach(cb=>cb.addEventListener('change',()=>{if(cb.checked)selectedDissertations.add(cb.dataset.id);else selectedDissertations.delete(cb.dataset.id);updateSelectedCount();}));
 }
 
+
+function assignmentStatusBadge(a){
+  const labelMap={'sent':'Sent','downloaded':'Downloaded','expired':'Expired','revoked':'Revoked','email-failed':'Email failed','pending':'Pending'};
+  const label=labelMap[a.status]||a.status||'Pending';
+  return `<span class="status-badge status-${esc(a.status||'pending')}">${esc(label)}</span>`;
+}
+
+function renderAssignments(){
+  const tbody=document.getElementById('assignmentRows');
+  const rows=dissertationAssignments;
+  tbody.innerHTML=rows.map((a,i)=>`<tr><td>${i+1}</td><td><span class="ref">${esc(a.reference)}</span></td><td>${esc(a.assessorName)}</td><td>${esc(a.assessorEmail)}</td><td>${esc(a.dissertationCount)}</td><td>${a.sentAt?esc(fmt(a.sentAt)):'<small>Not sent</small>'}</td><td>${esc(fmt(a.expiresAt))}</td><td>${assignmentStatusBadge(a)}</td><td>${a.downloadedAt?`${esc(fmt(a.downloadedAt))}<br><small>${esc(a.downloadCount)} download${Number(a.downloadCount)===1?'':'s'}</small>`:'<small>Not downloaded</small>'}</td><td><div class="files"><button class="btn small" type="button" onclick="resendAssignment('${esc(a.id)}')">Resend Link</button>${a.status!=='revoked'?`<button class="btn small danger" type="button" onclick="revokeAssignment('${esc(a.id)}')">Revoke</button>`:''}</div>${a.lastEmailError?`<small class="error-text">${esc(a.lastEmailError)}</small>`:''}</td></tr>`).join('');
+  document.getElementById('assignmentEmpty').classList.toggle('hidden',rows.length>0);
+}
+
 function renderAssessors(){
   const rows=byType('assessor').filter(matchesSearch);
   const tbody=document.getElementById('assessorRows');
@@ -56,6 +73,7 @@ function updateSelectedCount(){
   const n=selectedDissertations.size;
   document.getElementById('selectedCount').textContent=`(${n})`;
   document.getElementById('downloadSelectedDissertations').disabled=n===0;
+  document.getElementById('emailSelectedDissertations').disabled=n===0;
 }
 
 document.getElementById('selectAllDissertations').onclick=()=>{byType('dissertation').filter(matchesSearch).forEach(s=>selectedDissertations.add(s.id));renderDissertations();updateSelectedCount();};
@@ -70,6 +88,75 @@ document.getElementById('downloadSelectedDissertations').onclick=async()=>{
     const blob=await res.blob(); const url=URL.createObjectURL(blob); const a=document.createElement('a');a.href=url;a.download=`${department}-selected-dissertations.zip`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }catch(e){alert(e.message||'Could not download selected dissertations.');}
   finally{btn.innerHTML=old;updateSelectedCount();}
+};
+
+
+
+document.getElementById('emailSelectedDissertations').onclick=()=>{
+  if(!selectedDissertations.size)return;
+  document.getElementById('assignmentSelectionCount').textContent=`${selectedDissertations.size} dissertation${selectedDissertations.size===1?'':'s'} selected`;
+  document.getElementById('assignmentFormStatus').classList.add('hidden');
+  document.getElementById('assignmentFormStatus').textContent='';
+  assignmentDialog.showModal();
+};
+
+function closeAssignmentDialog(){ if(assignmentDialog.open) assignmentDialog.close(); }
+document.getElementById('closeAssignmentDialog').onclick=closeAssignmentDialog;
+document.getElementById('cancelAssignment').onclick=closeAssignmentDialog;
+assignmentDialog.addEventListener('click',e=>{if(e.target===assignmentDialog)closeAssignmentDialog();});
+
+assignmentForm.addEventListener('submit',async e=>{
+  e.preventDefault();
+  if(!selectedDissertations.size)return;
+  const btn=document.getElementById('sendAssignment');
+  const status=document.getElementById('assignmentFormStatus');
+  const old=btn.textContent;
+  btn.disabled=true;btn.textContent='Creating secure link & sending…';
+  status.classList.add('hidden');status.classList.remove('error','success');
+  try{
+    const payload={
+      ids:[...selectedDissertations],
+      assessorName:document.getElementById('assignmentAssessorName').value.trim(),
+      assessorEmail:document.getElementById('assignmentAssessorEmail').value.trim(),
+      expiryDays:Number(document.getElementById('assignmentExpiryDays').value||14),
+      message:document.getElementById('assignmentMessage').value.trim()
+    };
+    const res=await fetch(`${apiBase}/dissertation-assignments`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(data.error||'Could not email the dissertation assignment.');
+    dissertationAssignments.unshift(data.assignment);
+    renderAssignments();
+    selectedDissertations.clear();renderDissertations();updateSelectedCount();
+    assignmentForm.reset();document.getElementById('assignmentExpiryDays').value='14';
+    closeAssignmentDialog();
+    alert(`Secure dissertation link sent to ${data.assignment.assessorEmail}.`);
+  }catch(err){
+    status.textContent=err.message||'Could not send the dissertation assignment.';status.classList.remove('hidden');status.classList.add('error');
+    try{const r=await fetch(`${apiBase}/dissertation-assignments`);if(r.ok){dissertationAssignments=await r.json();renderAssignments();}}catch{}
+  }finally{btn.disabled=false;btn.textContent=old;}
+});
+
+window.revokeAssignment=async id=>{
+  if(!confirm('Revoke this secure dissertation link? The assessor will no longer be able to use it.'))return;
+  try{
+    const res=await fetch(`${apiBase}/dissertation-assignments/${encodeURIComponent(id)}/revoke`,{method:'POST'});
+    const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.error||'Could not revoke the link.');
+    dissertationAssignments=dissertationAssignments.map(a=>a.id===id?data.assignment:a);renderAssignments();
+  }catch(e){alert(e.message||'Could not revoke the link.');}
+};
+
+window.resendAssignment=async id=>{
+  const a=dissertationAssignments.find(x=>x.id===id);if(!a)return;
+  const days=prompt('How many days should the new secure link remain valid?', '14');
+  if(days===null)return;
+  const expiryDays=Math.min(60,Math.max(1,Number.parseInt(days,10)||14));
+  if(!confirm(`Generate a new secure link and email it to ${a.assessorEmail}? The previous link will stop working.`))return;
+  try{
+    const res=await fetch(`${apiBase}/dissertation-assignments/${encodeURIComponent(id)}/resend`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expiryDays})});
+    const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.error||'Could not resend the secure link.');
+    dissertationAssignments=dissertationAssignments.map(x=>x.id===id?data.assignment:x);renderAssignments();
+    alert(`A new secure link was sent to ${data.assignment.assessorEmail}.`);
+  }catch(e){alert(e.message||'Could not resend the secure link.');try{const r=await fetch(`${apiBase}/dissertation-assignments`);if(r.ok){dissertationAssignments=await r.json();renderAssignments();}}catch{}}
 };
 
 if(search)search.addEventListener('input',render);
