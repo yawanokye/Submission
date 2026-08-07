@@ -3,7 +3,7 @@ window.PORTAL_CONFIG = {
   // Example: "https://your-service.onrender.com/api/submissions"
   SUBMISSION_ENDPOINT: "",
 
-  // Score-sheet validation rules based on the approved Project Work sample.
+  // Only these five headings are validated. Student data and row counts are ignored.
   REQUIRED_COLUMNS: [
     "S/N",
     "NAME",
@@ -11,9 +11,6 @@ window.PORTAL_CONFIG = {
     "GROUP NO.",
     "TOTAL SCORE"
   ],
-  SCORE_MIN: 0,
-  SCORE_MAX: 100,
-  MAX_SCORE_ROWS: 1000,
   HEADER_SEARCH_ROWS: 30,
 
   // Upload limits in megabytes.
