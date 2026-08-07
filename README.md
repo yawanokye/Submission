@@ -1,6 +1,6 @@
 # Project Work & Dissertation Submission Portal
 
-A static frontend modelled on the supplied 2025 Project Work submission form.
+A static frontend modelled on the supplied Project Work submission form and the approved Project Work score-sheet sample.
 
 ## What it does
 
@@ -11,29 +11,37 @@ A static frontend modelled on the supplied 2025 Project Work submission form.
 - Validates the score spreadsheet in the browser before submission.
 - Submit button remains disabled until all required fields are complete and the spreadsheet passes validation.
 
-## Spreadsheet rules
+## Approved spreadsheet columns
 
-The first worksheet must include these columns:
+The validator searches the first worksheet for the score-table header. The header does not have to be on row 1. It must contain these columns:
 
-1. Name of students
-2. Registration Number
-3. Scores
-4. Study center
+1. S/N
+2. NAME
+3. REGISTRATION NO.
+4. GROUP NO.
+5. TOTAL SCORE
 
-The validator also checks:
+The supplied institutional score sheet places this header on row 8, so the validator automatically searches the first 30 rows to find it.
 
-- no blank compulsory cells
-- scores are numeric
-- scores are between 0 and 100
-- registration numbers are not duplicated
-- study centre in every spreadsheet row matches the study centre selected on the form
-- maximum 1,000 score rows by default
+## Validation rules
 
-Common header variants such as `Student Name`, `Reg No`, `Marks`, and `Study Centre` are accepted and mapped to the required standard.
+- all five approved columns must be present
+- column names must follow the approved labels; differences in case, spacing and a final full stop are tolerated
+- at least one student record must exist
+- S/N must be a positive whole number, unique and sequential starting from 1
+- NAME must not be blank
+- REGISTRATION NO. must not be blank or duplicated
+- GROUP NO. must not be blank
+- TOTAL SCORE must be numeric and between 0 and 100
+- blank rows after the student records end the table
+- supervisor signature/date/contact footer rows are ignored
+- maximum 1,000 student rows by default
+
+The included `scores_template.xlsx` is the supplied Project Work sample and can be used as the approved format.
 
 ## Run locally
 
-Open `index.html` in a browser. Because the spreadsheet parser is loaded from a CDN, internet access is needed unless you download and host SheetJS locally.
+Open `index.html` in a browser. Because the spreadsheet parser is loaded from a CDN, internet access is needed unless you host SheetJS locally.
 
 For a simple local server:
 
@@ -45,9 +53,7 @@ Then open `http://localhost:8080`.
 
 ## Enable real submissions
 
-A static website can validate files, but it cannot permanently store uploaded documents by itself. You need a backend or serverless endpoint.
-
-Edit `config.js`:
+A static website can validate files, but it cannot permanently store uploaded documents by itself. Configure a backend or serverless endpoint in `config.js`:
 
 ```js
 SUBMISSION_ENDPOINT: "https://your-service.example/api/submissions"
@@ -55,32 +61,4 @@ SUBMISSION_ENDPOINT: "https://your-service.example/api/submissions"
 
 The page sends `multipart/form-data` containing the form fields and uploaded files, plus `validatedScoresJson`.
 
-Recommended production options:
-
-- Render backend + PostgreSQL/object storage
-- Supabase Storage + database + Edge Function
-- Firebase Storage + Cloud Function
-- AWS S3 + Lambda/API Gateway
-
-For institutional use, a small Render backend with authenticated admin download/export is usually the easiest next step.
-
-## Security before production
-
-Do not rely only on browser validation. The backend must repeat all spreadsheet/file checks because client-side JavaScript can be bypassed. Also add:
-
-- login or one-time submission code if access should be restricted
-- virus/malware scanning for uploads
-- file extension and MIME verification
-- server-side size limits
-- private object storage
-- audit log and submission reference number
-- rate limiting
-- HTTPS
-- data retention and access-control policy
-
-## Main files
-
-- `index.html` - submission interface
-- `styles.css` - responsive design
-- `app.js` - validation and submission logic
-- `config.js` - endpoint and validation settings
+The backend should repeat the same validation because browser-side validation can be bypassed.

@@ -2,9 +2,7 @@ const cfg = window.PORTAL_CONFIG;
 
 const form = document.getElementById('submissionForm');
 const submitBtn = document.getElementById('submitBtn');
-const declaration = document.getElementById('declaration');
 const scoresFile = document.getElementById('scoresFile');
-const studyCentre = document.getElementById('studyCentre');
 const validationPanel = document.getElementById('validationPanel');
 const validationTitle = document.getElementById('validationTitle');
 const validationSummary = document.getElementById('validationSummary');
@@ -16,26 +14,18 @@ const formMessage = document.getElementById('formMessage');
 let scoresAreValid = false;
 let validatedRows = [];
 
-const normalize = value => String(value ?? '')
-  .trim()
-  .toLowerCase()
-  .replace(/[_\-.]/g, ' ')
-  .replace(/\s+/g, ' ');
+const text = value => String(value ?? '').trim();
 
-const aliases = {
-  'name of students': ['name of students', 'student name', 'student names', 'name', 'names of students'],
-  'registration number': ['registration number', 'registration no', 'reg number', 'reg no', 'student id', 'index number'],
-  'scores': ['scores', 'score', 'mark', 'marks', 'total score'],
-  'study center': ['study center', 'study centre', 'centre', 'center', 'studycentre', 'studycenter']
-};
+// Header matching is intentionally strict. We tolerate differences in case,
+// spacing and the final full stop, but we do not accept different column names.
+const normalizeHeader = value => text(value)
+  .toUpperCase()
+  .replace(/\u00A0/g, ' ')
+  .replace(/\s+/g, ' ')
+  .replace(/\s*\/\s*/g, '/')
+  .replace(/\.$/, '');
 
-function canonicalHeader(header) {
-  const n = normalize(header);
-  for (const [canonical, variants] of Object.entries(aliases)) {
-    if (variants.some(v => normalize(v) === n)) return canonical;
-  }
-  return n;
-}
+const normalizedRequiredHeaders = () => cfg.REQUIRED_COLUMNS.map(normalizeHeader);
 
 function setFileName(inputId, outputId, multiple = false) {
   const input = document.getElementById(inputId);
@@ -77,16 +67,13 @@ function updateSubmitState() {
   const requiredReady = [...form.querySelectorAll('[required]')].every(el => {
     if (el.type === 'file') return el.files && el.files.length > 0;
     if (el.type === 'checkbox') return el.checked;
-    return String(el.value).trim() !== '';
+    return text(el.value) !== '';
   });
   submitBtn.disabled = !(requiredReady && scoresAreValid && form.checkValidity());
 }
 
 form.addEventListener('input', updateSubmitState);
 form.addEventListener('change', updateSubmitState);
-studyCentre.addEventListener('change', () => {
-  if (scoresFile.files.length) validateScoresFile(scoresFile.files[0]);
-});
 
 scoresFile.addEventListener('change', async () => {
   scoresAreValid = false;
@@ -99,12 +86,45 @@ scoresFile.addEventListener('change', async () => {
   await validateScoresFile(scoresFile.files[0]);
 });
 
+function locateHeaderRow(matrix) {
+  const required = normalizedRequiredHeaders();
+  const limit = Math.min(matrix.length, cfg.HEADER_SEARCH_ROWS || 30);
+
+  for (let rowIndex = 0; rowIndex < limit; rowIndex++) {
+    const normalizedRow = (matrix[rowIndex] || []).map(normalizeHeader);
+    if (required.every(header => normalizedRow.includes(header))) {
+      return rowIndex;
+    }
+  }
+  return -1;
+}
+
+function buildColumnMap(headerRow) {
+  const map = {};
+  headerRow.forEach((value, index) => {
+    const normalized = normalizeHeader(value);
+    if (normalized) map[normalized] = index;
+  });
+  return map;
+}
+
+function isBlank(value) {
+  return text(value) === '';
+}
+
+function isFooterRow(row) {
+  const joined = row.map(text).join(' ').toUpperCase();
+  return joined.includes('SIGNATURE OF SUPERVISOR') ||
+    joined.startsWith('DATE ') ||
+    joined.includes('CONTACT ');
+}
+
 async function validateScoresFile(file) {
   validationPanel.classList.remove('hidden', 'success', 'error');
   previewWrap.classList.add('hidden');
   validationErrors.innerHTML = '';
   validationTitle.textContent = 'Checking spreadsheet…';
-  validationSummary.textContent = 'Reading the first worksheet and applying validation rules.';
+  validationSummary.textContent = 'Locating the approved score table and checking every student record.';
 
   if (file.size > cfg.MAX_SCORE_MB * 1024 * 1024) {
     return setValidationFailure([`Scores file exceeds ${cfg.MAX_SCORE_MB} MB.`]);
@@ -120,59 +140,106 @@ async function validateScoresFile(file) {
     if (!workbook.SheetNames.length) return setValidationFailure(['The workbook contains no worksheet.']);
 
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
-    const rawMatrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-    const headerRow = rawMatrix[0] || [];
-    const canonHeaders = headerRow.map(canonicalHeader);
+    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
     const errors = [];
 
-    const requiredCanonical = cfg.REQUIRED_COLUMNS.map(canonicalHeader);
-    const missing = requiredCanonical.filter(h => !canonHeaders.includes(h));
-    if (missing.length) {
-      errors.push(`Missing compulsory column(s): ${missing.join(', ')}.`);
-      errors.push(`Expected headers: ${cfg.REQUIRED_COLUMNS.join(' | ')}.`);
-      return setValidationFailure(errors);
+    const headerRowIndex = locateHeaderRow(matrix);
+    if (headerRowIndex === -1) {
+      return setValidationFailure([
+        'The approved score-table header could not be found in the first worksheet.',
+        `Required columns: ${cfg.REQUIRED_COLUMNS.join(' | ')}.`
+      ]);
     }
 
-    if (!rows.length) return setValidationFailure(['The spreadsheet has headers but no student records.']);
-    if (rows.length > cfg.MAX_SCORE_ROWS) errors.push(`The spreadsheet has ${rows.length} rows. Maximum allowed is ${cfg.MAX_SCORE_ROWS}.`);
+    const headerRow = matrix[headerRowIndex] || [];
+    const columnMap = buildColumnMap(headerRow);
+    const required = normalizedRequiredHeaders();
+    const missing = required.filter(header => columnMap[header] === undefined);
+    if (missing.length) {
+      return setValidationFailure([
+        `Missing compulsory column(s): ${missing.join(', ')}.`,
+        `Required columns: ${cfg.REQUIRED_COLUMNS.join(' | ')}.`
+      ]);
+    }
 
-    const indexByCanonical = {};
-    headerRow.forEach(h => { indexByCanonical[canonicalHeader(h)] = h; });
+    const idx = {
+      sn: columnMap[normalizeHeader('S/N')],
+      name: columnMap[normalizeHeader('NAME')],
+      reg: columnMap[normalizeHeader('REGISTRATION NO.')],
+      group: columnMap[normalizeHeader('GROUP NO.')],
+      score: columnMap[normalizeHeader('TOTAL SCORE')]
+    };
 
     const regSeen = new Map();
+    const snSeen = new Map();
     const cleanRows = [];
-    rows.forEach((row, i) => {
-      const excelRow = i + 2;
-      const name = String(row[indexByCanonical['name of students']] ?? '').trim();
-      const reg = String(row[indexByCanonical['registration number']] ?? '').trim();
-      const scoreRaw = row[indexByCanonical['scores']];
-      const centre = String(row[indexByCanonical['study center']] ?? '').trim();
-      const score = Number(String(scoreRaw).replace('%','').trim());
+    let started = false;
 
-      if (!name) errors.push(`Row ${excelRow}: student name is blank.`);
-      if (!reg) errors.push(`Row ${excelRow}: registration number is blank.`);
-      if (scoreRaw === '' || Number.isNaN(score)) errors.push(`Row ${excelRow}: score must be numeric.`);
-      else if (score < cfg.SCORE_MIN || score > cfg.SCORE_MAX) errors.push(`Row ${excelRow}: score ${score} is outside ${cfg.SCORE_MIN}-${cfg.SCORE_MAX}.`);
-      if (!centre) errors.push(`Row ${excelRow}: study center is blank.`);
+    for (let r = headerRowIndex + 1; r < matrix.length; r++) {
+      const row = matrix[r] || [];
+      const excelRow = r + 1;
 
-      const regKey = normalize(reg);
+      if (started && isFooterRow(row)) break;
+
+      const values = [row[idx.sn], row[idx.name], row[idx.reg], row[idx.group], row[idx.score]];
+      const wholeRowBlank = values.every(isBlank);
+
+      if (wholeRowBlank) {
+        if (started) break;
+        continue;
+      }
+
+      started = true;
+
+      const snRaw = text(row[idx.sn]);
+      const name = text(row[idx.name]);
+      const reg = text(row[idx.reg]);
+      const group = text(row[idx.group]);
+      const scoreRaw = text(row[idx.score]);
+      const sn = Number(snRaw);
+      const score = Number(scoreRaw.replace('%', '').trim());
+
+      if (!snRaw || !Number.isInteger(sn) || sn < 1) {
+        errors.push(`Row ${excelRow}: S/N must be a positive whole number.`);
+      } else {
+        if (snSeen.has(sn)) errors.push(`Row ${excelRow}: S/N ${sn} is duplicated from row ${snSeen.get(sn)}.`);
+        else snSeen.set(sn, excelRow);
+        const expectedSn = cleanRows.length + 1;
+        if (sn !== expectedSn) errors.push(`Row ${excelRow}: S/N should be ${expectedSn}, not ${sn}.`);
+      }
+
+      if (!name) errors.push(`Row ${excelRow}: NAME is blank.`);
+      if (!reg) errors.push(`Row ${excelRow}: REGISTRATION NO. is blank.`);
+      if (!group) errors.push(`Row ${excelRow}: GROUP NO. is blank.`);
+
+      if (!scoreRaw || Number.isNaN(score)) {
+        errors.push(`Row ${excelRow}: TOTAL SCORE must be numeric.`);
+      } else if (score < cfg.SCORE_MIN || score > cfg.SCORE_MAX) {
+        errors.push(`Row ${excelRow}: TOTAL SCORE ${score} is outside ${cfg.SCORE_MIN}-${cfg.SCORE_MAX}.`);
+      }
+
+      const regKey = reg.toUpperCase().replace(/\s+/g, '');
       if (regKey) {
-        if (regSeen.has(regKey)) errors.push(`Row ${excelRow}: duplicate registration number also appears on row ${regSeen.get(regKey)}.`);
+        if (regSeen.has(regKey)) errors.push(`Row ${excelRow}: REGISTRATION NO. is duplicated from row ${regSeen.get(regKey)}.`);
         else regSeen.set(regKey, excelRow);
       }
 
-      if (studyCentre.value && centre && normalize(centre) !== normalize(studyCentre.value)) {
-        errors.push(`Row ${excelRow}: study center "${centre}" does not match selected centre "${studyCentre.value}".`);
-      }
-
       cleanRows.push({
-        'Name of students': name,
-        'Registration Number': reg,
-        'Scores': Number.isNaN(score) ? scoreRaw : score,
-        'Study center': centre
+        'S/N': Number.isNaN(sn) ? snRaw : sn,
+        'NAME': name,
+        'REGISTRATION NO.': reg,
+        'GROUP NO.': group,
+        'TOTAL SCORE': Number.isNaN(score) ? scoreRaw : score
       });
-    });
+    }
+
+    if (!cleanRows.length) {
+      return setValidationFailure([`The score table was found on row ${headerRowIndex + 1}, but it contains no student records.`]);
+    }
+
+    if (cleanRows.length > cfg.MAX_SCORE_ROWS) {
+      errors.push(`The spreadsheet has ${cleanRows.length} student rows. Maximum allowed is ${cfg.MAX_SCORE_ROWS}.`);
+    }
 
     if (errors.length) return setValidationFailure(errors.slice(0, 30), errors.length);
 
@@ -180,7 +247,7 @@ async function validateScoresFile(file) {
     validatedRows = cleanRows;
     validationPanel.classList.add('success');
     validationTitle.textContent = 'Spreadsheet validated successfully';
-    validationSummary.textContent = `${rows.length} student record${rows.length === 1 ? '' : 's'} passed all checks. The file is ready for submission.`;
+    validationSummary.textContent = `${cleanRows.length} student record${cleanRows.length === 1 ? '' : 's'} passed all checks. Header detected on Excel row ${headerRowIndex + 1}.`;
     renderPreview(cleanRows.slice(0, 8));
     updateSubmitState();
   } catch (err) {
