@@ -1,64 +1,81 @@
-# Project Work & Dissertation Submission Portal
+# Project Work & Dissertation Submission Portal, Full Stack
 
-A static frontend modelled on the supplied Project Work submission form and the approved Project Work score-sheet sample.
+This version includes the public submission page, server-side storage, score extraction, an administrator dashboard, original file downloads, and consolidated Excel exports.
 
-## What it does
+## Core score rule
 
-- Collects supervisor/examiner name, phone, email and number of groups/candidates.
-- Supports Project Work or Dissertation submissions.
-- Includes the study centres from the supplied form.
-- Uploads claim form, brief report, completed work/dissertation files and a score spreadsheet.
-- Validates the score spreadsheet in the browser before submission.
-- Submit button remains disabled until all required fields are complete and the spreadsheet passes validation.
+An uploaded score sheet is accepted based only on finding these five headings in one row of the first worksheet:
 
-## Approved spreadsheet columns
+- `S/N`
+- `NAME`
+- `REGISTRATION NO.`
+- `GROUP NO.`
+- `TOTAL SCORE`
 
-The validator searches the first worksheet for the score-table header. The header does not have to be on row 1. It must contain these columns:
+The examiner may add or reduce the number of students. Row count, S/N sequence, duplicates, blank cells and score values are **not used to reject the upload**. Additional columns and institutional headings are ignored.
 
-1. S/N
-2. NAME
-3. REGISTRATION NO.
-4. GROUP NO.
-5. TOTAL SCORE
+For consolidation, the backend reads student rows beneath the detected heading row. Rows containing only a pre-filled S/N are ignored. The original uploaded score sheet is always retained unchanged. The master `S/N` is regenerated sequentially when the consolidated sheet is downloaded.
 
-The supplied institutional score sheet places this header on row 8, so the validator automatically searches the first 30 rows to find it.
+## What the administrator gets
 
-## Validation rules
+Open `/admin` and authenticate with the environment variables below.
 
-- all five approved columns must be present
-- column names must follow the approved labels; differences in case, spacing and a final full stop are tolerated
-- at least one student record must exist
-- S/N must be a positive whole number, unique and sequential starting from 1
-- NAME must not be blank
-- REGISTRATION NO. must not be blank or duplicated
-- GROUP NO. must not be blank
-- TOTAL SCORE must be numeric and between 0 and 100
-- blank rows after the student records end the table
-- supervisor signature/date/contact footer rows are ignored
-- maximum 1,000 student rows by default
+The dashboard provides:
 
-The included `scores_template.xlsx` is the supplied Project Work sample and can be used as the approved format.
+1. Individual submission records with examiner/supervisor details.
+2. Original claim form, report, score sheet and project/dissertation file downloads.
+3. A clean score extract for each submission.
+4. `Consolidated Scores` download with exactly:
+   `S/N | NAME | REGISTRATION NO. | GROUP NO. | TOTAL SCORE`
+5. `Submission Register` download containing the examiner and submission metadata.
+6. `Master Workbook` with both the clean consolidated score sheet and the submission register.
 
-## Run locally
+## Render deployment
 
-Open `index.html` in a browser. Because the spreadsheet parser is loaded from a CDN, internet access is needed unless you host SheetJS locally.
+This is now a **Web Service**, not a Static Site, because it receives and stores uploads.
 
-For a simple local server:
+Recommended Render settings:
+
+- Runtime: Node
+- Build Command: `npm install`
+- Start Command: `npm start`
+- Health Check Path: `/health`
+
+Environment variables:
+
+```text
+ADMIN_USER=admin
+ADMIN_PASSWORD=<a-strong-private-password>
+STORAGE_DIR=/var/data/projectwork_portal
+```
+
+Add a Render Persistent Disk and mount it at:
+
+```text
+/var/data
+```
+
+The persistent disk is essential. Without persistent storage, files saved to the service filesystem may disappear when the service restarts or redeploys.
+
+## Local use
 
 ```bash
-python -m http.server 8080
+npm install
+ADMIN_PASSWORD=my-password npm start
 ```
 
-Then open `http://localhost:8080`.
+Then open:
 
-## Enable real submissions
+- Public portal: `http://localhost:10000/`
+- Admin portal: `http://localhost:10000/admin`
 
-A static website can validate files, but it cannot permanently store uploaded documents by itself. Configure a backend or serverless endpoint in `config.js`:
+The browser will request the administrator username and password when `/admin` is opened.
 
-```js
-SUBMISSION_ENDPOINT: "https://your-service.example/api/submissions"
-```
+## Storage
 
-The page sends `multipart/form-data` containing the form fields and uploaded files, plus `validatedScoresJson`.
+By default the project writes into `./storage` locally. On Render, set `STORAGE_DIR` to the persistent disk path.
 
-The backend should repeat the same validation because browser-side validation can be bypassed.
+- `storage/data/submissions.json` contains submission metadata and extracted score rows.
+- `storage/files/` contains the original uploads.
+
+For a much larger deployment, replace the JSON metadata store with PostgreSQL and the file directory with private object storage. The current version is designed to be simple to deploy and manage for an institutional collection exercise.
