@@ -7,6 +7,12 @@ services:
     envVars:
       - key: STORAGE_DIR
         value: /var/data/ucc-submission-portals
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: ASSIGNMENT_EXPIRY_DAYS
+        value: 14
       - key: EDUCATION_ADMIN_USER
         value: education-admin
       - key: EDUCATION_ADMIN_PASSWORD
@@ -25,5 +31,5 @@ services:
         sync: false
     disk:
       name: submission-data
-      mountPath: /var/data
+      mountPath: /var/data/ucc-submission-portals
       sizeGB: 5

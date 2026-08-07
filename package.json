@@ -1,8 +1,8 @@
 {
   "name": "ucc-departmental-submission-portals",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "private": true,
-  "description": "Three UCC public submission portals with four department-specific administrator dashboards",
+  "description": "UCC departmental submission portals with secure Resend dissertation assignment links",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

@@ -111,6 +111,11 @@ const STORAGE_DIR = path.resolve(process.env.STORAGE_DIR || path.join(__dirname,
 const DATA_DIR = path.join(STORAGE_DIR, 'data');
 const FILES_DIR = path.join(STORAGE_DIR, 'files');
 const DB_FILE = path.join(DATA_DIR, 'submissions.json');
+const ASSIGNMENTS_FILE = path.join(DATA_DIR, 'dissertation-assignments.json');
+const RESEND_API_KEY = String(process.env.RESEND_API_KEY || '').trim();
+const RESEND_FROM_EMAIL = String(process.env.RESEND_FROM_EMAIL || '').trim();
+const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/$/, '');
+const ASSIGNMENT_EXPIRY_DAYS = Math.min(60, Math.max(1, Number(process.env.ASSIGNMENT_EXPIRY_DAYS || 14) || 14));
 
 const DEPARTMENTS = {
   'education': {
@@ -140,7 +145,9 @@ const MAX_HEADER_SCAN_ROWS = 40;
 
 for (const dir of [STORAGE_DIR, DATA_DIR, FILES_DIR]) fs.mkdirSync(dir, { recursive: true });
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]', 'utf8');
+if (!fs.existsSync(ASSIGNMENTS_FILE)) fs.writeFileSync(ASSIGNMENTS_FILE, '[]', 'utf8');
 
+app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -200,6 +207,89 @@ function writeDb(records) {
     await fsp.rename(temp, DB_FILE);
   });
   return writeQueue;
+}
+
+async function readAssignments() {
+  try {
+    const raw = await fsp.readFile(ASSIGNMENTS_FILE, 'utf8');
+    const parsed = JSON.parse(raw || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+let assignmentWriteQueue = Promise.resolve();
+function mutateAssignments(mutator) {
+  assignmentWriteQueue = assignmentWriteQueue.catch(() => {}).then(async () => {
+    const records = await readAssignments();
+    const result = await mutator(records);
+    const temp = ASSIGNMENTS_FILE + '.tmp';
+    await fsp.writeFile(temp, JSON.stringify(records, null, 2), 'utf8');
+    await fsp.rename(temp, ASSIGNMENTS_FILE);
+    return result;
+  });
+  return assignmentWriteQueue;
+}
+
+function assignmentTokenHash(token) {
+  return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+function newAssignmentToken() { return crypto.randomBytes(32).toString('hex'); }
+function isEmail(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim()); }
+function htmlEscape(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+}
+function baseUrlFor(req) {
+  if (PUBLIC_BASE_URL) return PUBLIC_BASE_URL;
+  return `${req.protocol}://${req.get('host')}`;
+}
+function assignmentState(a) {
+  if (a.revokedAt) return 'revoked';
+  if (a.expiresAt && new Date(a.expiresAt).getTime() <= Date.now()) return 'expired';
+  if (a.downloadedAt) return 'downloaded';
+  if (a.emailStatus === 'failed') return 'email-failed';
+  if (a.sentAt) return 'sent';
+  return a.emailStatus || 'pending';
+}
+function publicAssignment(a) {
+  return {
+    id:a.id, reference:a.reference, department:a.department, departmentName:a.departmentName,
+    assessorName:a.assessorName, assessorEmail:a.assessorEmail, dissertationCount:(a.dissertationIds || []).length,
+    createdAt:a.createdAt, sentAt:a.sentAt || null, expiresAt:a.expiresAt, downloadedAt:a.downloadedAt || null,
+    downloadCount:Number(a.downloadCount || 0), revokedAt:a.revokedAt || null, emailStatus:a.emailStatus || 'pending',
+    status:assignmentState(a), resendCount:Number(a.resendCount || 0), lastEmailError:a.lastEmailError || ''
+  };
+}
+async function sendResendEmail({ to, assessorName, departmentName, dissertationCount, expiresAt, secureUrl, message }) {
+  if (!RESEND_API_KEY || !RESEND_FROM_EMAIL) throw new Error('Resend is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL.');
+  const expiresText = new Date(expiresAt).toLocaleString('en-GB', { dateStyle:'long', timeStyle:'short', timeZone:'UTC' }) + ' UTC';
+  const optionalMessage = message ? `<div style="margin:18px 0;padding:14px 16px;background:#f5f7fa;border-left:4px solid #d4a72c"><strong>Message from the department</strong><br>${htmlEscape(message).replace(/\n/g,'<br>')}</div>` : '';
+  const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:640px;margin:auto;padding:24px"><h2 style="color:#082b4c">Dissertations Assigned for Assessment</h2><p>Dear ${htmlEscape(assessorName)},</p><p>${htmlEscape(departmentName)} has assigned <strong>${dissertationCount}</strong> dissertation${dissertationCount===1?'':'s'} to you for assessment.</p>${optionalMessage}<p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Access Assigned Dissertations</a></p><p>This secure link expires on <strong>${htmlEscape(expiresText)}</strong>. Please do not forward the link.</p><p>After completing the assessment, submit the assessment reports and claim forms through the Assessor Submission Portal.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+  const response = await fetch('https://api.resend.com/emails', {
+    method:'POST',
+    headers:{ Authorization:`Bearer ${RESEND_API_KEY}`, 'Content-Type':'application/json' },
+    body:JSON.stringify({
+      from:RESEND_FROM_EMAIL,
+      to:[to],
+      subject:`Dissertations for Assessment - ${departmentName}`,
+      html
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || data.error || `Resend returned HTTP ${response.status}.`);
+  return data;
+}
+async function assignmentByToken(token) {
+  const hash = assignmentTokenHash(token);
+  const assignments = await readAssignments();
+  return assignments.find(a => a.tokenHash === hash) || null;
+}
+function validateLiveAssignment(a) {
+  if (!a) return { ok:false, status:404, message:'This secure dissertation link is invalid.' };
+  if (a.revokedAt) return { ok:false, status:410, message:'This secure dissertation link has been revoked.' };
+  if (new Date(a.expiresAt).getTime() <= Date.now()) return { ok:false, status:410, message:'This secure dissertation link has expired. Please contact the department for a new link.' };
+  return { ok:true };
 }
 
 function normalizeHeader(value) {
@@ -424,6 +514,132 @@ function adminRecordsMap(records) {
   }));
 }
 
+
+// SECURE DISSERTATION ASSIGNMENT LINKS
+app.get('/secure/dissertations/:token', async (req, res) => {
+  const a = await assignmentByToken(req.params.token);
+  const live = validateLiveAssignment(a);
+  res.setHeader('Cache-Control','no-store');
+  res.setHeader('Referrer-Policy','no-referrer');
+  res.setHeader('X-Robots-Tag','noindex, nofollow');
+  res.setHeader('Content-Security-Policy',"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+  if (!live.ok) return res.status(live.status).send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dissertation Access</title></head><body style="font-family:Arial,sans-serif;background:#f4f7fa;color:#182431"><main style="max-width:680px;margin:70px auto;background:#fff;padding:32px;border-radius:14px"><h2 style="color:#082b4c">Dissertation Access</h2><p>${htmlEscape(live.message)}</p></main></body></html>`);
+  const count=(a.dissertationIds||[]).length;
+  const expiry=new Date(a.expiresAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'})+' UTC';
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Assigned Dissertations</title></head><body style="font-family:Arial,sans-serif;background:#f4f7fa;color:#182431;margin:0"><main style="max-width:680px;margin:60px auto;background:#fff;padding:32px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.08)"><div style="font-size:12px;text-transform:uppercase;color:#d4a72c;font-weight:bold">University of Cape Coast</div><h1 style="color:#082b4c;font-size:26px">Assigned Dissertations</h1><p>Dear ${htmlEscape(a.assessorName)},</p><p>You have <strong>${count}</strong> dissertation${count===1?'':'s'} assigned by ${htmlEscape(a.departmentName)}.</p><p>This link expires on <strong>${htmlEscape(expiry)}</strong>.</p><form method="get" action="/secure/dissertations/${encodeURIComponent(req.params.token)}/download"><button type="submit" style="background:#082b4c;color:white;border:0;border-radius:8px;padding:13px 18px;font-weight:bold;cursor:pointer">Download ${count} Dissertation${count===1?'':'s'} as ZIP</button></form><p style="margin-top:24px;color:#647382;font-size:13px">Keep this link private. If it has expired, contact the department administrator for a new link.</p></main></body></html>`);
+});
+
+app.get('/secure/dissertations/:token/download', async (req, res) => {
+  const a = await assignmentByToken(req.params.token);
+  const live = validateLiveAssignment(a);
+  res.setHeader('Cache-Control','no-store');
+  res.setHeader('Referrer-Policy','no-referrer');
+  if (!live.ok) return res.status(live.status).send(live.message);
+
+  const records = dissertationRecords(recordsForDepartment(await readDb(), a.department));
+  const selected = (a.dissertationIds || []).map(id => records.find(r => r.id === id)).filter(Boolean);
+  const zipFiles=[];
+  selected.forEach((r,i)=>{
+    const item=r.files?.dissertationFile;
+    if(!item) return;
+    const fp=path.join(FILES_DIR,path.basename(item.storedName));
+    if(!fs.existsSync(fp)) return;
+    const ext=path.extname(item.originalName || fp) || '.docx';
+    const prefix=String(i+1).padStart(3,'0');
+    zipFiles.push({path:fp,name:safeBaseName(`${prefix} - ${r.indexNumber || 'No Index'} - ${r.studentName || 'Student'}${ext}`),size:Number(item.size||fs.statSync(fp).size)});
+  });
+  if(!zipFiles.length) return res.status(404).send('The assigned dissertation files are currently unavailable.');
+  const totalSize=zipFiles.reduce((sum,f)=>sum+f.size,0);
+  if(totalSize > 3.5 * 1024 * 1024 * 1024) return res.status(413).send('This dissertation package is too large for one ZIP. Please contact the department administrator.');
+
+  res.setHeader('Content-Type','application/zip');
+  res.setHeader('Content-Disposition',`attachment; filename="${safeBaseName(`${a.reference}-dissertations.zip`)}"`);
+  try {
+    await streamZipArchive(res, zipFiles);
+    await mutateAssignments(list => {
+      const item=list.find(x=>x.id===a.id);
+      if(item){ item.downloadedAt=item.downloadedAt || new Date().toISOString(); item.lastDownloadedAt=new Date().toISOString(); item.downloadCount=Number(item.downloadCount||0)+1; }
+    });
+  } catch(e) {
+    console.error('Secure dissertation ZIP download failed:', e);
+    if(!res.headersSent) res.status(500).send('Could not prepare the dissertation ZIP file.'); else res.end();
+  }
+});
+
+// DEPARTMENT ADMIN: dissertation assignment by secure emailed link
+app.get('/api/admin/:department/dissertation-assignments', departmentAuth, async(req,res)=>{
+  const list=(await readAssignments()).filter(a=>a.department===req.adminDepartment).slice().reverse().map(publicAssignment);
+  res.json(list);
+});
+
+app.post('/api/admin/:department/dissertation-assignments', departmentAuth, async(req,res)=>{
+  const ids=Array.isArray(req.body?.ids)?[...new Set(req.body.ids.map(String))]:[];
+  const assessorName=String(req.body?.assessorName||'').trim();
+  const assessorEmail=String(req.body?.assessorEmail||'').trim();
+  const message=String(req.body?.message||'').trim().slice(0,4000);
+  const expiryDays=Math.min(60,Math.max(1,Number.parseInt(req.body?.expiryDays,10)||ASSIGNMENT_EXPIRY_DAYS));
+  if(!RESEND_API_KEY || !RESEND_FROM_EMAIL) return res.status(503).json({error:'Email sending is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL in Render.'});
+  if(!ids.length) return res.status(400).json({error:'Select at least one dissertation.'});
+  if(ids.length>500) return res.status(400).json({error:'A maximum of 500 dissertations can be assigned at once.'});
+  if(!assessorName) return res.status(400).json({error:"Enter the assessor's name."});
+  if(!isEmail(assessorEmail)) return res.status(400).json({error:'Enter a valid assessor email address.'});
+
+  const records=dissertationRecords(recordsForDepartment(await readDb(),req.adminDepartment));
+  const selected=ids.map(id=>records.find(r=>r.id===id)).filter(Boolean);
+  if(selected.length!==ids.length) return res.status(400).json({error:'One or more selected dissertations are unavailable in this department.'});
+  const token=newAssignmentToken();
+  const now=new Date();
+  const expiresAt=new Date(now.getTime()+expiryDays*24*60*60*1000).toISOString();
+  const assignment={
+    id:crypto.randomUUID(), reference:makeReference('ASSIGN'), department:req.adminDepartment, departmentName:req.adminDepartmentName,
+    assessorName, assessorEmail, dissertationIds:ids, createdAt:now.toISOString(), expiresAt, tokenHash:assignmentTokenHash(token),
+    sentAt:null, downloadedAt:null, lastDownloadedAt:null, downloadCount:0, revokedAt:null, emailStatus:'pending', resendCount:0, message
+  };
+  await mutateAssignments(list=>list.push(assignment));
+  const secureUrl=`${baseUrlFor(req)}/secure/dissertations/${token}`;
+  try {
+    const email=await sendResendEmail({to:assessorEmail,assessorName,departmentName:req.adminDepartmentName,dissertationCount:ids.length,expiresAt,secureUrl,message});
+    await mutateAssignments(list=>{const a=list.find(x=>x.id===assignment.id);if(a){a.sentAt=new Date().toISOString();a.emailStatus='sent';a.resendEmailId=email.id||'';a.lastEmailError='';}});
+    const final=(await readAssignments()).find(x=>x.id===assignment.id)||assignment;
+    res.status(201).json({ok:true,assignment:publicAssignment(final)});
+  } catch(e) {
+    console.error('Resend assignment email failed:',e);
+    await mutateAssignments(list=>{const a=list.find(x=>x.id===assignment.id);if(a){a.emailStatus='failed';a.lastEmailError=String(e.message||e).slice(0,500);}});
+    res.status(502).json({error:`The assignment was recorded, but the email could not be sent: ${e.message||e}`,assignmentId:assignment.id});
+  }
+});
+
+app.post('/api/admin/:department/dissertation-assignments/:id/revoke', departmentAuth, async(req,res)=>{
+  const item=await mutateAssignments(list=>{
+    const a=list.find(x=>x.id===req.params.id&&x.department===req.adminDepartment);
+    if(!a) return null;
+    a.revokedAt=new Date().toISOString(); a.emailStatus='revoked'; return publicAssignment(a);
+  });
+  if(!item) return res.status(404).json({error:'Assignment not found.'});
+  res.json({ok:true,assignment:item});
+});
+
+app.post('/api/admin/:department/dissertation-assignments/:id/resend', departmentAuth, async(req,res)=>{
+  if(!RESEND_API_KEY || !RESEND_FROM_EMAIL) return res.status(503).json({error:'Email sending is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL in Render.'});
+  const all=await readAssignments();
+  const existing=all.find(x=>x.id===req.params.id&&x.department===req.adminDepartment);
+  if(!existing) return res.status(404).json({error:'Assignment not found.'});
+  const expiryDays=Math.min(60,Math.max(1,Number.parseInt(req.body?.expiryDays,10)||ASSIGNMENT_EXPIRY_DAYS));
+  const token=newAssignmentToken();
+  const expiresAt=new Date(Date.now()+expiryDays*24*60*60*1000).toISOString();
+  await mutateAssignments(list=>{const a=list.find(x=>x.id===existing.id);if(a){a.tokenHash=assignmentTokenHash(token);a.expiresAt=expiresAt;a.revokedAt=null;a.emailStatus='pending';a.lastEmailError='';a.resendCount=Number(a.resendCount||0)+1;}});
+  const secureUrl=`${baseUrlFor(req)}/secure/dissertations/${token}`;
+  try {
+    const email=await sendResendEmail({to:existing.assessorEmail,assessorName:existing.assessorName,departmentName:existing.departmentName,dissertationCount:(existing.dissertationIds||[]).length,expiresAt,secureUrl,message:existing.message||''});
+    const item=await mutateAssignments(list=>{const a=list.find(x=>x.id===existing.id);if(a){a.sentAt=new Date().toISOString();a.emailStatus='sent';a.resendEmailId=email.id||'';a.lastEmailError='';return publicAssignment(a);}return null;});
+    res.json({ok:true,assignment:item});
+  } catch(e) {
+    console.error('Resend assignment email failed:',e);
+    await mutateAssignments(list=>{const a=list.find(x=>x.id===existing.id);if(a){a.emailStatus='failed';a.lastEmailError=String(e.message||e).slice(0,500);}});
+    res.status(502).json({error:`The secure link was regenerated, but the email could not be sent: ${e.message||e}`});
+  }
+});
+
 // Public admin chooser. Department data remain protected behind department-specific credentials.
 app.get('/admin',(_req,res)=>res.sendFile(path.join(__dirname,'admin','chooser.html')));
 app.get('/admin/admin.css',(_req,res)=>res.sendFile(path.join(__dirname,'admin','admin.css')));
@@ -522,7 +738,7 @@ app.get('/api/admin/:department/summary',departmentAuth,async(req,res)=>{
   });
 });
 
-app.get('/health',(_req,res)=>res.json({ok:true,departments:Object.keys(DEPARTMENTS).length}));
+app.get('/health',(_req,res)=>res.json({ok:true,departments:Object.keys(DEPARTMENTS).length,emailConfigured:Boolean(RESEND_API_KEY&&RESEND_FROM_EMAIL)}));
 app.get('/vendor/xlsx.full.min.js', (_req,res)=>res.sendFile(path.join(__dirname,'node_modules','xlsx','dist','xlsx.full.min.js')));
 app.use(express.static(path.join(__dirname,'public'),{extensions:['html']}));
 app.use((err,req,res,_next)=>{

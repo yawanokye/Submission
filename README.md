@@ -1,98 +1,135 @@
 # UCC Departmental Academic Submission Portals
 
-This Node/Express application provides three public submission portals and four department-specific administrator portals.
+Version 4 adds secure dissertation assignment and email distribution through Resend.
 
-## Departments
+## Public submission portals
 
-Every public submission requires the submitter to choose one of these receiving departments:
+Every submitter selects one of four receiving departments:
 
 1. Department of Education Programmes
 2. Department of Business Programmes
 3. Department of Arts and Social Sciences
 4. Department of Science and Mathematics Programmes
 
-A record is visible only in the administrator portal for the department selected by the submitter.
+Public portals:
 
-## Public portals
+- `/project-work.html` — Undergraduate Project Work
+- `/dissertation.html` — Student Dissertation Submission
+- `/assessor.html` — Assessor batch submission
 
-### 1. `/project-work.html` – Undergraduate Project Work
-
-- Supervisor/examiner details
-- Department and study centre
-- Claim form, report, completed project work and score sheet
-- Excel validation checks only for the presence of these five headings: `S/N`, `NAME`, `REGISTRATION NO.`, `GROUP NO.`, `TOTAL SCORE`
-- Student count, S/N sequence, duplicate registration numbers and score values do not cause rejection
-- Score rows are compiled only within the selected department
-
-### 2. `/dissertation.html` – Dissertation Submission
-
-- Department
-- Student name and index number
-- Telephone and email
-- Supervisor's name
-- Programme
-- Dissertation topic/title
-- Dissertation upload
-
-### 3. `/assessor.html` – Assessment Report Submission
-
-- Department
-- Assessor and student identification
-- Number of works being submitted, from 1 to 25
-- Multiple assessment reports, exactly matching the declared number of works
-- Multiple claim forms, exactly matching the declared number of works
-- Multiple dissertation uploads optional, up to the declared number of works
+Each department sees only records submitted to that department.
 
 ## Department administrator portals
 
-Use `/admin` to choose a department, or open the protected URLs directly:
+Use `/admin` or open a department directly:
 
 - `/admin/education`
 - `/admin/business`
 - `/admin/arts-social-sciences`
 - `/admin/science-mathematics`
 
-Each department dashboard contains three separate sections:
+Each dashboard contains three sections.
 
-### Undergraduate Project Work
+### 1. Undergraduate Project Work
 
-- Individual project work submissions and original files
-- Consolidated Project Scores Excel download
-- Project Work Register Excel download
-- Master Project Scores workbook containing only undergraduate project-work data
+- Individual project-work submissions and original files
+- Excel validation checks only for the five headings `S/N`, `NAME`, `REGISTRATION NO.`, `GROUP NO.`, `TOTAL SCORE`
+- Consolidated Project Scores
+- Project Work Register
+- Master Project Scores
 
-### Dissertations
+Project-work score consolidation applies only to undergraduate project work.
 
-- Individual dissertation records only
+### 2. Dissertations
+
+- Individual dissertation records
 - Register columns: `S/N`, `Name of Student`, `Index Number`, `Dissertation Title`, `Programme`, `Supervisor's Name`
 - Individual dissertation download
-- Checkboxes for selecting dissertations
-- Selected dissertations can be downloaded together as one ZIP file
-- Dissertation Register can be downloaded as Excel
+- Select multiple dissertations and download them as one ZIP
+- Select multiple dissertations and click **Email Selected to Assessor**
 
-### Assessment Reports
+#### Secure assessor distribution workflow
 
-- Individual assessor submission records only
-- Each record shows the declared number of works
-- Every assessment report in the submission can be downloaded individually
-- Every claim form in the submission can be downloaded individually
-- Every optional dissertation in the submission can be downloaded individually
-- No consolidated score or master workbook is produced for this section
+1. Department administrator selects one or more dissertations.
+2. Click **Email Selected to Assessor**.
+3. Enter the assessor's name and email address, link-validity period, and an optional message.
+4. The server generates a cryptographically random secure token and stores only its SHA-256 hash.
+5. Resend sends an email containing a secure link. No dissertation is attached to the email.
+6. The assessor opens the secure link and downloads all assigned dissertations as one ZIP.
+7. The ZIP is created dynamically from the original dissertation files. No duplicate ZIP is permanently stored.
+8. The dashboard records date sent, expiry, first download date, download count, and status.
+9. Department administrators can revoke a link or resend a newly generated link. Resending invalidates the previous link.
+
+Links expire after 14 days by default. The administrator can choose 1–60 days when sending, and the default can be changed with `ASSIGNMENT_EXPIRY_DAYS`.
+
+The secure link is department-scoped and can access only the dissertations recorded in that specific assignment.
+
+### 3. Assessment Reports
+
+- Individual assessor submissions only
+- Number of works being submitted, 1–25
+- Exactly the declared number of assessment reports
+- Exactly the declared number of claim forms
+- Optional multiple dissertations, up to the declared number of works
+- Every submitted file remains individually downloadable
+
+Assessment reports and dissertations are not included in undergraduate score consolidation.
+
+## Resend setup
+
+Create a Resend account, verify the domain/address that will send the emails, and add these Render environment variables:
+
+```text
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxx
+RESEND_FROM_EMAIL=UCC CoDE <dissertations@your-verified-domain.edu.gh>
+```
+
+`RESEND_FROM_EMAIL` must be an address/domain accepted by your Resend account.
+
+Optional:
+
+```text
+ASSIGNMENT_EXPIRY_DAYS=14
+```
+
+The application uses `RENDER_EXTERNAL_URL` automatically when it builds secure links on Render. If you later put the portal behind a custom domain and need to force that URL, set:
+
+```text
+PUBLIC_BASE_URL=https://your-domain.example
+```
+
+Do not add a trailing slash.
 
 ## Render deployment
 
 Create a **Web Service**, not a Static Site.
 
-- Build Command: `npm install`
-- Start Command: `npm start`
+```text
+Build Command: npm install
+Start Command: npm start
+```
 
-Attach a persistent disk at `/var/data` and use:
+### Persistent disk
+
+The application stores original submissions and assignment metadata on the persistent disk. Mount the disk at exactly:
+
+```text
+/var/data/ucc-submission-portals
+```
+
+and set:
 
 ```text
 STORAGE_DIR=/var/data/ucc-submission-portals
 ```
 
-Set separate administrator credentials for each department:
+The included `render.yaml` uses the same exact mount path so the application does not need to create a child directory outside the mounted writable path.
+
+A 5 GB disk is configured as a starting point. Increase it as the dissertation collection grows.
+
+## Department administrator credentials
+
+Set separate credentials in Render:
 
 ```text
 EDUCATION_ADMIN_USER=education-admin
@@ -108,11 +145,37 @@ SCIENCE_MATH_ADMIN_USER=science-admin
 SCIENCE_MATH_ADMIN_PASSWORD=choose-a-strong-password
 ```
 
-`render.yaml` includes these variable names. Password values are intentionally not stored in the repository.
+## Stored metadata
 
-## Storage
+Persistent data files:
 
-All metadata is stored in `submissions.json` on the persistent disk. Uploaded files are stored in the persistent file directory. A 5 GB disk is configured as a starting point. Increase disk size if many dissertations or project files are expected.
+```text
+data/submissions.json
+data/dissertation-assignments.json
+```
+
+`dissertation-assignments.json` contains assignment metadata and hashed link tokens. It does not contain the raw secure token sent to an assessor.
+
+Submitted documents remain in the persistent `files` directory.
+
+## Security behaviour
+
+- Secure assignment tokens use 32 random bytes.
+- Only a SHA-256 hash of each token is stored.
+- Links can expire and be revoked.
+- Resending creates a new token and invalidates the old token.
+- Secure pages use `no-store`, `no-referrer`, and `noindex` headers.
+- Dissertation ZIPs are created on demand and are not stored permanently.
+- Download date and download count are recorded.
+- Department admins cannot assign dissertations belonging to another department.
+
+## Health check
+
+`/health` reports whether email configuration is present without exposing the API key:
+
+```json
+{"ok":true,"departments":4,"emailConfigured":true}
+```
 
 ## Local test
 
@@ -123,3 +186,4 @@ npm start
 
 Then open `http://localhost:10000`.
 
+For local email tests, set `RESEND_API_KEY` and `RESEND_FROM_EMAIL` in your environment. If `PUBLIC_BASE_URL` is not set, secure links are generated from the current request host.
