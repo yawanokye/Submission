@@ -5,12 +5,24 @@ services:
     buildCommand: npm install
     startCommand: npm start
     envVars:
-      - key: ADMIN_USER
-        value: admin
-      - key: ADMIN_PASSWORD
-        sync: false
       - key: STORAGE_DIR
         value: /var/data/ucc-submission-portals
+      - key: EDUCATION_ADMIN_USER
+        value: education-admin
+      - key: EDUCATION_ADMIN_PASSWORD
+        sync: false
+      - key: BUSINESS_ADMIN_USER
+        value: business-admin
+      - key: BUSINESS_ADMIN_PASSWORD
+        sync: false
+      - key: ARTS_SOCIAL_ADMIN_USER
+        value: arts-admin
+      - key: ARTS_SOCIAL_ADMIN_PASSWORD
+        sync: false
+      - key: SCIENCE_MATH_ADMIN_USER
+        value: science-admin
+      - key: SCIENCE_MATH_ADMIN_PASSWORD
+        sync: false
     disk:
       name: submission-data
       mountPath: /var/data

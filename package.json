@@ -1,8 +1,8 @@
 {
-  "name": "ucc-three-submission-portals",
-  "version": "2.0.0",
+  "name": "ucc-departmental-submission-portals",
+  "version": "3.0.0",
   "private": true,
-  "description": "Three UCC public submission portals with consolidated undergraduate scores and an administrator dashboard",
+  "description": "Three UCC public submission portals with four department-specific administrator dashboards",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

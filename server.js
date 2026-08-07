@@ -7,13 +7,133 @@ const path = require('path');
 const crypto = require('crypto');
 
 const app = express();
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+function crc32Update(crc, buffer) {
+  let c = crc >>> 0;
+  for (let i = 0; i < buffer.length; i++) c = CRC_TABLE[(c ^ buffer[i]) & 0xFF] ^ (c >>> 8);
+  return c >>> 0;
+}
+function dosDateTime(date = new Date()) {
+  const year = Math.max(1980, date.getFullYear());
+  const dosTime = ((date.getHours() & 31) << 11) | ((date.getMinutes() & 63) << 5) | ((Math.floor(date.getSeconds() / 2)) & 31);
+  const dosDate = (((year - 1980) & 127) << 9) | (((date.getMonth() + 1) & 15) << 5) | (date.getDate() & 31);
+  return { dosTime, dosDate };
+}
+async function writeResponseChunk(res, chunk) {
+  if (!res.write(chunk)) await new Promise(resolve => res.once('drain', resolve));
+}
+async function streamZipArchive(res, files) {
+  let offset = 0;
+  const central = [];
+  const { dosTime, dosDate } = dosDateTime();
+  async function write(chunk) { await writeResponseChunk(res, chunk); offset += chunk.length; }
+
+  for (const file of files) {
+    const nameBuf = Buffer.from(file.name, 'utf8');
+    const localOffset = offset;
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0008, 6); // data descriptor follows file data
+    local.writeUInt16LE(0, 8);      // stored, no compression
+    local.writeUInt16LE(dosTime, 10);
+    local.writeUInt16LE(dosDate, 12);
+    local.writeUInt32LE(0, 14);
+    local.writeUInt32LE(0, 18);
+    local.writeUInt32LE(0, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    local.writeUInt16LE(0, 28);
+    await write(local); await write(nameBuf);
+
+    let crc = 0xFFFFFFFF;
+    let size = 0;
+    for await (const chunk of fs.createReadStream(file.path)) {
+      crc = crc32Update(crc, chunk);
+      size += chunk.length;
+      await write(chunk);
+    }
+    crc = (crc ^ 0xFFFFFFFF) >>> 0;
+    const descriptor = Buffer.alloc(16);
+    descriptor.writeUInt32LE(0x08074b50, 0);
+    descriptor.writeUInt32LE(crc, 4);
+    descriptor.writeUInt32LE(size >>> 0, 8);
+    descriptor.writeUInt32LE(size >>> 0, 12);
+    await write(descriptor);
+    central.push({ nameBuf, crc, size, localOffset, dosTime, dosDate });
+  }
+
+  const centralOffset = offset;
+  for (const entry of central) {
+    const h = Buffer.alloc(46);
+    h.writeUInt32LE(0x02014b50, 0);
+    h.writeUInt16LE(20, 4);
+    h.writeUInt16LE(20, 6);
+    h.writeUInt16LE(0x0008, 8);
+    h.writeUInt16LE(0, 10);
+    h.writeUInt16LE(entry.dosTime, 12);
+    h.writeUInt16LE(entry.dosDate, 14);
+    h.writeUInt32LE(entry.crc, 16);
+    h.writeUInt32LE(entry.size >>> 0, 20);
+    h.writeUInt32LE(entry.size >>> 0, 24);
+    h.writeUInt16LE(entry.nameBuf.length, 28);
+    h.writeUInt16LE(0, 30);
+    h.writeUInt16LE(0, 32);
+    h.writeUInt16LE(0, 34);
+    h.writeUInt16LE(0, 36);
+    h.writeUInt32LE(0, 38);
+    h.writeUInt32LE(entry.localOffset >>> 0, 42);
+    await write(h); await write(entry.nameBuf);
+  }
+  const centralSize = offset - centralOffset;
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(central.length, 8);
+  end.writeUInt16LE(central.length, 10);
+  end.writeUInt32LE(centralSize >>> 0, 12);
+  end.writeUInt32LE(centralOffset >>> 0, 16);
+  end.writeUInt16LE(0, 20);
+  await write(end);
+  res.end();
+}
 const PORT = Number(process.env.PORT || 10000);
 const STORAGE_DIR = path.resolve(process.env.STORAGE_DIR || path.join(__dirname, 'storage'));
 const DATA_DIR = path.join(STORAGE_DIR, 'data');
 const FILES_DIR = path.join(STORAGE_DIR, 'files');
 const DB_FILE = path.join(DATA_DIR, 'submissions.json');
-const ADMIN_USER = process.env.ADMIN_USER || 'admin';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'change-this-password';
+
+const DEPARTMENTS = {
+  'education': {
+    name: 'Department of Education Programmes',
+    user: process.env.EDUCATION_ADMIN_USER || 'education-admin',
+    password: process.env.EDUCATION_ADMIN_PASSWORD || 'change-this-password'
+  },
+  'business': {
+    name: 'Department of Business Programmes',
+    user: process.env.BUSINESS_ADMIN_USER || 'business-admin',
+    password: process.env.BUSINESS_ADMIN_PASSWORD || 'change-this-password'
+  },
+  'arts-social-sciences': {
+    name: 'Department of Arts and Social Sciences',
+    user: process.env.ARTS_SOCIAL_ADMIN_USER || 'arts-admin',
+    password: process.env.ARTS_SOCIAL_ADMIN_PASSWORD || 'change-this-password'
+  },
+  'science-mathematics': {
+    name: 'Department of Science and Mathematics Programmes',
+    user: process.env.SCIENCE_MATH_ADMIN_USER || 'science-admin',
+    password: process.env.SCIENCE_MATH_ADMIN_PASSWORD || 'change-this-password'
+  }
+};
 
 const REQUIRED_HEADERS = ['S/N', 'NAME', 'REGISTRATION NO.', 'GROUP NO.', 'TOTAL SCORE'];
 const MAX_HEADER_SCAN_ROWS = 40;
@@ -22,7 +142,7 @@ for (const dir of [STORAGE_DIR, DATA_DIR, FILES_DIR]) fs.mkdirSync(dir, { recurs
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]', 'utf8');
 
 app.disable('x-powered-by');
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 function safeEqual(a, b) {
@@ -31,24 +151,34 @@ function safeEqual(a, b) {
   return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
 }
 
-function adminAuth(req, res, next) {
+function departmentFromSlug(slug) {
+  return Object.prototype.hasOwnProperty.call(DEPARTMENTS, slug) ? DEPARTMENTS[slug] : null;
+}
+
+function departmentAuth(req, res, next) {
+  const slug = String(req.params.department || '');
+  const dept = departmentFromSlug(slug);
+  if (!dept) return res.status(404).send('Department administrator portal not found.');
+
   const header = req.headers.authorization || '';
   if (!header.startsWith('Basic ')) {
-    res.set('WWW-Authenticate', 'Basic realm="UCC Submission Admin"');
-    return res.status(401).send('Administrator authentication required.');
+    res.set('WWW-Authenticate', `Basic realm="${dept.name} Administration"`);
+    return res.status(401).send('Department administrator authentication required.');
   }
   try {
     const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
     const sep = decoded.indexOf(':');
     const user = sep >= 0 ? decoded.slice(0, sep) : decoded;
     const pass = sep >= 0 ? decoded.slice(sep + 1) : '';
-    if (!safeEqual(user, ADMIN_USER) || !safeEqual(pass, ADMIN_PASSWORD)) {
-      res.set('WWW-Authenticate', 'Basic realm="UCC Submission Admin"');
-      return res.status(401).send('Invalid administrator credentials.');
+    if (!safeEqual(user, dept.user) || !safeEqual(pass, dept.password)) {
+      res.set('WWW-Authenticate', `Basic realm="${dept.name} Administration"`);
+      return res.status(401).send('Invalid department administrator credentials.');
     }
+    req.adminDepartment = slug;
+    req.adminDepartmentName = dept.name;
     next();
   } catch {
-    return res.status(401).send('Invalid administrator credentials.');
+    return res.status(401).send('Invalid department administrator credentials.');
   }
 }
 
@@ -110,11 +240,11 @@ function parseScoreWorkbook(filePath) {
     const source = matrix[r] || [];
     const vals = NORMALIZED_REQUIRED.map(h => cellText(source[idx[h]]));
     const [sn, name, registrationNo, groupNo, totalScore] = vals;
-    const populated = [name, registrationNo, groupNo, totalScore].filter(Boolean).length;
-    // This is extraction only, not validation. It lets examiners add or remove student rows.
-    // Prefilled empty S/N rows and ordinary footer text are ignored.
-    if (populated === 0) continue;
-    if (!numericSn(sn) && populated < 2) continue;
+
+    // Acceptance validation is header-only. These conditions are used only to avoid
+    // treating blank template lines or signature/footer content as student score rows.
+    const looksLikeStudent = numericSn(sn) || (name && registrationNo && (groupNo || totalScore));
+    if (!looksLikeStudent) continue;
     rows.push({ originalSn: sn, name, registrationNo, groupNo, totalScore });
   }
   return { sheetName: workbook.SheetNames[0], headerRow: header.rowIndex + 1, rows };
@@ -131,12 +261,16 @@ const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, FILES_DIR),
   filename: (_req, file, cb) => cb(null, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}-${safeBaseName(file.originalname)}`)
 });
-const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024, files: 35 } });
+const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024, files: 80 } });
 function filesFor(req, key) { return (req.files && req.files[key]) || []; }
 async function removeUploaded(req) { await Promise.all(Object.values(req.files || {}).flat().map(f => fsp.unlink(f.path).catch(() => {}))); }
 function fileRecord(f) { return f ? { storedName: path.basename(f.path), originalName: f.originalname, mimeType: f.mimetype, size: f.size } : null; }
 function text(req, key) { return String(req.body[key] || '').trim(); }
 function requireText(req, fields) { return fields.find(k => !text(req, k)); }
+function validateDepartment(req) {
+  const slug = text(req, 'department');
+  return departmentFromSlug(slug) ? slug : null;
+}
 
 async function saveRecord(record) {
   const records = await readDb();
@@ -150,6 +284,8 @@ app.post('/api/project-work', upload.fields([
   { name: 'completedWork', maxCount: 25 }, { name: 'scoresFile', maxCount: 1 }
 ]), async (req, res) => {
   try {
+    const department = validateDepartment(req);
+    if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
     const missing = requireText(req, ['fullName','phone','email','groupCount','studyCentre']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error: `Missing required field: ${missing}` }); }
     if (!filesFor(req,'claimForm').length || !filesFor(req,'reportFile').length || !filesFor(req,'completedWork').length || !filesFor(req,'scoresFile').length) {
@@ -159,7 +295,8 @@ app.post('/api/project-work', upload.fields([
     try { scoreResult = parseScoreWorkbook(filesFor(req,'scoresFile')[0].path); }
     catch (e) { await removeUploaded(req); return res.status(400).json({ error: e.message }); }
     const record = {
-      id: crypto.randomUUID(), portalType: 'project-work', reference: makeReference('PWORK'), submittedAt: new Date().toISOString(),
+      id: crypto.randomUUID(), portalType: 'project-work', department, departmentName: DEPARTMENTS[department].name,
+      reference: makeReference('PWORK'), submittedAt: new Date().toISOString(),
       fullName: text(req,'fullName'), phone: text(req,'phone'), email: text(req,'email'), groupCount: text(req,'groupCount'), studyCentre: text(req,'studyCentre'),
       scoreSheet: { worksheet: scoreResult.sheetName, headerRow: scoreResult.headerRow, rowCount: scoreResult.rows.length, rows: scoreResult.rows },
       files: {
@@ -168,48 +305,67 @@ app.post('/api/project-work', upload.fields([
       }
     };
     await saveRecord(record);
-    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, scoreRowsIncluded:scoreResult.rows.length });
+    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, scoreRowsIncluded:scoreResult.rows.length });
   } catch (e) { console.error(e); await removeUploaded(req).catch(()=>{}); res.status(500).json({ error:'The project work submission could not be saved.' }); }
 });
 
 // 2. STUDENT DISSERTATION
 app.post('/api/dissertation', upload.fields([{ name:'dissertationFile', maxCount:1 }]), async (req, res) => {
   try {
+    const department = validateDepartment(req);
+    if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
     const missing = requireText(req, ['studentName','indexNumber','phone','email','supervisorName','programme','dissertationTopic']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error:`Missing required field: ${missing}` }); }
     if (!filesFor(req,'dissertationFile').length) { await removeUploaded(req); return res.status(400).json({ error:'The dissertation file is required.' }); }
     const record = {
-      id: crypto.randomUUID(), portalType:'dissertation', reference:makeReference('DISS'), submittedAt:new Date().toISOString(),
+      id: crypto.randomUUID(), portalType:'dissertation', department, departmentName: DEPARTMENTS[department].name,
+      reference:makeReference('DISS'), submittedAt:new Date().toISOString(),
       studentName:text(req,'studentName'), indexNumber:text(req,'indexNumber'), phone:text(req,'phone'), email:text(req,'email'),
       supervisorName:text(req,'supervisorName'), programme:text(req,'programme'), dissertationTopic:text(req,'dissertationTopic'),
       files:{ dissertationFile:fileRecord(filesFor(req,'dissertationFile')[0]) }
     };
     await saveRecord(record);
-    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt });
+    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName });
   } catch (e) { console.error(e); await removeUploaded(req).catch(()=>{}); res.status(500).json({ error:'The dissertation submission could not be saved.' }); }
 });
 
 // 3. ASSESSOR SUBMISSION
 app.post('/api/assessor', upload.fields([
-  { name:'reportFile', maxCount:1 }, { name:'dissertationFile', maxCount:1 }, { name:'claimForm', maxCount:1 }
+  { name:'reportFile', maxCount:25 }, { name:'dissertationFile', maxCount:25 }, { name:'claimForm', maxCount:25 }
 ]), async (req, res) => {
   try {
-    const missing = requireText(req, ['assessorName','phone','email','studentName','indexNumber','programme']);
+    const department = validateDepartment(req);
+    if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
+    const missing = requireText(req, ['assessorName','phone','email','studentName','indexNumber','programme','workCount']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error:`Missing required field: ${missing}` }); }
-    if (!filesFor(req,'reportFile').length || !filesFor(req,'claimForm').length) {
-      await removeUploaded(req); return res.status(400).json({ error:'Assessment report and claim form are required. The dissertation upload is optional.' });
+
+    const workCount = Number.parseInt(text(req,'workCount'), 10);
+    if (!Number.isInteger(workCount) || workCount < 1 || workCount > 25) {
+      await removeUploaded(req); return res.status(400).json({ error:'Number of works must be between 1 and 25.' });
+    }
+    const reports = filesFor(req,'reportFile');
+    const claims = filesFor(req,'claimForm');
+    const dissertations = filesFor(req,'dissertationFile');
+    if (reports.length !== workCount || claims.length !== workCount) {
+      await removeUploaded(req);
+      return res.status(400).json({ error:`For ${workCount} work${workCount===1?'':'s'}, upload exactly ${workCount} assessment report${workCount===1?'':'s'} and ${workCount} claim form${workCount===1?'':'s'}.` });
+    }
+    if (dissertations.length > workCount) {
+      await removeUploaded(req); return res.status(400).json({ error:`You may upload no more than ${workCount} optional dissertation file${workCount===1?'':'s'}.` });
     }
     const record = {
-      id:crypto.randomUUID(), portalType:'assessor', reference:makeReference('ASSESS'), submittedAt:new Date().toISOString(),
-      assessorName:text(req,'assessorName'), phone:text(req,'phone'), email:text(req,'email'), studentName:text(req,'studentName'),
-      indexNumber:text(req,'indexNumber'), programme:text(req,'programme'),
-      files:{ reportFile:fileRecord(filesFor(req,'reportFile')[0]), claimForm:fileRecord(filesFor(req,'claimForm')[0]), dissertationFile:fileRecord(filesFor(req,'dissertationFile')[0]) }
+      id:crypto.randomUUID(), portalType:'assessor', department, departmentName: DEPARTMENTS[department].name,
+      reference:makeReference('ASSESS'), submittedAt:new Date().toISOString(),
+      assessorName:text(req,'assessorName'), phone:text(req,'phone'), email:text(req,'email'), workCount,
+      studentName:text(req,'studentName'), indexNumber:text(req,'indexNumber'), programme:text(req,'programme'),
+      files:{ reportFile:reports.map(fileRecord), claimForm:claims.map(fileRecord), dissertationFile:dissertations.map(fileRecord) }
     };
     await saveRecord(record);
-    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt });
+    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, workCount, reportFiles:reports.length, claimForms:claims.length, dissertationFiles:dissertations.length });
   } catch (e) { console.error(e); await removeUploaded(req).catch(()=>{}); res.status(500).json({ error:'The assessor submission could not be saved.' }); }
 });
 
+function recordsForDepartment(records, department) { return records.filter(r => r.department === department); }
 function projectRecords(records) { return records.filter(r => r.portalType === 'project-work' || !r.portalType); }
 function dissertationRecords(records) { return records.filter(r => r.portalType === 'dissertation'); }
 function assessorRecords(records) { return records.filter(r => r.portalType === 'assessor'); }
@@ -223,54 +379,160 @@ function allScoreRows(records) {
 }
 function scoreSheetAoA(records) { const rows=allScoreRows(records); return [REQUIRED_HEADERS, ...rows.map(r=>REQUIRED_HEADERS.map(h=>r[h]))]; }
 function projectRegisterAoA(records) {
-  const h=['REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED'];
-  const body=projectRecords(records).map(r=>[r.reference,r.submittedAt,r.fullName,r.phone,r.email,r.studyCentre,r.groupCount,r.scoreSheet?.rowCount??0]); return [h,...body];
+  const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED'];
+  const body=projectRecords(records).map((r,i)=>[i+1,r.reference,r.submittedAt,r.fullName,r.phone,r.email,r.studyCentre,r.groupCount,r.scoreSheet?.rowCount??0]); return [h,...body];
 }
 function dissertationRegisterAoA(records) {
-  const h=['REFERENCE','SUBMITTED AT','STUDENT NAME','INDEX NUMBER','PHONE','EMAIL','SUPERVISOR NAME','PROGRAMME','DISSERTATION TOPIC','FILE'];
-  const body=dissertationRecords(records).map(r=>[r.reference,r.submittedAt,r.studentName,r.indexNumber,r.phone,r.email,r.supervisorName,r.programme,r.dissertationTopic,r.files?.dissertationFile?.originalName||'']); return [h,...body];
+  const h=['S/N','Name of Student','Index Number','Dissertation Title','Programme',"Supervisor's Name"];
+  const body=dissertationRecords(records).map((r,i)=>[i+1,r.studentName,r.indexNumber,r.dissertationTopic,r.programme,r.supervisorName]); return [h,...body];
 }
-function assessorRegisterAoA(records) {
-  const h=['REFERENCE','SUBMITTED AT','ASSESSOR NAME','PHONE','EMAIL','STUDENT NAME','INDEX NUMBER','PROGRAMME','REPORT','DISSERTATION (OPTIONAL)','CLAIM FORM'];
-  const body=assessorRecords(records).map(r=>[r.reference,r.submittedAt,r.assessorName,r.phone,r.email,r.studentName,r.indexNumber,r.programme,r.files?.reportFile?.originalName||'',r.files?.dissertationFile?.originalName||'',r.files?.claimForm?.originalName||'']); return [h,...body];
+function addSheet(wb,name,aoa,widths) {
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=widths.map(w=>({wch:w}));
+  if(ws['!ref']) ws['!autofilter']={ref:ws['!ref']};
+  XLSX.utils.book_append_sheet(wb,ws,name);
 }
-function addSheet(wb,name,aoa,widths) { const ws=XLSX.utils.aoa_to_sheet(aoa); ws['!cols']=widths.map(w=>({wch:w})); if(ws['!ref']) ws['!autofilter']={ref:ws['!ref']}; XLSX.utils.book_append_sheet(wb,ws,name); }
 function workbookBuffer(kind,records) {
   const wb=XLSX.utils.book_new();
-  if(kind==='scores'||kind==='master') addSheet(wb,'Consolidated Project Scores',scoreSheetAoA(records),[10,34,24,16,16]);
-  if(kind==='project'||kind==='master') addSheet(wb,'Project Work Register',projectRegisterAoA(records),[22,24,32,18,30,22,24,20]);
-  if(kind==='dissertation'||kind==='master') addSheet(wb,'Dissertation Register',dissertationRegisterAoA(records),[22,24,30,22,18,30,30,30,55,35]);
-  if(kind==='assessor'||kind==='master') addSheet(wb,'Assessor Register',assessorRegisterAoA(records),[22,24,30,18,30,30,22,30,35,35,35]);
+  if(kind==='scores') addSheet(wb,'Consolidated Project Scores',scoreSheetAoA(records),[10,34,24,16,16]);
+  if(kind==='project-register') addSheet(wb,'Project Work Register',projectRegisterAoA(records),[8,22,24,32,18,30,22,24,20]);
+  if(kind==='project-master') {
+    addSheet(wb,'Master Project Scores',scoreSheetAoA(records),[10,34,24,16,16]);
+    addSheet(wb,'Project Work Register',projectRegisterAoA(records),[8,22,24,32,18,30,22,24,20]);
+  }
+  if(kind==='dissertation-register') addSheet(wb,'Dissertation Register',dissertationRegisterAoA(records),[8,34,24,58,32,34]);
   return XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
 }
-function sendWorkbook(res,kind,records,filename){ const buffer=workbookBuffer(kind,records); res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.setHeader('Content-Disposition',`attachment; filename="${filename}"`); res.send(buffer); }
+function sendWorkbook(res,kind,records,filename){
+  const buffer=workbookBuffer(kind,records);
+  res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition',`attachment; filename="${filename}"`);
+  res.send(buffer);
+}
 
-app.get('/admin',adminAuth,(_req,res)=>res.sendFile(path.join(__dirname,'admin','index.html')));
-app.get('/admin/admin.css',adminAuth,(_req,res)=>res.sendFile(path.join(__dirname,'admin','admin.css')));
-app.get('/admin/admin.js',adminAuth,(_req,res)=>res.sendFile(path.join(__dirname,'admin','admin.js')));
+function adminRecordsMap(records) {
+  return records.slice().reverse().map(r=>({
+    id:r.id, reference:r.reference, submittedAt:r.submittedAt, portalType:r.portalType||'project-work',
+    name:r.fullName||r.studentName||r.assessorName||'', secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
+    email:r.email||'', phone:r.phone||'', programme:r.programme||'', studyCentre:r.studyCentre||'', scoreRows:r.scoreSheet?.rowCount??0,
+    studentName:r.studentName||'', indexNumber:r.indexNumber||'', dissertationTopic:r.dissertationTopic||'', supervisorName:r.supervisorName||'',
+    assessorName:r.assessorName||'', workCount:r.workCount||1,
+    reportFileCount:Array.isArray(r.files?.reportFile)?r.files.reportFile.length:(r.files?.reportFile?1:0),
+    claimFormCount:Array.isArray(r.files?.claimForm)?r.files.claimForm.length:(r.files?.claimForm?1:0),
+    dissertationFileCount:Array.isArray(r.files?.dissertationFile)?r.files.dissertationFile.length:(r.files?.dissertationFile?1:0),
+    dissertationFileName:Array.isArray(r.files?.dissertationFile)?(r.files.dissertationFile[0]?.originalName||''):(r.files?.dissertationFile?.originalName||'')
+  }));
+}
 
-app.get('/api/admin/submissions',adminAuth,async(_req,res)=>{ const records=await readDb(); res.json(records.slice().reverse().map(r=>({
-  id:r.id, reference:r.reference, submittedAt:r.submittedAt, portalType:r.portalType||'project-work',
-  name:r.fullName||r.studentName||r.assessorName||'', secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
-  email:r.email||'', phone:r.phone||'', programme:r.programme||'', studyCentre:r.studyCentre||'', scoreRows:r.scoreSheet?.rowCount??0
-}))); });
-app.get('/api/admin/submissions/:id',adminAuth,async(req,res)=>{ const records=await readDb(); const r=records.find(x=>x.id===req.params.id); if(!r)return res.status(404).json({error:'Submission not found.'}); res.json(r); });
-app.get('/api/admin/submissions/:id/files/:kind/:index?',adminAuth,async(req,res)=>{
-  const records=await readDb(); const r=records.find(x=>x.id===req.params.id); if(!r)return res.status(404).send('Submission not found.');
-  const allowed=['claimForm','reportFile','scoresFile','completedWork','dissertationFile']; if(!allowed.includes(req.params.kind))return res.status(400).send('Invalid file type.');
-  let item=r.files?.[req.params.kind]; if(Array.isArray(item))item=item[Number(req.params.index||0)]; if(!item)return res.status(404).send('File not found.');
-  const fp=path.join(FILES_DIR,path.basename(item.storedName)); if(!fs.existsSync(fp))return res.status(404).send('Stored file is unavailable.'); res.download(fp,item.originalName);
+// Public admin chooser. Department data remain protected behind department-specific credentials.
+app.get('/admin',(_req,res)=>res.sendFile(path.join(__dirname,'admin','chooser.html')));
+app.get('/admin/admin.css',(_req,res)=>res.sendFile(path.join(__dirname,'admin','admin.css')));
+app.get('/admin/admin.js',(_req,res)=>res.sendFile(path.join(__dirname,'admin','admin.js')));
+app.get('/admin/:department',departmentAuth,(req,res)=>res.sendFile(path.join(__dirname,'admin','index.html')));
+
+app.get('/api/admin/:department/info', departmentAuth, async(req,res)=>{
+  res.json({ department:req.adminDepartment, departmentName:req.adminDepartmentName });
 });
-app.get('/api/admin/submissions/:id/scores.xlsx',adminAuth,async(req,res)=>{ const records=await readDb(); const r=records.find(x=>x.id===req.params.id); if(!r||!(r.portalType==='project-work'||!r.portalType))return res.status(404).send('Project work submission not found.'); sendWorkbook(res,'scores',[r],`${r.reference}-scores.xlsx`); });
-app.get('/api/admin/export/scores.xlsx',adminAuth,async(_req,res)=>sendWorkbook(res,'scores',await readDb(),'consolidated-project-scores.xlsx'));
-app.get('/api/admin/export/project.xlsx',adminAuth,async(_req,res)=>sendWorkbook(res,'project',await readDb(),'project-work-register.xlsx'));
-app.get('/api/admin/export/dissertation.xlsx',adminAuth,async(_req,res)=>sendWorkbook(res,'dissertation',await readDb(),'dissertation-register.xlsx'));
-app.get('/api/admin/export/assessor.xlsx',adminAuth,async(_req,res)=>sendWorkbook(res,'assessor',await readDb(),'assessor-register.xlsx'));
-app.get('/api/admin/export/master.xlsx',adminAuth,async(_req,res)=>sendWorkbook(res,'master',await readDb(),'ucc-submission-master-workbook.xlsx'));
-app.get('/api/admin/summary',adminAuth,async(_req,res)=>{ const records=await readDb(); res.json({ total:records.length, project:projectRecords(records).length, dissertation:dissertationRecords(records).length, assessor:assessorRecords(records).length, scoreRows:allScoreRows(records).length }); });
+app.get('/api/admin/:department/submissions', departmentAuth, async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  res.json(adminRecordsMap(records));
+});
+app.get('/api/admin/:department/submissions/:id', departmentAuth, async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  const r=records.find(x=>x.id===req.params.id);
+  if(!r)return res.status(404).json({error:'Submission not found in this department.'});
+  res.json(r);
+});
+app.get('/api/admin/:department/submissions/:id/files/:kind/:index?', departmentAuth, async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  const r=records.find(x=>x.id===req.params.id);
+  if(!r)return res.status(404).send('Submission not found in this department.');
+  const allowed=['claimForm','reportFile','scoresFile','completedWork','dissertationFile'];
+  if(!allowed.includes(req.params.kind))return res.status(400).send('Invalid file type.');
+  let item=r.files?.[req.params.kind];
+  if(Array.isArray(item))item=item[Number(req.params.index||0)];
+  if(!item)return res.status(404).send('File not found.');
+  const fp=path.join(FILES_DIR,path.basename(item.storedName));
+  if(!fs.existsSync(fp))return res.status(404).send('Stored file is unavailable.');
+  res.download(fp,item.originalName);
+});
+app.get('/api/admin/:department/submissions/:id/scores.xlsx', departmentAuth, async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  const r=records.find(x=>x.id===req.params.id);
+  if(!r||!(r.portalType==='project-work'||!r.portalType))return res.status(404).send('Project work submission not found.');
+  sendWorkbook(res,'scores',[r],`${r.reference}-clean-scores.xlsx`);
+});
 
-app.get('/health',(_req,res)=>res.json({ok:true}));
+// UNDERGRADUATE PROJECT WORK exports only
+app.get('/api/admin/:department/export/project-scores.xlsx', departmentAuth, async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  sendWorkbook(res,'scores',records,`${req.adminDepartment}-consolidated-project-scores.xlsx`);
+});
+app.get('/api/admin/:department/export/project-register.xlsx', departmentAuth, async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  sendWorkbook(res,'project-register',records,`${req.adminDepartment}-project-work-register.xlsx`);
+});
+app.get('/api/admin/:department/export/project-master.xlsx', departmentAuth, async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  sendWorkbook(res,'project-master',records,`${req.adminDepartment}-master-project-scores.xlsx`);
+});
+
+// DISSERTATION register and selected-document ZIP. No dissertation content is consolidated.
+app.get('/api/admin/:department/export/dissertation-register.xlsx', departmentAuth, async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  sendWorkbook(res,'dissertation-register',records,`${req.adminDepartment}-dissertation-register.xlsx`);
+});
+app.post('/api/admin/:department/dissertations/download-selected', departmentAuth, async(req,res)=>{
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+  if (!ids.length) return res.status(400).json({ error:'Select at least one dissertation.' });
+  if (ids.length > 500) return res.status(400).json({ error:'A maximum of 500 dissertations can be downloaded at once.' });
+
+  const records=dissertationRecords(recordsForDepartment(await readDb(), req.adminDepartment));
+  const selected = ids.map(id => records.find(r => r.id === id)).filter(Boolean);
+  if (!selected.length) return res.status(404).json({ error:'No selected dissertations were found in this department.' });
+
+  const zipFiles=[];
+  selected.forEach((r,i)=>{
+    const item=r.files?.dissertationFile;
+    if(!item) return;
+    const fp=path.join(FILES_DIR,path.basename(item.storedName));
+    if(!fs.existsSync(fp)) return;
+    const ext=path.extname(item.originalName || fp) || '.docx';
+    const prefix=String(i+1).padStart(3,'0');
+    zipFiles.push({path:fp,name:safeBaseName(`${prefix} - ${r.indexNumber || 'No Index'} - ${r.studentName || 'Student'}${ext}`),size:Number(item.size||fs.statSync(fp).size)});
+  });
+  if(!zipFiles.length) return res.status(404).json({ error:'Selected dissertation files are unavailable.' });
+  const totalSize=zipFiles.reduce((a,f)=>a+f.size,0);
+  if(totalSize > 3.5 * 1024 * 1024 * 1024) return res.status(400).json({ error:'The selected ZIP would exceed the supported 3.5 GB limit. Download the dissertations in smaller groups.' });
+
+  res.setHeader('Content-Type','application/zip');
+  res.setHeader('Content-Disposition',`attachment; filename="${req.adminDepartment}-selected-dissertations.zip"`);
+  try { await streamZipArchive(res, zipFiles); }
+  catch(e) { console.error('ZIP download failed:', e); if(!res.headersSent)res.status(500).json({error:'Could not create the ZIP file.'}); else res.end(); }
+});
+
+app.get('/api/admin/:department/summary',departmentAuth,async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  res.json({
+    total:records.length,
+    project:projectRecords(records).length,
+    dissertation:dissertationRecords(records).length,
+    assessor:assessorRecords(records).length,
+    scoreRows:allScoreRows(records).length
+  });
+});
+
+app.get('/health',(_req,res)=>res.json({ok:true,departments:Object.keys(DEPARTMENTS).length}));
 app.get('/vendor/xlsx.full.min.js', (_req,res)=>res.sendFile(path.join(__dirname,'node_modules','xlsx','dist','xlsx.full.min.js')));
 app.use(express.static(path.join(__dirname,'public'),{extensions:['html']}));
-app.use((err,req,res,_next)=>{ console.error(err); if(err instanceof multer.MulterError)return res.status(400).json({error:err.code==='LIMIT_FILE_SIZE'?'A file exceeds the 100 MB server limit.':err.message}); res.status(500).json({error:'Unexpected server error.'}); });
-app.listen(PORT,'0.0.0.0',()=>{ console.log(`UCC submission portals listening on ${PORT}`); if(ADMIN_PASSWORD==='change-this-password')console.warn('WARNING: Set ADMIN_PASSWORD before production deployment.'); });
+app.use((err,req,res,_next)=>{
+  console.error(err);
+  if(err instanceof multer.MulterError)return res.status(400).json({error:err.code==='LIMIT_FILE_SIZE'?'A file exceeds the 100 MB server limit.':err.message});
+  res.status(500).json({error:'Unexpected server error.'});
+});
+app.listen(PORT,'0.0.0.0',()=>{
+  console.log(`UCC submission portals listening on ${PORT}`);
+  for (const [slug, dept] of Object.entries(DEPARTMENTS)) {
+    if (dept.password === 'change-this-password') console.warn(`WARNING: Set a secure admin password for ${slug}.`);
+  }
+});
