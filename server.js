@@ -112,8 +112,11 @@ const DATA_DIR = path.join(STORAGE_DIR, 'data');
 const FILES_DIR = path.join(STORAGE_DIR, 'files');
 const DB_FILE = path.join(DATA_DIR, 'submissions.json');
 const ASSIGNMENTS_FILE = path.join(DATA_DIR, 'dissertation-assignments.json');
-const RESEND_API_KEY = String(process.env.RESEND_API_KEY || '').trim();
-const RESEND_FROM_EMAIL = String(process.env.RESEND_FROM_EMAIL || '').trim();
+const GMAIL_CLIENT_ID = String(process.env.GMAIL_CLIENT_ID || '').trim();
+const GMAIL_CLIENT_SECRET = String(process.env.GMAIL_CLIENT_SECRET || '').trim();
+const GMAIL_REFRESH_TOKEN = String(process.env.GMAIL_REFRESH_TOKEN || '').trim();
+const GMAIL_SENDER_EMAIL = String(process.env.GMAIL_SENDER_EMAIL || '').trim();
+const GMAIL_FROM_NAME = String(process.env.GMAIL_FROM_NAME || 'UCC Dissertation Portal').trim();
 const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/$/, '');
 const ASSIGNMENT_EXPIRY_DAYS = Math.min(60, Math.max(1, Number(process.env.ASSIGNMENT_EXPIRY_DAYS || 14) || 14));
 
@@ -261,23 +264,78 @@ function publicAssignment(a) {
     status:assignmentState(a), resendCount:Number(a.resendCount || 0), lastEmailError:a.lastEmailError || ''
   };
 }
-async function sendResendEmail({ to, assessorName, departmentName, dissertationCount, expiresAt, secureUrl, message }) {
-  if (!RESEND_API_KEY || !RESEND_FROM_EMAIL) throw new Error('Resend is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL.');
-  const expiresText = new Date(expiresAt).toLocaleString('en-GB', { dateStyle:'long', timeStyle:'short', timeZone:'UTC' }) + ' UTC';
-  const optionalMessage = message ? `<div style="margin:18px 0;padding:14px 16px;background:#f5f7fa;border-left:4px solid #d4a72c"><strong>Message from the department</strong><br>${htmlEscape(message).replace(/\n/g,'<br>')}</div>` : '';
-  const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:640px;margin:auto;padding:24px"><h2 style="color:#082b4c">Dissertations Assigned for Assessment</h2><p>Dear ${htmlEscape(assessorName)},</p><p>${htmlEscape(departmentName)} has assigned <strong>${dissertationCount}</strong> dissertation${dissertationCount===1?'':'s'} to you for assessment.</p>${optionalMessage}<p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Access Assigned Dissertations</a></p><p>This secure link expires on <strong>${htmlEscape(expiresText)}</strong>. Please do not forward the link.</p><p>After completing the assessment, submit the assessment reports and claim forms through the Assessor Submission Portal.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
-  const response = await fetch('https://api.resend.com/emails', {
+function gmailConfigured() {
+  return Boolean(GMAIL_CLIENT_ID && GMAIL_CLIENT_SECRET && GMAIL_REFRESH_TOKEN && GMAIL_SENDER_EMAIL);
+}
+function cleanMailHeader(value) {
+  return String(value || '').replace(/[\r\n]+/g, ' ').trim();
+}
+function encodeMailHeader(value) {
+  const text = cleanMailHeader(value);
+  if (!text) return '';
+  if (/^[\x20-\x7E]*$/.test(text)) return text;
+  return `=?UTF-8?B?${Buffer.from(text, 'utf8').toString('base64')}?=`;
+}
+function base64Url(value) {
+  return Buffer.from(value, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+async function getGmailAccessToken() {
+  if (!gmailConfigured()) {
+    throw new Error('Gmail API is not configured. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN and GMAIL_SENDER_EMAIL.');
+  }
+  const response = await fetch('https://oauth2.googleapis.com/token', {
     method:'POST',
-    headers:{ Authorization:`Bearer ${RESEND_API_KEY}`, 'Content-Type':'application/json' },
-    body:JSON.stringify({
-      from:RESEND_FROM_EMAIL,
-      to:[to],
-      subject:`Dissertations for Assessment - ${departmentName}`,
-      html
+    headers:{ 'Content-Type':'application/x-www-form-urlencoded' },
+    body:new URLSearchParams({
+      client_id:GMAIL_CLIENT_ID,
+      client_secret:GMAIL_CLIENT_SECRET,
+      refresh_token:GMAIL_REFRESH_TOKEN,
+      grant_type:'refresh_token'
     })
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.message || data.error || `Resend returned HTTP ${response.status}.`);
+  if (!response.ok || !data.access_token) {
+    const detail = data.error_description || data.error || `Google OAuth returned HTTP ${response.status}.`;
+    throw new Error(`Could not obtain a Gmail access token: ${detail}`);
+  }
+  return data.access_token;
+}
+async function sendGmailEmail({ to, assessorName, departmentName, dissertationCount, expiresAt, secureUrl, message }) {
+  if (!gmailConfigured()) {
+    throw new Error('Gmail API is not configured. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN and GMAIL_SENDER_EMAIL.');
+  }
+  if (!isEmail(to)) throw new Error('The assessor email address is invalid.');
+  if (!isEmail(GMAIL_SENDER_EMAIL)) throw new Error('GMAIL_SENDER_EMAIL is not a valid email address.');
+
+  const expiresText = new Date(expiresAt).toLocaleString('en-GB', { dateStyle:'long', timeStyle:'short', timeZone:'UTC' }) + ' UTC';
+  const optionalMessage = message ? `<div style="margin:18px 0;padding:14px 16px;background:#f5f7fa;border-left:4px solid #d4a72c"><strong>Message from the department</strong><br>${htmlEscape(message).replace(/\n/g,'<br>')}</div>` : '';
+  const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:640px;margin:auto;padding:24px"><h2 style="color:#082b4c">Dissertations Assigned for Assessment</h2><p>Dear ${htmlEscape(assessorName)},</p><p>${htmlEscape(departmentName)} has assigned <strong>${dissertationCount}</strong> dissertation${dissertationCount===1?'':'s'} to you for assessment.</p>${optionalMessage}<p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Access Assigned Dissertations</a></p><p>This secure link expires on <strong>${htmlEscape(expiresText)}</strong>. Please do not forward the link.</p><p>After completing the assessment, submit the assessment reports and claim forms through the Assessor Submission Portal.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+
+  const fromName = encodeMailHeader(GMAIL_FROM_NAME || 'UCC Dissertation Portal');
+  const fromHeader = fromName ? `${fromName} <${cleanMailHeader(GMAIL_SENDER_EMAIL)}>` : cleanMailHeader(GMAIL_SENDER_EMAIL);
+  const subject = encodeMailHeader(`Dissertations for Assessment - ${departmentName}`);
+  const rawMessage = [
+    `From: ${fromHeader}`,
+    `To: ${cleanMailHeader(to)}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset="UTF-8"',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    html
+  ].join('\r\n');
+
+  const accessToken = await getGmailAccessToken();
+  const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method:'POST',
+    headers:{ Authorization:`Bearer ${accessToken}`, 'Content-Type':'application/json' },
+    body:JSON.stringify({ raw:base64Url(rawMessage) })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = data?.error?.message || data?.error_description || data?.error || `Gmail API returned HTTP ${response.status}.`;
+    throw new Error(detail);
+  }
   return data;
 }
 async function assignmentByToken(token) {
@@ -578,7 +636,7 @@ app.post('/api/admin/:department/dissertation-assignments', departmentAuth, asyn
   const assessorEmail=String(req.body?.assessorEmail||'').trim();
   const message=String(req.body?.message||'').trim().slice(0,4000);
   const expiryDays=Math.min(60,Math.max(1,Number.parseInt(req.body?.expiryDays,10)||ASSIGNMENT_EXPIRY_DAYS));
-  if(!RESEND_API_KEY || !RESEND_FROM_EMAIL) return res.status(503).json({error:'Email sending is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL in Render.'});
+  if(!gmailConfigured()) return res.status(503).json({error:'Email sending is not configured. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN and GMAIL_SENDER_EMAIL in Render.'});
   if(!ids.length) return res.status(400).json({error:'Select at least one dissertation.'});
   if(ids.length>500) return res.status(400).json({error:'A maximum of 500 dissertations can be assigned at once.'});
   if(!assessorName) return res.status(400).json({error:"Enter the assessor's name."});
@@ -598,12 +656,12 @@ app.post('/api/admin/:department/dissertation-assignments', departmentAuth, asyn
   await mutateAssignments(list=>list.push(assignment));
   const secureUrl=`${baseUrlFor(req)}/secure/dissertations/${token}`;
   try {
-    const email=await sendResendEmail({to:assessorEmail,assessorName,departmentName:req.adminDepartmentName,dissertationCount:ids.length,expiresAt,secureUrl,message});
-    await mutateAssignments(list=>{const a=list.find(x=>x.id===assignment.id);if(a){a.sentAt=new Date().toISOString();a.emailStatus='sent';a.resendEmailId=email.id||'';a.lastEmailError='';}});
+    const email=await sendGmailEmail({to:assessorEmail,assessorName,departmentName:req.adminDepartmentName,dissertationCount:ids.length,expiresAt,secureUrl,message});
+    await mutateAssignments(list=>{const a=list.find(x=>x.id===assignment.id);if(a){a.sentAt=new Date().toISOString();a.emailStatus='sent';a.emailProvider='gmail';a.emailProviderMessageId=email.id||'';a.lastEmailError='';}});
     const final=(await readAssignments()).find(x=>x.id===assignment.id)||assignment;
     res.status(201).json({ok:true,assignment:publicAssignment(final)});
   } catch(e) {
-    console.error('Resend assignment email failed:',e);
+    console.error('Gmail assignment email failed:',e);
     await mutateAssignments(list=>{const a=list.find(x=>x.id===assignment.id);if(a){a.emailStatus='failed';a.lastEmailError=String(e.message||e).slice(0,500);}});
     res.status(502).json({error:`The assignment was recorded, but the email could not be sent: ${e.message||e}`,assignmentId:assignment.id});
   }
@@ -620,7 +678,7 @@ app.post('/api/admin/:department/dissertation-assignments/:id/revoke', departmen
 });
 
 app.post('/api/admin/:department/dissertation-assignments/:id/resend', departmentAuth, async(req,res)=>{
-  if(!RESEND_API_KEY || !RESEND_FROM_EMAIL) return res.status(503).json({error:'Email sending is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL in Render.'});
+  if(!gmailConfigured()) return res.status(503).json({error:'Email sending is not configured. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN and GMAIL_SENDER_EMAIL in Render.'});
   const all=await readAssignments();
   const existing=all.find(x=>x.id===req.params.id&&x.department===req.adminDepartment);
   if(!existing) return res.status(404).json({error:'Assignment not found.'});
@@ -630,11 +688,11 @@ app.post('/api/admin/:department/dissertation-assignments/:id/resend', departmen
   await mutateAssignments(list=>{const a=list.find(x=>x.id===existing.id);if(a){a.tokenHash=assignmentTokenHash(token);a.expiresAt=expiresAt;a.revokedAt=null;a.emailStatus='pending';a.lastEmailError='';a.resendCount=Number(a.resendCount||0)+1;}});
   const secureUrl=`${baseUrlFor(req)}/secure/dissertations/${token}`;
   try {
-    const email=await sendResendEmail({to:existing.assessorEmail,assessorName:existing.assessorName,departmentName:existing.departmentName,dissertationCount:(existing.dissertationIds||[]).length,expiresAt,secureUrl,message:existing.message||''});
-    const item=await mutateAssignments(list=>{const a=list.find(x=>x.id===existing.id);if(a){a.sentAt=new Date().toISOString();a.emailStatus='sent';a.resendEmailId=email.id||'';a.lastEmailError='';return publicAssignment(a);}return null;});
+    const email=await sendGmailEmail({to:existing.assessorEmail,assessorName:existing.assessorName,departmentName:existing.departmentName,dissertationCount:(existing.dissertationIds||[]).length,expiresAt,secureUrl,message:existing.message||''});
+    const item=await mutateAssignments(list=>{const a=list.find(x=>x.id===existing.id);if(a){a.sentAt=new Date().toISOString();a.emailStatus='sent';a.emailProvider='gmail';a.emailProviderMessageId=email.id||'';a.lastEmailError='';return publicAssignment(a);}return null;});
     res.json({ok:true,assignment:item});
   } catch(e) {
-    console.error('Resend assignment email failed:',e);
+    console.error('Gmail assignment email failed:',e);
     await mutateAssignments(list=>{const a=list.find(x=>x.id===existing.id);if(a){a.emailStatus='failed';a.lastEmailError=String(e.message||e).slice(0,500);}});
     res.status(502).json({error:`The secure link was regenerated, but the email could not be sent: ${e.message||e}`});
   }
@@ -738,7 +796,7 @@ app.get('/api/admin/:department/summary',departmentAuth,async(req,res)=>{
   });
 });
 
-app.get('/health',(_req,res)=>res.json({ok:true,departments:Object.keys(DEPARTMENTS).length,emailConfigured:Boolean(RESEND_API_KEY&&RESEND_FROM_EMAIL)}));
+app.get('/health',(_req,res)=>res.json({ok:true,departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail'}));
 app.get('/vendor/xlsx.full.min.js', (_req,res)=>res.sendFile(path.join(__dirname,'node_modules','xlsx','dist','xlsx.full.min.js')));
 app.use(express.static(path.join(__dirname,'public'),{extensions:['html']}));
 app.use((err,req,res,_next)=>{

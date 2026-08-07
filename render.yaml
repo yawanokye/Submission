@@ -7,10 +7,16 @@ services:
     envVars:
       - key: STORAGE_DIR
         value: /var/data/ucc-submission-portals
-      - key: RESEND_API_KEY
+      - key: GMAIL_CLIENT_ID
         sync: false
-      - key: RESEND_FROM_EMAIL
+      - key: GMAIL_CLIENT_SECRET
         sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false
+      - key: GMAIL_SENDER_EMAIL
+        sync: false
+      - key: GMAIL_FROM_NAME
+        value: UCC Dissertation Portal
       - key: ASSIGNMENT_EXPIRY_DAYS
         value: 14
       - key: EDUCATION_ADMIN_USER
