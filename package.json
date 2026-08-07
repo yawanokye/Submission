@@ -1,16 +1,14 @@
 {
-  "name": "projectwork-dissertation-submission-portal",
-  "version": "1.0.0",
+  "name": "ucc-three-submission-portals",
+  "version": "2.0.0",
   "private": true,
-  "description": "Project Work and Dissertation submission portal with consolidated score export and admin dashboard",
+  "description": "Three UCC public submission portals with consolidated undergraduate scores and an administrator dashboard",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "check": "node --check server.js"
   },
-  "engines": {
-    "node": ">=20"
-  },
+  "engines": { "node": ">=20" },
   "dependencies": {
     "express": "^4.21.2",
     "multer": "^1.4.5-lts.1",

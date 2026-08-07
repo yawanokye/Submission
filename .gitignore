@@ -1,6 +1,5 @@
 node_modules/
 storage/files/*
-storage/data/submissions.json
 !storage/files/.gitkeep
-!storage/data/.gitkeep
+storage/data/submissions.json
 .env

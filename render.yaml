@@ -1,18 +1,17 @@
 services:
   - type: web
-    name: projectwork-submission-portal
+    name: ucc-submission-portals
     runtime: node
     buildCommand: npm install
     startCommand: npm start
-    healthCheckPath: /health
     envVars:
       - key: ADMIN_USER
         value: admin
       - key: ADMIN_PASSWORD
         sync: false
       - key: STORAGE_DIR
-        value: /var/data/projectwork_portal
+        value: /var/data/ucc-submission-portals
     disk:
-      name: projectwork-data
+      name: submission-data
       mountPath: /var/data
-      sizeGB: 10
+      sizeGB: 5
