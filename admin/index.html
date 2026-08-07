@@ -1,1 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Submission Administration</title>
+  <link rel="stylesheet" href="/admin/admin.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/ucc-logo.png" alt="University of Cape Coast logo" />
+      <div>
+        <div class="eyebrow">College Submission Portal</div>
+        <h1>Administration Dashboard</h1>
+      </div>
+    </div>
+    <a class="home-link" href="/">Submission page</a>
+  </header>
 
+  <main>
+    <section class="summary-grid">
+      <article><span>Total submissions</span><strong id="totalSubmissions">0</strong></article>
+      <article><span>Consolidated score rows</span><strong id="totalRows">0</strong></article>
+      <article><span>Study centres represented</span><strong id="centreCount">0</strong></article>
+    </section>
+
+    <section class="export-card">
+      <div>
+        <h2>Downloads</h2>
+        <p>Download all examiner submissions as a register, all score rows as one clean sheet, or both in one workbook.</p>
+      </div>
+      <div class="export-actions">
+        <a class="btn primary" href="/api/admin/export/scores.xlsx">Download Consolidated Scores</a>
+        <a class="btn" href="/api/admin/export/register.xlsx">Download Submission Register</a>
+        <a class="btn" href="/api/admin/export/master.xlsx">Download Master Workbook</a>
+      </div>
+    </section>
+
+    <section class="table-card">
+      <div class="table-head">
+        <div>
+          <h2>Individual submissions</h2>
+          <p>Every original score sheet and supporting file remains available here.</p>
+        </div>
+        <input id="search" type="search" placeholder="Search reference, examiner, centre…" />
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Reference</th>
+              <th>Date</th>
+              <th>Examiner / Supervisor</th>
+              <th>Study Centre</th>
+              <th>Type</th>
+              <th>Groups / Candidates</th>
+              <th>Score Rows</th>
+              <th>Files</th>
+            </tr>
+          </thead>
+          <tbody id="submissionRows"></tbody>
+        </table>
+      </div>
+      <div id="emptyState" class="empty hidden">No submissions found.</div>
+    </section>
+  </main>
+
+  <dialog id="detailDialog">
+    <div class="dialog-head">
+      <div>
+        <div class="eyebrow">Submission record</div>
+        <h2 id="detailReference"></h2>
+      </div>
+      <button id="closeDialog" class="close-btn" aria-label="Close">×</button>
+    </div>
+    <div id="detailBody"></div>
+  </dialog>
+
+  <script src="/admin/admin.js"></script>
+</body>
+</html>
