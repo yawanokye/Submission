@@ -2,6 +2,10 @@ const department = location.pathname.split('/').filter(Boolean)[1] || '';
 const apiBase = `/api/admin/${encodeURIComponent(department)}`;
 let submissions=[];
 let dissertationAssignments=[];
+let adminIdentity={role:'viewer',sections:['project-work','dissertation','assessor'],master:false,name:''};
+const roleRank={viewer:1,officer:2,administrator:3};
+const sectionMap={project:'project-work',dissertation:'dissertation',assessor:'assessor'};
+const can=(section,role='viewer')=>(adminIdentity.sections||[]).includes(section)&&(roleRank[adminIdentity.role]||0)>=(roleRank[role]||1);
 const selectedProject=new Set();
 const selectedDissertations=new Set();
 const selectedAssessors=new Set();
@@ -21,12 +25,14 @@ const pruneSet=(set,valid)=>{for(const id of [...set])if(!valid.has(id))set.dele
 async function load(){
   const [infoRes,subRes,sumRes,assignRes]=await Promise.all([fetch(`${apiBase}/info`),fetch(`${apiBase}/submissions`),fetch(`${apiBase}/summary`),fetch(`${apiBase}/dissertation-assignments`)]);
   if(!infoRes.ok||!subRes.ok||!sumRes.ok||!assignRes.ok)throw new Error('Could not load this department portal.');
-  const info=await infoRes.json(); submissions=await subRes.json(); dissertationAssignments=await assignRes.json(); const s=await sumRes.json();
+  const info=await infoRes.json(); adminIdentity=info.admin||adminIdentity; submissions=await subRes.json(); dissertationAssignments=await assignRes.json(); const s=await sumRes.json();
   pruneSet(selectedProject,new Set(byType('project-work').map(x=>x.id)));
   pruneSet(selectedDissertations,new Set(byType('dissertation').map(x=>x.id)));
   pruneSet(selectedAssessors,new Set(byType('assessor').map(x=>x.id)));
   pruneSet(selectedAssignments,new Set(dissertationAssignments.map(x=>x.id)));
   document.getElementById('departmentName').textContent=info.departmentName;
+  const ident=document.getElementById('adminIdentity');if(ident)ident.textContent=`${adminIdentity.name||adminIdentity.username||'Administrator'} · ${adminIdentity.role}`;
+  applyPermissions();
   document.title=`${info.departmentName} · Submission Administration`;
   for(const k of ['total','project','dissertation','assessor','scoreRows'])document.getElementById(k).textContent=s[k]??0;
   document.getElementById('projectTabCount').textContent=s.project??0;
@@ -39,11 +45,22 @@ async function load(){
   render();
 }
 
+function applyPermissions(){
+  document.querySelectorAll('.admin-tab').forEach(b=>b.hidden=!can(sectionMap[b.dataset.tab]||'', 'viewer'));
+  document.querySelectorAll('.admin-tab-panel').forEach(p=>{if(!can(sectionMap[p.dataset.tabPanel]||'','viewer'))p.hidden=true;});
+  const hide=(id,condition)=>{const el=document.getElementById(id);if(el)el.hidden=condition;};
+  hide('emailSelectedDissertations',!can('dissertation','officer'));hide('deleteSelectedDissertations',!can('dissertation','administrator'));hide('deleteSelectedAssignments',!can('dissertation','administrator'));
+  hide('selectAllAssignments',!can('dissertation','administrator'));hide('clearAssignments',!can('dissertation','administrator'));
+  hide('deleteSelectedProject',!can('project-work','administrator'));hide('selectAllProject',!can('project-work','administrator'));hide('clearProject',!can('project-work','administrator'));
+  hide('deleteSelectedAssessors',!can('assessor','administrator'));hide('selectAllAssessors',!can('assessor','administrator'));hide('clearAssessors',!can('assessor','administrator'));
+  [['project','project-work'],['dissertation','dissertation'],['assessor','assessor'],['scoreRows','project-work']].forEach(([id,section])=>{const el=document.getElementById(id);if(el?.closest('article'))el.closest('article').hidden=!can(section,'viewer');});
+  const first=[...document.querySelectorAll('.admin-tab')].find(b=>!b.hidden);if(first&&!document.querySelector('.admin-tab.active:not([hidden])'))activateAdminTab(first.dataset.tab);
+}
 function render(){renderProject();renderDissertations();renderAssignments();renderAssessors();updateSelectionButtons();}
 
 function renderProject(){
   const rows=byType('project-work').filter(matchesSearch),tbody=document.getElementById('projectRows');
-  tbody.innerHTML=rows.map((s,i)=>`<tr><td>${i+1}</td><td><span class="ref">${esc(s.reference)}</span></td><td>${esc(s.name)}<br><small>${esc(s.email)}</small></td><td>${esc(s.studyCentre)}</td><td>${esc(s.scoreRows)}</td><td>${esc(fmt(s.submittedAt))}</td><td class="select-cell"><input class="row-check project-check" type="checkbox" data-id="${esc(s.id)}" ${selectedProject.has(s.id)?'checked':''}></td><td><div class="files"><a class="btn small" href="${apiBase}/submissions/${s.id}/files/scoresFile">Original Scores</a><a class="btn small" href="${apiBase}/submissions/${s.id}/scores.xlsx">Clean Scores</a><button class="btn small" onclick="showDetail('${s.id}')">View Record</button><button class="btn small danger" onclick="deleteOneSubmission('${s.id}','project work')">Delete</button></div></td></tr>`).join('');
+  tbody.innerHTML=rows.map((s,i)=>`<tr><td>${i+1}</td><td><span class="ref">${esc(s.reference)}</span></td><td>${esc(s.name)}<br><small>${esc(s.email)}</small></td><td>${esc(s.studyCentre)}</td><td>${esc(s.scoreRows)}</td><td>${esc(fmt(s.submittedAt))}</td><td class="select-cell"><input class="row-check project-check" type="checkbox" data-id="${esc(s.id)}" ${selectedProject.has(s.id)?'checked':''}></td><td><div class="files"><a class="btn small" href="${apiBase}/submissions/${s.id}/files/scoresFile">Original Scores</a><a class="btn small" href="${apiBase}/submissions/${s.id}/scores.xlsx">Clean Scores</a><button class="btn small" onclick="showDetail('${s.id}')">View Record</button>${can('project-work','administrator')?`<button class="btn small danger" onclick="deleteOneSubmission('${s.id}','project work')">Delete</button>`:''}</div></td></tr>`).join('');
   document.getElementById('projectEmpty').classList.toggle('hidden',rows.length>0);
   tbody.querySelectorAll('.project-check').forEach(cb=>cb.addEventListener('change',()=>{cb.checked?selectedProject.add(cb.dataset.id):selectedProject.delete(cb.dataset.id);updateSelectionButtons();}));
 }
@@ -67,7 +84,7 @@ function dissertationSortRows(rows){
 }
 function renderDissertations(){
   const rows=dissertationSortRows(byType('dissertation').filter(matchesSearch)),tbody=document.getElementById('dissertationRows');
-  tbody.innerHTML=rows.map((s,i)=>{const state=assessorStateClass(s.assignmentCount);return `<tr class="dissertation-state-${state}"><td>${i+1}</td><td>${esc(s.studentName||s.name)}</td><td><span class="ref">${esc(s.indexNumber)}</span></td><td class="title-cell">${esc(s.dissertationTopic)}${s.titleValidated?'<br><small class="validated-text">✓ Title validated</small>':''}</td><td>${esc(s.programme)}</td><td>${esc(s.supervisorName||s.secondaryName)}</td><td>${assessorCounter(s)}</td><td class="select-cell"><input class="row-check dissertation-check" type="checkbox" data-id="${esc(s.id)}" ${selectedDissertations.has(s.id)?'checked':''}></td><td><div class="files"><a class="btn small primary" href="${apiBase}/submissions/${s.id}/files/dissertationFile">Download</a><button class="btn small" onclick="showDetail('${s.id}')">View</button><button class="btn small danger" onclick="deleteOneSubmission('${s.id}','dissertation')">Delete</button></div></td></tr>`}).join('');
+  tbody.innerHTML=rows.map((s,i)=>{const state=assessorStateClass(s.assignmentCount);const type=`<span class="submission-type ${s.submissionType==='revised'?'revised':'fresh'}">${s.submissionType==='revised'?'Revised':'Fresh'}</span>`;return `<tr class="dissertation-state-${state}"><td>${i+1}</td><td>${esc(s.studentName||s.name)}</td><td><span class="ref">${esc(s.indexNumber)}</span></td><td class="title-cell">${type} ${esc(s.dissertationTopic)}${s.titleValidated?'<br><small class="validated-text">✓ Title validated</small>':''}</td><td>${esc(s.programme)}</td><td>${esc(s.supervisorName||s.secondaryName)}</td><td>${assessorCounter(s)}</td><td class="select-cell"><input class="row-check dissertation-check" type="checkbox" data-id="${esc(s.id)}" ${selectedDissertations.has(s.id)?'checked':''}></td><td><div class="files"><a class="btn small primary" href="${apiBase}/submissions/${s.id}/files/dissertationFile">Download</a><button class="btn small" onclick="showDetail('${s.id}')">View</button>${can('dissertation','administrator')?`<button class="btn small danger" onclick="deleteOneSubmission('${s.id}','dissertation')">Delete</button>`:''}</div></td></tr>`}).join('');
   document.getElementById('dissertationEmpty').classList.toggle('hidden',rows.length>0);
   tbody.querySelectorAll('.dissertation-check').forEach(cb=>cb.addEventListener('change',()=>{cb.checked?selectedDissertations.add(cb.dataset.id):selectedDissertations.delete(cb.dataset.id);updateSelectionButtons();}));
 }
@@ -75,26 +92,26 @@ function renderDissertations(){
 function assignmentStatusBadge(a){const labelMap={'sent':'Sent','downloaded':'Downloaded','expired':'Expired','revoked':'Revoked','email-failed':'Email failed','pending':'Pending'};const label=labelMap[a.status]||a.status||'Pending';return `<span class="status-badge status-${esc(a.status||'pending')}">${esc(label)}</span>`;}
 function renderAssignments(){
   const tbody=document.getElementById('assignmentRows'),rows=dissertationAssignments;
-  tbody.innerHTML=rows.map((a,i)=>{const studentNames=(a.studentNames||[]).join(', ')||'—';return `<tr><td>${i+1}</td><td><span class="ref">${esc(a.reference)}</span></td><td class="title-cell">${esc(studentNames)}</td><td>${esc(a.assessorName)}</td><td>${esc(a.assessorEmail)}</td><td>${esc(a.dissertationCount)}</td><td>${a.sentAt?esc(fmt(a.sentAt)):'<small>Not sent</small>'}</td><td>${esc(fmt(a.expiresAt))}</td><td>${assignmentStatusBadge(a)}</td><td>${a.downloadedAt?`${esc(fmt(a.downloadedAt))}<br><small>${esc(a.downloadCount)} download${Number(a.downloadCount)===1?'':'s'}</small>`:'<small>Not downloaded</small>'}</td><td class="select-cell"><input class="row-check assignment-check" type="checkbox" data-id="${esc(a.id)}" ${selectedAssignments.has(a.id)?'checked':''} aria-label="Select assignment for deletion"></td><td><div class="files"><button class="btn small" type="button" onclick="resendAssignment('${esc(a.id)}')">Resend Link</button>${a.status!=='revoked'?`<button class="btn small danger" type="button" onclick="revokeAssignment('${esc(a.id)}')">Revoke</button>`:''}</div>${a.lastEmailError?`<small class="error-text">${esc(a.lastEmailError)}</small>`:''}</td></tr>`}).join('');
+  tbody.innerHTML=rows.map((a,i)=>{const studentNames=(a.studentNames||[]).join(', ')||'—';return `<tr><td>${i+1}</td><td><span class="ref">${esc(a.reference)}</span></td><td class="title-cell">${esc(studentNames)}</td><td>${esc(a.assessorName)}</td><td>${esc(a.assessorEmail)}</td><td>${esc(a.dissertationCount)}</td><td>${a.sentAt?esc(fmt(a.sentAt)):'<small>Not sent</small>'}</td><td>${esc(fmt(a.earlyBirdDueAt))}</td><td>${esc(fmt(a.assessmentDueAt))}</td><td>${esc(fmt(a.expiresAt))}</td><td>${assignmentStatusBadge(a)}</td><td>${a.downloadedAt?`${esc(fmt(a.downloadedAt))}<br><small>${esc(a.downloadCount)} download${Number(a.downloadCount)===1?'':'s'}</small>`:'<small>Not downloaded</small>'}</td><td class="select-cell">${can('dissertation','administrator')?`<input class="row-check assignment-check" type="checkbox" data-id="${esc(a.id)}" ${selectedAssignments.has(a.id)?'checked':''} aria-label="Select assignment for deletion">`:''}</td><td><div class="files">${can('dissertation','officer')?`<button class="btn small" type="button" onclick="resendAssignment('${esc(a.id)}')">Resend Link</button>${a.status!=='revoked'?`<button class="btn small danger" type="button" onclick="revokeAssignment('${esc(a.id)}')">Revoke</button>`:''}`:''}</div>${a.lastEmailError?`<small class="error-text">${esc(a.lastEmailError)}</small>`:''}</td></tr>`}).join('');
   document.getElementById('assignmentEmpty').classList.toggle('hidden',rows.length>0);
   tbody.querySelectorAll('.assignment-check').forEach(cb=>cb.addEventListener('change',()=>{cb.checked?selectedAssignments.add(cb.dataset.id):selectedAssignments.delete(cb.dataset.id);updateSelectionButtons();}));
 }
 
+function feedbackSummary(s){const states=s.feedbackStates||[];if(!states.length)return '<small>No work records</small>';return `<div class="feedback-summary">${states.map((f,i)=>`<span class="feedback-chip feedback-${esc(f.state)}" title="Work ${i+1}${f.email?` · ${esc(f.email)}`:''}">W${i+1}</span>`).join('')}</div>`;}
 function renderAssessors(){
   const rows=byType('assessor').filter(matchesSearch),tbody=document.getElementById('assessorRows');
-  tbody.innerHTML=rows.map((s,i)=>`<tr><td>${i+1}</td><td><span class="ref">${esc(s.reference)}</span></td><td>${esc(s.assessorName||s.name)}</td><td>${esc(s.workCount||1)}</td><td class="title-cell">${esc(s.studentName||s.secondaryName)}</td><td>${esc(s.indexNumber)}</td><td>${esc(s.programme)}</td><td>${esc(fmt(s.submittedAt))}</td><td class="select-cell"><input class="row-check assessor-check" type="checkbox" data-id="${esc(s.id)}" ${selectedAssessors.has(s.id)?'checked':''}></td><td><div class="files"><button class="btn small primary" onclick="showDetail('${s.id}')">View / Download Files</button><button class="btn small danger" onclick="deleteOneSubmission('${s.id}','assessment submission')">Delete</button></div></td></tr>`).join('');
+  tbody.innerHTML=rows.map((s,i)=>`<tr><td>${i+1}</td><td><span class="ref">${esc(s.reference)}</span></td><td>${esc(s.assessorName||s.name)}</td><td>${esc(s.workCount||1)}</td><td class="title-cell">${esc(s.studentName||s.secondaryName)}</td><td>${esc(s.indexNumber)}</td><td>${esc(s.programme)}</td><td>${feedbackSummary(s)}</td><td>${esc(fmt(s.submittedAt))}</td><td class="select-cell"><input class="row-check assessor-check" type="checkbox" data-id="${esc(s.id)}" ${selectedAssessors.has(s.id)?'checked':''}></td><td><div class="files"><button class="btn small primary" onclick="showDetail('${s.id}')">View / Forward / Download</button>${can('assessor','administrator')?`<button class="btn small danger" onclick="deleteOneSubmission('${s.id}','assessment submission')">Delete</button>`:''}</div></td></tr>`).join('');
   document.getElementById('assessorEmpty').classList.toggle('hidden',rows.length>0);
   tbody.querySelectorAll('.assessor-check').forEach(cb=>cb.addEventListener('change',()=>{cb.checked?selectedAssessors.add(cb.dataset.id):selectedAssessors.delete(cb.dataset.id);updateSelectionButtons();}));
 }
-
 function updateSelectionButtons(){
   const p=selectedProject.size,d=selectedDissertations.size,a=selectedAssessors.size;
-  document.getElementById('projectSelectedCount').textContent=`(${p})`;document.getElementById('deleteSelectedProject').disabled=p===0;
-  document.getElementById('selectedCount').textContent=`(${d})`;document.getElementById('downloadSelectedDissertations').disabled=d===0;document.getElementById('deleteSelectedDissertations').disabled=d===0;
+  document.getElementById('projectSelectedCount').textContent=`(${p})`;document.getElementById('deleteSelectedProject').disabled=p===0||!can('project-work','administrator');
+  document.getElementById('selectedCount').textContent=`(${d})`;document.getElementById('downloadSelectedDissertations').disabled=d===0;document.getElementById('deleteSelectedDissertations').disabled=d===0||!can('dissertation','administrator');
   const selectedRows=[...selectedDissertations].map(id=>submissions.find(s=>s.id===id)).filter(Boolean);const atLimit=selectedRows.some(s=>Number(s.assignmentCount||0)>=3);
-  const emailBtn=document.getElementById('emailSelectedDissertations');emailBtn.disabled=d===0||atLimit;emailBtn.title=atLimit?'At least one selected dissertation already has 3 assessors.':'';
-  document.getElementById('assessorSelectedCount').textContent=`(${a})`;document.getElementById('deleteSelectedAssessors').disabled=a===0;
-  const da=selectedAssignments.size;document.getElementById('assignmentSelectedCount').textContent=`(${da})`;document.getElementById('deleteSelectedAssignments').disabled=da===0;
+  const emailBtn=document.getElementById('emailSelectedDissertations');emailBtn.disabled=d===0||atLimit||!can('dissertation','officer');emailBtn.title=atLimit?'At least one selected dissertation already has 3 assessors.':'';
+  document.getElementById('assessorSelectedCount').textContent=`(${a})`;document.getElementById('deleteSelectedAssessors').disabled=a===0||!can('assessor','administrator');
+  const da=selectedAssignments.size;document.getElementById('assignmentSelectedCount').textContent=`(${da})`;document.getElementById('deleteSelectedAssignments').disabled=da===0||!can('dissertation','administrator');
 }
 
 document.getElementById('selectAllProject').onclick=()=>{byType('project-work').filter(matchesSearch).forEach(s=>selectedProject.add(s.id));renderProject();updateSelectionButtons();};
@@ -142,7 +159,7 @@ if(dissertationSort)dissertationSort.addEventListener('change',renderDissertatio
 const tabButtons=[...document.querySelectorAll('.admin-tab')];
 const tabPanels=[...document.querySelectorAll('.admin-tab-panel')];
 function activateAdminTab(tab){
-  const valid=['project','dissertation','assessor'];if(!valid.includes(tab))tab='project';
+  const valid=['project','dissertation','assessor'].filter(t=>can(sectionMap[t],'viewer'));if(!valid.includes(tab))tab=valid[0]||'project';
   tabButtons.forEach(b=>{const active=b.dataset.tab===tab;b.classList.toggle('active',active);b.setAttribute('aria-selected',active?'true':'false');});
   tabPanels.forEach(p=>p.classList.toggle('hidden',p.dataset.tabPanel!==tab));
   if(location.hash!==`#${tab}`)history.replaceState(null,'',`${location.pathname}${location.search}#${tab}`);
@@ -155,29 +172,33 @@ function item(labelTxt,value){return value!==undefined&&value!==null&&String(val
 function fileLink(s,kind,labelTxt,file,index=''){return file?`<a href="${apiBase}/submissions/${s.id}/files/${kind}${index!==''?`/${index}`:''}">${esc(labelTxt)} · ${esc(file.originalName||'Download')}</a>`:''}
 function fileLinks(s,kind,labelTxt,value){const list=Array.isArray(value)?value:(value?[value]:[]);return list.map((f,i)=>fileLink(s,kind,`${labelTxt} ${list.length>1?i+1:''}`.trim(),f,Array.isArray(value)?i:'')).join('')}
 function workFileLink(s,workIndex,kind,labelTxt,file){return file?`<a href="${apiBase}/submissions/${s.id}/works/${workIndex}/files/${kind}">${esc(labelTxt)} · ${esc(file.originalName||'Download')}</a>`:''}
-function assessmentWorksHtml(s){
+function feedbackLabel(state){return {'not-forwarded':'Not forwarded','sent':'Forwarded, awaiting download','downloaded':'Downloaded by student','pending':'Sending','email-failed':'Email failed','expired':'Link expired','revoked':'Revoked','unavailable':'No matching student email'}[state]||state;}
+function assessmentWorksHtml(s,summary){
   if(!Array.isArray(s.works)||!s.works.length)return '';
-  return `<div class="assessment-admin-list">${s.works.map((w,i)=>`<section class="assessment-admin-work"><div class="assessment-admin-head"><div><span>Work ${esc(w.workNo||i+1)}</span><h4>${esc(w.studentName||`${w.studentFirstName||''} ${w.studentLastName||''}`.trim())}</h4></div><strong>${esc(w.indexNumber||'')}</strong></div><div class="detail-grid">${item('Student First Name',w.studentFirstName)}${item('Student Surname',w.studentLastName)}${item('Index Number',w.indexNumber)}${item('Programme',w.programme)}</div><div class="file-list work-file-list">${workFileLink(s,i,'reportFile','Assessment report',w.files?.reportFile)}${workFileLink(s,i,'claimForm','Claim form',w.files?.claimForm)}${workFileLink(s,i,'dissertationFile','Dissertation',w.files?.dissertationFile)||'<span class="optional-missing">No dissertation uploaded</span>'}</div></section>`).join('')}</div>`;
+  const infos=summary?.feedbackStates||[];
+  return `<div class="feedback-legend"><span class="feedback-chip feedback-not-forwarded">Red</span> not forwarded <span class="feedback-chip feedback-sent">Amber</span> forwarded / awaiting download <span class="feedback-chip feedback-downloaded">Green</span> downloaded</div><div class="assessment-admin-list">${s.works.map((w,i)=>{const info=infos[i]||{state:w.feedback?.downloadedAt?'downloaded':w.feedback?.sentAt?'sent':w.feedback?.emailStatus==='failed'?'email-failed':'not-forwarded',email:w.feedback?.recipientEmail||''};const state=info.state||'not-forwarded';const canForward=can('assessor','officer')&&state!=='unavailable';return `<section class="assessment-admin-work"><div class="assessment-admin-head"><div><span>Work ${esc(w.workNo||i+1)}</span><h4>${esc(w.studentName||`${w.studentFirstName||''} ${w.studentLastName||''}`.trim())}</h4></div><strong>${esc(w.indexNumber||'')}</strong></div><div class="detail-grid">${item('Student First Name',w.studentFirstName)}${item('Student Surname',w.studentLastName)}${item('Index Number',w.indexNumber)}${item('Programme',w.programme)}${item('Student Email',info.email||'No matching dissertation email')}</div><div class="feedback-control feedback-box-${esc(state)}"><span class="feedback-status"><i></i>${esc(feedbackLabel(state))}</span>${w.feedback?.sentAt?`<small>Sent: ${esc(fmt(w.feedback.sentAt))}</small>`:''}${w.feedback?.downloadedAt?`<small>Downloaded: ${esc(fmt(w.feedback.downloadedAt))}</small>`:''}${w.feedback?.lastEmailError?`<small class="error-text">${esc(w.feedback.lastEmailError)}</small>`:''}<div class="files">${canForward?`<button class="btn small email" type="button" onclick="forwardFeedback('${esc(s.id)}',${i},'${esc(info.email)}','${esc(state)}')">${state==='not-forwarded'||state==='email-failed'||state==='expired'||state==='revoked'?'Forward to Student':'Resend Feedback Link'}</button>`:''}${can('assessor','officer')&&w.feedback&&!['not-forwarded','unavailable','revoked'].includes(state)?`<button class="btn small danger" type="button" onclick="revokeFeedback('${esc(s.id)}',${i})">Revoke Link</button>`:''}</div></div><div class="file-list work-file-list">${workFileLink(s,i,'reportFile','Assessment report',w.files?.reportFile)}${workFileLink(s,i,'claimForm','Claim form',w.files?.claimForm)}${workFileLink(s,i,'dissertationFile','Reviewed dissertation',w.files?.dissertationFile)||'<span class="optional-missing">No reviewed dissertation uploaded</span>'}</div></section>`;}).join('')}</div>`;
 }
+window.forwardFeedback=async(id,workIndex,email,state)=>{if(!email)return alert('No matching student email was found from the dissertation submission.');if(!confirm(`${state==='not-forwarded'?'Forward':'Send a new secure feedback link for'} this assessment report${state==='not-forwarded'?'':' again'} to ${email}?`))return;try{const r=await fetch(`${apiBase}/submissions/${encodeURIComponent(id)}/works/${workIndex}/forward-to-student`,{method:'POST'}),d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Could not forward the feedback.');alert(`Assessment feedback link sent to ${d.email}.`);if(dialog.open)dialog.close();await load();}catch(e){alert(e.message||'Could not forward the feedback.');}};
+window.revokeFeedback=async(id,workIndex)=>{if(!confirm('Revoke this student feedback link?'))return;try{const r=await fetch(`${apiBase}/submissions/${encodeURIComponent(id)}/works/${workIndex}/revoke-feedback`,{method:'POST'}),d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Could not revoke the feedback link.');if(dialog.open)dialog.close();await load();}catch(e){alert(e.message||'Could not revoke the feedback link.');}};
 window.showDetail=async id=>{
   const r=await fetch(`${apiBase}/submissions/${id}`),s=await r.json();
   if(!r.ok){alert(s.error||'Record unavailable.');return;}
   document.getElementById('detailReference').textContent=s.reference||'';
   let details='',files='',workGroups='';
   if((s.portalType||'project-work')==='project-work'){
-    details=item('Supervisor / Examiner',s.fullName)+item('First Name',s.firstName)+item('Surname',s.lastName)+item('Phone',s.phone)+item('Email',s.email)+item('Study Centre',s.studyCentre)+item('Groups / Candidates',s.groupCount)+item('Score rows extracted',s.scoreSheet?.rowCount);
+    const summary=submissions.find(x=>x.id===s.id);details=item('Supervisor / Examiner',s.fullName)+item('First Name',s.firstName)+item('Surname',s.lastName)+item('Phone',s.phone)+item('Email',s.email)+item('Study Centre',s.studyCentre)+item('Groups / Candidates',s.groupCount)+item('Score rows extracted',summary?.scoreRows??s.scoreSheet?.rowCount);
     files=fileLink(s,'claimForm','Claim form',s.files?.claimForm)+fileLink(s,'reportFile','Report',s.files?.reportFile)+fileLink(s,'scoresFile','Original score sheet',s.files?.scoresFile)+(s.files?.completedWork||[]).map((f,i)=>fileLink(s,'completedWork','Project work',f,i)).join('')+`<a href="${apiBase}/submissions/${s.id}/scores.xlsx"><strong>Download clean scores for this submission</strong></a>`;
   }else if(s.portalType==='dissertation'){
-    details=item('Student Name',s.studentName)+item('Index Number',s.indexNumber)+item('Phone',s.phone)+item('Email',s.email)+item('Supervisor',s.supervisorName)+item('Programme',s.programme)+item('Dissertation Title',s.dissertationTopic)+item('Title Validation',s.titleValidation?.matched?'Matched uploaded work':'Legacy / not recorded');
-    files=fileLink(s,'dissertationFile','Dissertation',s.files?.dissertationFile);
+    details=item('Submission Type',s.submissionType==='revised'?'Revised Submission':'Fresh Submission')+item('Student Name',s.studentName)+item('Index Number',s.indexNumber)+item('Phone',s.phone)+item('Email',s.email)+item('Supervisor',s.supervisorName)+item('Programme',s.programme)+item('Dissertation Title',s.dissertationTopic)+item('Title Validation',s.titleValidation?.matched?'Matched uploaded work':'Legacy / not recorded');
+    files=fileLink(s,'dissertationFile',s.submissionType==='revised'?'Revised Dissertation':'Dissertation',s.files?.dissertationFile)+fileLinks(s,'reviewerResponses',"Reviewers' response",s.files?.reviewerResponses);
   }else{
     details=item('Assessor',s.assessorName)+item('First Name',s.assessorFirstName)+item('Surname',s.assessorLastName)+item('Phone',s.phone)+item('Email',s.email)+item('Number of Reports / Works',s.workCount||1);
-    if(Array.isArray(s.works)&&s.works.length){workGroups=assessmentWorksHtml(s);}else{
+    if(Array.isArray(s.works)&&s.works.length){const summary=submissions.find(x=>x.id===s.id);workGroups=assessmentWorksHtml(s,summary);}else{
       details+=item('Student Name(s)',s.studentName)+item('Index Number(s)',s.indexNumber)+item('Programme',s.programme);
       files=fileLinks(s,'reportFile','Assessment report',s.files?.reportFile)+fileLinks(s,'claimForm','Claim form',s.files?.claimForm)+fileLinks(s,'dissertationFile','Dissertation',s.files?.dissertationFile);
     }
   }
-  document.getElementById('detailBody').innerHTML=`<div class="detail"><div class="detail-grid">${item('Department',s.departmentName)}${item('Submitted',fmt(s.submittedAt))}${details}</div>${workGroups||`<h3>Submitted files</h3><div class="file-list">${files||'<span>No file available.</span>'}</div>`}<div class="dialog-actions"><button class="btn danger" type="button" onclick="deleteOneSubmission('${esc(s.id)}','submission')">Delete Submission</button></div></div>`;
+  document.getElementById('detailBody').innerHTML=`<div class="detail"><div class="detail-grid">${item('Department',s.departmentName)}${item('Submitted',fmt(s.submittedAt))}${details}</div>${workGroups||`<h3>Submitted files</h3><div class="file-list">${files||'<span>No file available.</span>'}</div>`}<div class="dialog-actions">${can(s.portalType||'project-work','administrator')?`<button class="btn danger" type="button" onclick="deleteOneSubmission('${esc(s.id)}','submission')">Delete Submission</button>`:''}</div></div>`;
   dialog.showModal();
 };
 document.getElementById('closeDialog').onclick=()=>dialog.close();dialog.addEventListener('click',e=>{if(e.target===dialog)dialog.close()});
