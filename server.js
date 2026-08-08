@@ -716,40 +716,84 @@ app.post('/api/dissertation', upload.fields([{ name:'dissertationFile', maxCount
 });
 
 // 3. ASSESSOR SUBMISSION
-app.post('/api/assessor', upload.fields([
-  { name:'reportFile', maxCount:25 }, { name:'dissertationFile', maxCount:25 }, { name:'claimForm', maxCount:25 }
-]), async (req, res) => {
+// Each declared report gets its own student fields and its own file inputs.
+const assessorUploadFields = [];
+for (let i = 0; i < 25; i++) {
+  assessorUploadFields.push(
+    { name:`reportFile_${i}`, maxCount:1 },
+    { name:`claimForm_${i}`, maxCount:1 },
+    { name:`dissertationFile_${i}`, maxCount:1 }
+  );
+}
+app.post('/api/assessor', upload.fields(assessorUploadFields), async (req, res) => {
   try {
     const department = validateDepartment(req);
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
-    const missing = requireText(req, ['assessorTitle','assessorFirstName','assessorLastName','phone','email','studentName','indexNumber','programme','workCount']);
+    const missing = requireText(req, ['assessorTitle','assessorFirstName','assessorLastName','phone','email','workCount']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error:`Missing required field: ${missing}` }); }
 
     const workCount = Number.parseInt(text(req,'workCount'), 10);
     if (!Number.isInteger(workCount) || workCount < 1 || workCount > 25) {
-      await removeUploaded(req); return res.status(400).json({ error:'Number of works must be between 1 and 25.' });
+      await removeUploaded(req); return res.status(400).json({ error:'Number of reports must be between 1 and 25.' });
     }
-    const reports = filesFor(req,'reportFile');
-    const claims = filesFor(req,'claimForm');
-    const dissertations = filesFor(req,'dissertationFile');
-    if (reports.length !== workCount || claims.length !== workCount) {
-      await removeUploaded(req);
-      return res.status(400).json({ error:`For ${workCount} work${workCount===1?'':'s'}, upload exactly ${workCount} assessment report${workCount===1?'':'s'} and ${workCount} claim form${workCount===1?'':'s'}.` });
+
+    const works = [];
+    for (let i = 0; i < workCount; i++) {
+      const studentFirstName = text(req, `studentFirstName_${i}`);
+      const studentLastName = text(req, `studentLastName_${i}`);
+      const indexNumber = text(req, `indexNumber_${i}`);
+      const programme = text(req, `programme_${i}`);
+      if (!studentFirstName || !studentLastName || !indexNumber || !programme) {
+        await removeUploaded(req);
+        return res.status(400).json({ error:`Complete all required student details for Work ${i + 1}.` });
+      }
+      const report = filesFor(req, `reportFile_${i}`)[0];
+      const claim = filesFor(req, `claimForm_${i}`)[0];
+      const dissertation = filesFor(req, `dissertationFile_${i}`)[0] || null;
+      if (!report || !claim) {
+        await removeUploaded(req);
+        return res.status(400).json({ error:`Work ${i + 1} requires one assessment report and one claim form.` });
+      }
+      works.push({
+        workNo:i + 1,
+        studentFirstName,
+        studentLastName,
+        studentName:buildDisplayName('', studentFirstName, studentLastName),
+        indexNumber,
+        programme,
+        files:{
+          reportFile:fileRecord(report),
+          claimForm:fileRecord(claim),
+          dissertationFile:dissertation ? fileRecord(dissertation) : null
+        }
+      });
     }
-    if (dissertations.length > workCount) {
-      await removeUploaded(req); return res.status(400).json({ error:`You may upload no more than ${workCount} optional dissertation file${workCount===1?'':'s'}.` });
-    }
+
     const record = {
       id:crypto.randomUUID(), portalType:'assessor', department, departmentName: DEPARTMENTS[department].name,
       reference:makeReference('ASSESS'), submittedAt:new Date().toISOString(),
       assessorTitle:text(req,'assessorTitle'), assessorFirstName:text(req,'assessorFirstName'), assessorLastName:text(req,'assessorLastName'),
       assessorName:buildDisplayName(text(req,'assessorTitle'),text(req,'assessorFirstName'),text(req,'assessorLastName')),
       phone:text(req,'phone'), email:text(req,'email'), workCount,
-      studentName:text(req,'studentName'), indexNumber:text(req,'indexNumber'), programme:text(req,'programme'),
-      files:{ reportFile:reports.map(fileRecord), claimForm:claims.map(fileRecord), dissertationFile:dissertations.map(fileRecord) }
+      works,
+      // Compatibility summaries for search and existing table columns.
+      studentName:works.map(w=>w.studentName).join('; '),
+      indexNumber:works.map(w=>w.indexNumber).join('; '),
+      programme:[...new Set(works.map(w=>w.programme))].join('; '),
+      // Flattened file collections preserve existing deletion/file-count behaviour.
+      files:{
+        reportFile:works.map(w=>w.files.reportFile),
+        claimForm:works.map(w=>w.files.claimForm),
+        dissertationFile:works.map(w=>w.files.dissertationFile).filter(Boolean)
+      }
     };
     await saveRecord(record);
-    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, workCount, reportFiles:reports.length, claimForms:claims.length, dissertationFiles:dissertations.length });
+    res.status(201).json({
+      ok:true, reference:record.reference, submittedAt:record.submittedAt,
+      departmentName:record.departmentName, workCount,
+      reportFiles:works.length, claimForms:works.length,
+      dissertationFiles:works.filter(w=>w.files.dissertationFile).length
+    });
   } catch (e) { console.error(e); await removeUploaded(req).catch(()=>{}); res.status(500).json({ error:'The assessor submission could not be saved.' }); }
 });
 
@@ -1120,6 +1164,23 @@ app.get('/api/admin/:department/submissions/:id', departmentAuth, async(req,res)
   if(!r)return res.status(404).json({error:'Submission not found in this department.'});
   res.json(r);
 });
+app.get('/api/admin/:department/submissions/:id/works/:workIndex/files/:kind', departmentAuth, async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  const r=records.find(x=>x.id===req.params.id);
+  if(!r)return res.status(404).send('Submission not found in this department.');
+  if(r.portalType!=='assessor')return res.status(400).send('Work-level files are available only for assessment submissions.');
+  const workIndex=Number.parseInt(req.params.workIndex,10);
+  const work=Array.isArray(r.works)?r.works[workIndex]:null;
+  if(!work)return res.status(404).send('Assessment work not found.');
+  const allowed=['reportFile','claimForm','dissertationFile'];
+  if(!allowed.includes(req.params.kind))return res.status(400).send('Invalid file type.');
+  const item=work.files?.[req.params.kind];
+  if(!item)return res.status(404).send('File not found.');
+  const fp=path.join(FILES_DIR,path.basename(item.storedName));
+  if(!fs.existsSync(fp))return res.status(404).send('Stored file is unavailable.');
+  res.download(fp,item.originalName);
+});
+
 app.get('/api/admin/:department/submissions/:id/files/:kind/:index?', departmentAuth, async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   const r=records.find(x=>x.id===req.params.id);
