@@ -5,6 +5,8 @@ services:
     buildCommand: npm install
     startCommand: npm start
     envVars:
+      - key: NODE_VERSION
+        value: 24.14.1
       - key: STORAGE_DIR
         value: /var/data/ucc-submission-portals
       - key: GMAIL_CLIENT_ID

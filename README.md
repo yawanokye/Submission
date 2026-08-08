@@ -1,200 +1,240 @@
 # UCC Departmental Academic Submission Portals
 
-Version 5 sends secure dissertation assignment links through the Gmail API.
+Version 6 adds structured names, dissertation-title validation, administrator deletion controls, a three-assessor limit, and supervisor/assessor conflict protection while retaining Gmail secure-link distribution.
 
-## Public submission portals
+## Public portals
 
-Every submitter selects one of four receiving departments:
+Every public portal requires a receiving department:
 
 1. Department of Education Programmes
 2. Department of Business Programmes
 3. Department of Arts and Social Sciences
 4. Department of Science and Mathematics Programmes
 
-Public portals:
+URLs:
 
 - `/project-work.html` — Undergraduate Project Work
 - `/dissertation.html` — Student Dissertation Submission
 - `/assessor.html` — Assessor batch submission
 
-Each department sees only records submitted to that department.
+Each submitter now provides a **Title**, **First Name**, and **Surname / Last Name** as separate required fields. Suggested titles include Mr, Mrs, Ms, Miss, Dr, Prof., Rev., Ing. and Esq., while the field also allows another title to be typed.
+
+## 1. Undergraduate Project Work
+
+The portal retains the existing project-work workflow:
+
+- claim form
+- report
+- completed project work files
+- Excel score sheet
+- department and study centre
+- number of groups / candidates
+
+Score-sheet acceptance validates only the five headings:
+
+`S/N | NAME | REGISTRATION NO. | GROUP NO. | TOTAL SCORE`
+
+The examiner may add or remove student rows. Student count, S/N sequence, duplicates and score values are not used to reject the workbook.
+
+Only undergraduate project work contributes to:
+
+- Consolidated Project Scores
+- Master Project Scores
+- Project Work Register
+
+## 2. Dissertation Submission
+
+Required student information:
+
+- Title
+- First Name
+- Surname / Last Name
+- Index Number
+- Telephone Number
+- Email
+- Programme
+
+Required supervisor information:
+
+- Supervisor's Title
+- Supervisor's First Name
+- Supervisor's Surname / Last Name
+
+Required dissertation information:
+
+- Dissertation Title
+- Dissertation file in PDF, DOC or DOCX format
+
+### Dissertation-title validation
+
+Before a dissertation submission is saved, the server reads the beginning of the uploaded work and checks that the entered dissertation title appears in the document. Matching ignores capitalisation, punctuation, line breaks and normal spacing differences, but the wording must match.
+
+- PDF: the first four pages are read.
+- DOCX: document text is extracted.
+- DOC: document text is extracted.
+- If the file is a scanned/non-searchable PDF or otherwise has insufficient readable text, the submission is rejected with an instruction to upload a readable version.
+- If the title does not match, the submission is rejected and the temporary uploaded file is removed.
+
+The successful record stores only the validation result and time, not the extracted dissertation text.
+
+## 3. Assessment Report Submission
+
+The assessor provides Title, First Name and Surname / Last Name, plus contact information.
+
+For `N` works, the portal requires:
+
+- exactly `N` assessment reports
+- exactly `N` claim forms
+- zero to `N` optional dissertation files
+
+The current maximum is 25 works per assessor submission.
 
 ## Department administrator portals
-
-Use `/admin` or open a department directly:
 
 - `/admin/education`
 - `/admin/business`
 - `/admin/arts-social-sciences`
 - `/admin/science-mathematics`
 
-Each dashboard contains three sections.
+Each department sees only submissions routed to that department.
 
-### 1. Undergraduate Project Work
+### Administrator deletion
 
-- Individual project-work submissions and original files
-- Excel validation checks only for the five headings `S/N`, `NAME`, `REGISTRATION NO.`, `GROUP NO.`, `TOTAL SCORE`
-- Consolidated Project Scores
-- Project Work Register
-- Master Project Scores
+Administrators can permanently delete submissions from all three sections:
 
-Project-work score consolidation applies only to undergraduate project work.
+- one submission at a time
+- multiple selected submissions at once
 
-### 2. Dissertations
+Deletion removes the submission record and its stored files. If a deleted dissertation was included in an assessor secure-link assignment, it is removed from that assignment. If no dissertations remain in that assignment, the assignment is automatically revoked.
 
-- Individual dissertation records
-- Register columns: `S/N`, `Name of Student`, `Index Number`, `Dissertation Title`, `Programme`, `Supervisor's Name`
-- Individual dissertation download
-- Select multiple dissertations and download them as one ZIP
-- Select multiple dissertations and click **Email Selected to Assessor**
+Deletion is permanent and cannot be undone.
 
-#### Secure assessor distribution workflow
+## Dissertation register and file selection
 
-1. Department administrator selects one or more dissertations.
+The dissertation register retains these columns:
+
+`S/N | Name of Student | Index Number | Dissertation Title | Programme | Supervisor's Name`
+
+Administrators can:
+
+- download one dissertation
+- select several dissertations and download a ZIP
+- select several dissertations and email one secure download link to an assessor
+- delete one or several dissertation submissions
+
+## Assessor assignment controls
+
+### Maximum of three assessors per dissertation
+
+Each dissertation row displays an **assessor counter**, for example `0 / 3`, `1 / 3`, `2 / 3`, or `3 / 3`.
+
+The server prevents a dissertation from being assigned to more than three unique assessors. Pending assignment creation is also reserved during the check to prevent simultaneous requests from exceeding the limit.
+
+A revoked assignment no longer occupies an assessor slot. Expired assignments remain part of the assignment history unless revoked.
+
+The system also prevents the same assessor from being assigned twice to the same dissertation. Use **Resend Link** for an existing assignment instead.
+
+### Supervisor cannot assess the same dissertation
+
+When an administrator assigns dissertations, the assessor's Title, First Name and Surname / Last Name are entered separately. The server compares that name with each selected dissertation's recorded supervisor. If they match, the whole assignment is blocked and the affected dissertation/index number is identified.
+
+This check also attempts to recognise legacy supervisor names that include titles or middle names.
+
+## Secure Gmail distribution
+
+The secure-link workflow remains:
+
+1. Select dissertation(s).
 2. Click **Email Selected to Assessor**.
-3. Enter the assessor's name and email address, link-validity period, and an optional message.
-4. The server generates a cryptographically random secure token and stores only its SHA-256 hash.
-5. The Gmail API sends an email containing a secure link. No dissertation is attached to the email.
-6. The assessor opens the secure link and downloads all assigned dissertations as one ZIP.
-7. The ZIP is created dynamically from the original dissertation files. No duplicate ZIP is permanently stored.
-8. The dashboard records date sent, expiry, first download date, download count, and status.
-9. Department administrators can revoke a link or resend a newly generated link. Resending invalidates the previous link.
+3. Enter assessor Title, First Name, Surname, Email, link-validity period and optional message.
+4. The server validates the 3-assessor limit and supervisor conflict.
+5. A random secure token is generated and only its SHA-256 hash is stored.
+6. Gmail API sends the secure link. No dissertation is attached to the email.
+7. The assessor downloads the assigned dissertations as a ZIP generated on demand.
+8. The dashboard records sent date, expiry, download date/count and status.
+9. The administrator can revoke or resend the link.
 
-Links expire after 14 days by default. The administrator can choose 1–60 days when sending, and the default can be changed with `ASSIGNMENT_EXPIRY_DAYS`.
+## Gmail API environment variables
 
-The secure link is department-scoped and can access only the dissertations recorded in that specific assignment.
-
-### 3. Assessment Reports
-
-- Individual assessor submissions only
-- Number of works being submitted, 1–25
-- Exactly the declared number of assessment reports
-- Exactly the declared number of claim forms
-- Optional multiple dissertations, up to the declared number of works
-- Every submitted file remains individually downloadable
-
-Assessment reports and dissertations are not included in undergraduate score consolidation.
-
-## Gmail API setup
-
-Add the following environment variables in Render. Keep the client secret and refresh token private and never commit them to GitHub.
+Set these in Render:
 
 ```text
-GMAIL_CLIENT_ID=your-oauth-client-id.apps.googleusercontent.com
-GMAIL_CLIENT_SECRET=your-oauth-client-secret
-GMAIL_REFRESH_TOKEN=your-oauth-refresh-token
-GMAIL_SENDER_EMAIL=department-mailbox@ucc.edu.gh
+GMAIL_CLIENT_ID=...
+GMAIL_CLIENT_SECRET=...
+GMAIL_REFRESH_TOKEN=...
+GMAIL_SENDER_EMAIL=department-email@ucc.edu.gh
 GMAIL_FROM_NAME=UCC Dissertation Portal
+ASSIGNMENT_EXPIRY_DAYS=14
 ```
 
-`GMAIL_REFRESH_TOKEN` must be generated by authorising the Gmail/Google Workspace account that is allowed to send as `GMAIL_SENDER_EMAIL`. If the sender is an alias, that alias must already be configured as an authorised Gmail send-as identity for the account used to generate the refresh token.
-
-The OAuth scope required by this portal is:
+The Gmail OAuth scope is:
 
 ```text
 https://www.googleapis.com/auth/gmail.send
 ```
 
-The portal exchanges the refresh token for a short-lived access token at send time and then calls the Gmail API over HTTPS. No SMTP configuration is required.
-
-Optional:
-
-```text
-ASSIGNMENT_EXPIRY_DAYS=14
-```
-
-The application uses `RENDER_EXTERNAL_URL` automatically when it builds secure links on Render. If you later put the portal behind a custom domain and need to force that URL, set:
-
-```text
-PUBLIC_BASE_URL=https://your-domain.example
-```
-
-Do not add a trailing slash.
-
 ## Render deployment
 
-Create a **Web Service**, not a Static Site.
+Create a **Web Service**.
 
 ```text
 Build Command: npm install
 Start Command: npm start
 ```
 
+This version pins Node.js to the Node 24 line because the PDF text-extraction dependency is tested for that runtime.
+
+The included `.node-version` contains:
+
+```text
+24
+```
+
 ### Persistent disk
 
-The application stores original submissions and assignment metadata on the persistent disk. Mount the disk at exactly:
+Mount a persistent disk at exactly:
 
 ```text
 /var/data/ucc-submission-portals
 ```
 
-and set:
+Set:
 
 ```text
 STORAGE_DIR=/var/data/ucc-submission-portals
 ```
 
-The included `render.yaml` uses the same exact mount path so the application does not need to create a child directory outside the mounted writable path.
-
-A 5 GB disk is configured as a starting point. Increase it as the dissertation collection grows.
-
-## Department administrator credentials
-
-Set separate credentials in Render:
+## Department credentials
 
 ```text
 EDUCATION_ADMIN_USER=education-admin
-EDUCATION_ADMIN_PASSWORD=choose-a-strong-password
+EDUCATION_ADMIN_PASSWORD=...
 
 BUSINESS_ADMIN_USER=business-admin
-BUSINESS_ADMIN_PASSWORD=choose-a-strong-password
+BUSINESS_ADMIN_PASSWORD=...
 
 ARTS_SOCIAL_ADMIN_USER=arts-admin
-ARTS_SOCIAL_ADMIN_PASSWORD=choose-a-strong-password
+ARTS_SOCIAL_ADMIN_PASSWORD=...
 
 SCIENCE_MATH_ADMIN_USER=science-admin
-SCIENCE_MATH_ADMIN_PASSWORD=choose-a-strong-password
+SCIENCE_MATH_ADMIN_PASSWORD=...
 ```
 
 ## Stored metadata
-
-Persistent data files:
 
 ```text
 data/submissions.json
 data/dissertation-assignments.json
 ```
 
-`dissertation-assignments.json` contains assignment metadata and hashed link tokens. It does not contain the raw secure token sent to an assessor.
-
-Submitted documents remain in the persistent `files` directory.
-
-## Security behaviour
-
-- Secure assignment tokens use 32 random bytes.
-- Only a SHA-256 hash of each token is stored.
-- Links can expire and be revoked.
-- Resending creates a new token and invalidates the old token.
-- Secure pages use `no-store`, `no-referrer`, and `noindex` headers.
-- Dissertation ZIPs are created on demand and are not stored permanently.
-- Download date and download count are recorded.
-- Department admins cannot assign dissertations belonging to another department.
+Original submitted files remain under the persistent `files` directory.
 
 ## Health check
 
-`/health` reports whether Gmail email configuration is present without exposing any credential:
+`/health`
+
+Expected form:
 
 ```json
 {"ok":true,"departments":4,"emailConfigured":true,"emailProvider":"gmail"}
 ```
-
-## Local test
-
-```bash
-npm install
-npm start
-```
-
-Then open `http://localhost:10000`.
-
-For local email tests, set the four `GMAIL_*` credentials in your environment. If `PUBLIC_BASE_URL` is not set, secure links are generated from the current request host.

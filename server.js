@@ -5,6 +5,10 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
+const mammoth = require('mammoth');
+const WordExtractor = require('word-extractor');
+const { CanvasFactory } = require('pdf-parse/worker');
+const { PDFParse } = require('pdf-parse');
 
 const app = express();
 
@@ -243,6 +247,85 @@ function isEmail(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value 
 function htmlEscape(value) {
   return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 }
+
+const PERSON_TITLES = new Set(['mr','mrs','ms','miss','dr','prof','professor','rev','reverend','ing','esq','esquire']);
+function cleanHumanText(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+function buildDisplayName(title, firstName, lastName) {
+  return [cleanHumanText(title), cleanHumanText(firstName), cleanHumanText(lastName)].filter(Boolean).join(' ');
+}
+function personNameTokens(value) {
+  return String(value || '')
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/)
+    .filter(Boolean).filter(t => !PERSON_TITLES.has(t)).sort();
+}
+function samePersonName(a, b) {
+  const aa = personNameTokens(a), bb = personNameTokens(b);
+  if (aa.length < 2 || bb.length < 2) return false;
+  const small = aa.length <= bb.length ? aa : bb;
+  const large = aa.length <= bb.length ? bb : aa;
+  return small.every(v => large.includes(v));
+}
+function personKey(name, email='') {
+  const tokens=personNameTokens(name);
+  return tokens.length>=2 ? `name:${tokens.join('|')}` : `email:${String(email||'').trim().toLowerCase()}`;
+}
+function normalizeDissertationTitle(value) {
+  return String(value || '')
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function compactDissertationTitle(value) {
+  return normalizeDissertationTitle(value).replace(/\s+/g, '');
+}
+async function extractDissertationText(file) {
+  const ext = path.extname(file.originalname || file.path).toLowerCase();
+  if (ext === '.docx') {
+    const result = await mammoth.extractRawText({ path: file.path });
+    return String(result.value || '');
+  }
+  if (ext === '.doc') {
+    const extractor = new WordExtractor();
+    const result = await extractor.extract(file.path);
+    return String(result.getBody ? result.getBody() : '');
+  }
+  if (ext === '.pdf') {
+    const buffer = await fsp.readFile(file.path);
+    const parser = new PDFParse({ data: buffer, CanvasFactory });
+    try {
+      const result = await parser.getText({ first: 4 });
+      return String(result.text || '');
+    } finally {
+      if (typeof parser.destroy === 'function') { try { await parser.destroy(); } catch {} }
+    }
+  }
+  throw new Error('Dissertation title validation supports PDF, DOC and DOCX files only.');
+}
+async function validateDissertationTitleAgainstFile(enteredTitle, file) {
+  const expected = normalizeDissertationTitle(enteredTitle);
+  const expectedCompact = compactDissertationTitle(enteredTitle);
+  if (expected.length < 8) throw new Error('Enter the full dissertation title as it appears on the title page.');
+  let extracted;
+  try {
+    extracted = await extractDissertationText(file);
+  } catch (e) {
+    throw new Error(`The dissertation text could not be read for title validation. ${e.message || e}`);
+  }
+  const firstText = String(extracted || '').slice(0, 120000);
+  if (normalizeDissertationTitle(firstText).length < 20) {
+    throw new Error('The uploaded dissertation does not contain enough readable text for automatic title validation. Upload a searchable PDF, DOC or DOCX file.');
+  }
+  const normalDoc = normalizeDissertationTitle(firstText);
+  const compactDoc = compactDissertationTitle(firstText);
+  const matched = normalDoc.includes(expected) || (expectedCompact.length >= 12 && compactDoc.includes(expectedCompact));
+  if (!matched) {
+    throw new Error('The entered dissertation title does not match the title found in the uploaded work. Copy the title exactly as it appears on the dissertation title page and submit again.');
+  }
+  return { matched: true, method: 'document-text', checkedAt: new Date().toISOString() };
+}
 function baseUrlFor(req) {
   if (PUBLIC_BASE_URL) return PUBLIC_BASE_URL;
   return `${req.protocol}://${req.get('host')}`;
@@ -258,11 +341,31 @@ function assignmentState(a) {
 function publicAssignment(a) {
   return {
     id:a.id, reference:a.reference, department:a.department, departmentName:a.departmentName,
+    assessorTitle:a.assessorTitle || '', assessorFirstName:a.assessorFirstName || '', assessorLastName:a.assessorLastName || '',
     assessorName:a.assessorName, assessorEmail:a.assessorEmail, dissertationCount:(a.dissertationIds || []).length,
     createdAt:a.createdAt, sentAt:a.sentAt || null, expiresAt:a.expiresAt, downloadedAt:a.downloadedAt || null,
     downloadCount:Number(a.downloadCount || 0), revokedAt:a.revokedAt || null, emailStatus:a.emailStatus || 'pending',
     status:assignmentState(a), resendCount:Number(a.resendCount || 0), lastEmailError:a.lastEmailError || ''
   };
+}
+function activeAssessorMap(assignments, includePending=false) {
+  const map = new Map();
+  for (const a of assignments || []) {
+    if (a.revokedAt || (!a.sentAt && !(includePending && a.emailStatus === 'pending'))) continue;
+    const email = String(a.assessorEmail || '').trim().toLowerCase();
+    const name = a.assessorName || a.assessorEmail || '';
+    const key = personKey(name,email);
+    if (!key) continue;
+    for (const id of a.dissertationIds || []) {
+      if (!map.has(id)) map.set(id, new Map());
+      if (!map.get(id).has(key)) map.get(id).set(key, {email,name});
+    }
+  }
+  return map;
+}
+function dissertationAssignmentInfo(dissertationId, assignments) {
+  const m = activeAssessorMap(assignments).get(dissertationId) || new Map();
+  return { count:m.size, assessors:[...m.values()] };
 }
 function gmailConfigured() {
   return Boolean(GMAIL_CLIENT_ID && GMAIL_CLIENT_SECRET && GMAIL_REFRESH_TOKEN && GMAIL_SENDER_EMAIL);
@@ -415,6 +518,12 @@ async function removeUploaded(req) { await Promise.all(Object.values(req.files |
 function fileRecord(f) { return f ? { storedName: path.basename(f.path), originalName: f.originalname, mimeType: f.mimetype, size: f.size } : null; }
 function text(req, key) { return String(req.body[key] || '').trim(); }
 function requireText(req, fields) { return fields.find(k => !text(req, k)); }
+function submitterName(req, prefix='') {
+  const title = text(req, `${prefix}Title`);
+  const firstName = text(req, `${prefix}FirstName`);
+  const lastName = text(req, `${prefix}LastName`);
+  return { title, firstName, lastName, fullName: buildDisplayName(title, firstName, lastName) };
+}
 function validateDepartment(req) {
   const slug = text(req, 'department');
   return departmentFromSlug(slug) ? slug : null;
@@ -434,7 +543,7 @@ app.post('/api/project-work', upload.fields([
   try {
     const department = validateDepartment(req);
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
-    const missing = requireText(req, ['fullName','phone','email','groupCount','studyCentre']);
+    const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount','studyCentre']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error: `Missing required field: ${missing}` }); }
     if (!filesFor(req,'claimForm').length || !filesFor(req,'reportFile').length || !filesFor(req,'completedWork').length || !filesFor(req,'scoresFile').length) {
       await removeUploaded(req); return res.status(400).json({ error: 'Claim form, report, score sheet and completed project work are required.' });
@@ -445,7 +554,9 @@ app.post('/api/project-work', upload.fields([
     const record = {
       id: crypto.randomUUID(), portalType: 'project-work', department, departmentName: DEPARTMENTS[department].name,
       reference: makeReference('PWORK'), submittedAt: new Date().toISOString(),
-      fullName: text(req,'fullName'), phone: text(req,'phone'), email: text(req,'email'), groupCount: text(req,'groupCount'), studyCentre: text(req,'studyCentre'),
+      title:text(req,'title'), firstName:text(req,'firstName'), lastName:text(req,'lastName'),
+      fullName:buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'lastName')),
+      phone: text(req,'phone'), email: text(req,'email'), groupCount: text(req,'groupCount'), studyCentre: text(req,'studyCentre'),
       scoreSheet: { worksheet: scoreResult.sheetName, headerRow: scoreResult.headerRow, rowCount: scoreResult.rows.length, rows: scoreResult.rows },
       files: {
         claimForm: fileRecord(filesFor(req,'claimForm')[0]), reportFile: fileRecord(filesFor(req,'reportFile')[0]),
@@ -462,18 +573,34 @@ app.post('/api/dissertation', upload.fields([{ name:'dissertationFile', maxCount
   try {
     const department = validateDepartment(req);
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
-    const missing = requireText(req, ['studentName','indexNumber','phone','email','supervisorName','programme','dissertationTopic']);
+    const missing = requireText(req, [
+      'studentTitle','studentFirstName','studentLastName','indexNumber','phone','email',
+      'supervisorTitle','supervisorFirstName','supervisorLastName','programme','dissertationTopic'
+    ]);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error:`Missing required field: ${missing}` }); }
-    if (!filesFor(req,'dissertationFile').length) { await removeUploaded(req); return res.status(400).json({ error:'The dissertation file is required.' }); }
+    const dissertationFiles=filesFor(req,'dissertationFile');
+    if (!dissertationFiles.length) { await removeUploaded(req); return res.status(400).json({ error:'The dissertation file is required.' }); }
+    const dissertationFile=dissertationFiles[0];
+    const ext=path.extname(dissertationFile.originalname||'').toLowerCase();
+    if(!['.pdf','.doc','.docx'].includes(ext)) { await removeUploaded(req); return res.status(400).json({error:'Upload the dissertation as a PDF, DOC or DOCX file.'}); }
+
+    let titleValidation;
+    try { titleValidation=await validateDissertationTitleAgainstFile(text(req,'dissertationTopic'), dissertationFile); }
+    catch(e) { await removeUploaded(req); return res.status(400).json({error:e.message||String(e)}); }
+
+    const studentName=buildDisplayName(text(req,'studentTitle'),text(req,'studentFirstName'),text(req,'studentLastName'));
+    const supervisorName=buildDisplayName(text(req,'supervisorTitle'),text(req,'supervisorFirstName'),text(req,'supervisorLastName'));
     const record = {
       id: crypto.randomUUID(), portalType:'dissertation', department, departmentName: DEPARTMENTS[department].name,
       reference:makeReference('DISS'), submittedAt:new Date().toISOString(),
-      studentName:text(req,'studentName'), indexNumber:text(req,'indexNumber'), phone:text(req,'phone'), email:text(req,'email'),
-      supervisorName:text(req,'supervisorName'), programme:text(req,'programme'), dissertationTopic:text(req,'dissertationTopic'),
-      files:{ dissertationFile:fileRecord(filesFor(req,'dissertationFile')[0]) }
+      studentTitle:text(req,'studentTitle'), studentFirstName:text(req,'studentFirstName'), studentLastName:text(req,'studentLastName'), studentName,
+      indexNumber:text(req,'indexNumber'), phone:text(req,'phone'), email:text(req,'email'),
+      supervisorTitle:text(req,'supervisorTitle'), supervisorFirstName:text(req,'supervisorFirstName'), supervisorLastName:text(req,'supervisorLastName'), supervisorName,
+      programme:text(req,'programme'), dissertationTopic:text(req,'dissertationTopic'), titleValidation,
+      files:{ dissertationFile:fileRecord(dissertationFile) }
     };
     await saveRecord(record);
-    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName });
+    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, titleValidated:true });
   } catch (e) { console.error(e); await removeUploaded(req).catch(()=>{}); res.status(500).json({ error:'The dissertation submission could not be saved.' }); }
 });
 
@@ -484,7 +611,7 @@ app.post('/api/assessor', upload.fields([
   try {
     const department = validateDepartment(req);
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
-    const missing = requireText(req, ['assessorName','phone','email','studentName','indexNumber','programme','workCount']);
+    const missing = requireText(req, ['assessorTitle','assessorFirstName','assessorLastName','phone','email','studentName','indexNumber','programme','workCount']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error:`Missing required field: ${missing}` }); }
 
     const workCount = Number.parseInt(text(req,'workCount'), 10);
@@ -504,7 +631,9 @@ app.post('/api/assessor', upload.fields([
     const record = {
       id:crypto.randomUUID(), portalType:'assessor', department, departmentName: DEPARTMENTS[department].name,
       reference:makeReference('ASSESS'), submittedAt:new Date().toISOString(),
-      assessorName:text(req,'assessorName'), phone:text(req,'phone'), email:text(req,'email'), workCount,
+      assessorTitle:text(req,'assessorTitle'), assessorFirstName:text(req,'assessorFirstName'), assessorLastName:text(req,'assessorLastName'),
+      assessorName:buildDisplayName(text(req,'assessorTitle'),text(req,'assessorFirstName'),text(req,'assessorLastName')),
+      phone:text(req,'phone'), email:text(req,'email'), workCount,
       studentName:text(req,'studentName'), indexNumber:text(req,'indexNumber'), programme:text(req,'programme'),
       files:{ reportFile:reports.map(fileRecord), claimForm:claims.map(fileRecord), dissertationFile:dissertations.map(fileRecord) }
     };
@@ -558,20 +687,67 @@ function sendWorkbook(res,kind,records,filename){
   res.send(buffer);
 }
 
-function adminRecordsMap(records) {
-  return records.slice().reverse().map(r=>({
-    id:r.id, reference:r.reference, submittedAt:r.submittedAt, portalType:r.portalType||'project-work',
-    name:r.fullName||r.studentName||r.assessorName||'', secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
-    email:r.email||'', phone:r.phone||'', programme:r.programme||'', studyCentre:r.studyCentre||'', scoreRows:r.scoreSheet?.rowCount??0,
-    studentName:r.studentName||'', indexNumber:r.indexNumber||'', dissertationTopic:r.dissertationTopic||'', supervisorName:r.supervisorName||'',
-    assessorName:r.assessorName||'', workCount:r.workCount||1,
-    reportFileCount:Array.isArray(r.files?.reportFile)?r.files.reportFile.length:(r.files?.reportFile?1:0),
-    claimFormCount:Array.isArray(r.files?.claimForm)?r.files.claimForm.length:(r.files?.claimForm?1:0),
-    dissertationFileCount:Array.isArray(r.files?.dissertationFile)?r.files.dissertationFile.length:(r.files?.dissertationFile?1:0),
-    dissertationFileName:Array.isArray(r.files?.dissertationFile)?(r.files.dissertationFile[0]?.originalName||''):(r.files?.dissertationFile?.originalName||'')
-  }));
+function adminRecordsMap(records, assignments=[]) {
+  const activeMap=activeAssessorMap(assignments);
+  return records.slice().reverse().map(r=>{
+    const assignees=activeMap.get(r.id)||new Map();
+    return {
+      id:r.id, reference:r.reference, submittedAt:r.submittedAt, portalType:r.portalType||'project-work',
+      name:r.fullName||r.studentName||r.assessorName||'', secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
+      title:r.title||r.studentTitle||r.assessorTitle||'', firstName:r.firstName||r.studentFirstName||r.assessorFirstName||'', lastName:r.lastName||r.studentLastName||r.assessorLastName||'',
+      email:r.email||'', phone:r.phone||'', programme:r.programme||'', studyCentre:r.studyCentre||'', scoreRows:r.scoreSheet?.rowCount??0,
+      studentName:r.studentName||'', indexNumber:r.indexNumber||'', dissertationTopic:r.dissertationTopic||'', supervisorName:r.supervisorName||'',
+      titleValidated:Boolean(r.titleValidation?.matched),
+      assessorName:r.assessorName||'', workCount:r.workCount||1,
+      assignmentCount:assignees.size, assignmentLimit:3, assignedAssessors:[...assignees.values()],
+      reportFileCount:Array.isArray(r.files?.reportFile)?r.files.reportFile.length:(r.files?.reportFile?1:0),
+      claimFormCount:Array.isArray(r.files?.claimForm)?r.files.claimForm.length:(r.files?.claimForm?1:0),
+      dissertationFileCount:Array.isArray(r.files?.dissertationFile)?r.files.dissertationFile.length:(r.files?.dissertationFile?1:0),
+      dissertationFileName:Array.isArray(r.files?.dissertationFile)?(r.files.dissertationFile[0]?.originalName||''):(r.files?.dissertationFile?.originalName||'')
+    };
+  });
 }
 
+function collectStoredFiles(record) {
+  const out=[];
+  const visit=v=>{
+    if(!v) return;
+    if(Array.isArray(v)){v.forEach(visit);return;}
+    if(typeof v==='object'){
+      if(v.storedName) out.push(path.join(FILES_DIR,path.basename(v.storedName)));
+      else Object.values(v).forEach(visit);
+    }
+  };
+  visit(record?.files);
+  return [...new Set(out)];
+}
+async function deleteDepartmentSubmissions(department, ids) {
+  const unique=[...new Set((ids||[]).map(String))];
+  if(!unique.length) return {deleted:0, records:[]};
+  const all=await readDb();
+  const targets=all.filter(r=>r.department===department && unique.includes(r.id));
+  if(!targets.length) return {deleted:0, records:[]};
+  const targetIds=new Set(targets.map(r=>r.id));
+  await writeDb(all.filter(r=>!targetIds.has(r.id)));
+  await Promise.all(targets.flatMap(collectStoredFiles).map(fp=>fsp.unlink(fp).catch(()=>{})));
+  const dissertationIds=new Set(targets.filter(r=>r.portalType==='dissertation').map(r=>r.id));
+  if(dissertationIds.size){
+    await mutateAssignments(list=>{
+      const now=new Date().toISOString();
+      for(const a of list){
+        if(a.department!==department) continue;
+        const before=(a.dissertationIds||[]).length;
+        a.dissertationIds=(a.dissertationIds||[]).filter(id=>!dissertationIds.has(id));
+        if(before!==a.dissertationIds.length && !a.dissertationIds.length){
+          a.revokedAt=a.revokedAt||now;
+          a.emailStatus='revoked';
+          a.revokedReason='All dissertation submissions in this assignment were deleted by the department administrator.';
+        }
+      }
+    });
+  }
+  return {deleted:targets.length,records:targets};
+}
 
 // SECURE DISSERTATION ASSIGNMENT LINKS
 app.get('/secure/dissertations/:token', async (req, res) => {
@@ -632,28 +808,63 @@ app.get('/api/admin/:department/dissertation-assignments', departmentAuth, async
 
 app.post('/api/admin/:department/dissertation-assignments', departmentAuth, async(req,res)=>{
   const ids=Array.isArray(req.body?.ids)?[...new Set(req.body.ids.map(String))]:[];
-  const assessorName=String(req.body?.assessorName||'').trim();
+  const assessorTitle=String(req.body?.assessorTitle||'').trim();
+  const assessorFirstName=String(req.body?.assessorFirstName||'').trim();
+  const assessorLastName=String(req.body?.assessorLastName||'').trim();
+  const assessorName=buildDisplayName(assessorTitle,assessorFirstName,assessorLastName);
   const assessorEmail=String(req.body?.assessorEmail||'').trim();
   const message=String(req.body?.message||'').trim().slice(0,4000);
   const expiryDays=Math.min(60,Math.max(1,Number.parseInt(req.body?.expiryDays,10)||ASSIGNMENT_EXPIRY_DAYS));
   if(!gmailConfigured()) return res.status(503).json({error:'Email sending is not configured. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN and GMAIL_SENDER_EMAIL in Render.'});
   if(!ids.length) return res.status(400).json({error:'Select at least one dissertation.'});
   if(ids.length>500) return res.status(400).json({error:'A maximum of 500 dissertations can be assigned at once.'});
-  if(!assessorName) return res.status(400).json({error:"Enter the assessor's name."});
+  if(!assessorTitle || !assessorFirstName || !assessorLastName) return res.status(400).json({error:"Enter the assessor's title, first name and surname."});
   if(!isEmail(assessorEmail)) return res.status(400).json({error:'Enter a valid assessor email address.'});
 
   const records=dissertationRecords(recordsForDepartment(await readDb(),req.adminDepartment));
   const selected=ids.map(id=>records.find(r=>r.id===id)).filter(Boolean);
   if(selected.length!==ids.length) return res.status(400).json({error:'One or more selected dissertations are unavailable in this department.'});
+
+  const supervisorConflicts=selected.filter(r=>samePersonName(assessorName,r.supervisorName));
+  if(supervisorConflicts.length){
+    const labels=supervisorConflicts.slice(0,5).map(r=>`${r.indexNumber||r.studentName||r.reference}`).join(', ');
+    return res.status(400).json({error:`This assessor is recorded as the supervisor for the following selected dissertation${supervisorConflicts.length===1?'':'s'}: ${labels}. A supervisor cannot be assigned as assessor for the same work.`});
+  }
+
   const token=newAssignmentToken();
   const now=new Date();
   const expiresAt=new Date(now.getTime()+expiryDays*24*60*60*1000).toISOString();
   const assignment={
     id:crypto.randomUUID(), reference:makeReference('ASSIGN'), department:req.adminDepartment, departmentName:req.adminDepartmentName,
-    assessorName, assessorEmail, dissertationIds:ids, createdAt:now.toISOString(), expiresAt, tokenHash:assignmentTokenHash(token),
+    assessorTitle, assessorFirstName, assessorLastName, assessorName, assessorEmail, dissertationIds:ids,
+    createdAt:now.toISOString(), expiresAt, tokenHash:assignmentTokenHash(token),
     sentAt:null, downloadedAt:null, lastDownloadedAt:null, downloadCount:0, revokedAt:null, emailStatus:'pending', resendCount:0, message
   };
-  await mutateAssignments(list=>list.push(assignment));
+  let reservationError='';
+  const reserved=await mutateAssignments(list=>{
+    const activeMap=activeAssessorMap(list.filter(a=>a.department===req.adminDepartment),true);
+    const alreadyAssigned=[];
+    const atLimit=[];
+    for(const r of selected){
+      const people=activeMap.get(r.id)||new Map();
+      const duplicate=[...people.values()].some(p=>String(p.email||'').toLowerCase()===assessorEmail.toLowerCase() || samePersonName(p.name,assessorName));
+      if(duplicate) alreadyAssigned.push(r);
+      if(people.size>=3) atLimit.push(r);
+    }
+    if(alreadyAssigned.length){
+      const labels=alreadyAssigned.slice(0,5).map(r=>r.indexNumber||r.studentName||r.reference).join(', ');
+      reservationError=`This assessor has already been assigned the following dissertation${alreadyAssigned.length===1?'':'s'}: ${labels}. Use Resend Link on the existing assignment instead.`;
+      return false;
+    }
+    if(atLimit.length){
+      const labels=atLimit.slice(0,5).map(r=>r.indexNumber||r.studentName||r.reference).join(', ');
+      reservationError=`The following dissertation${atLimit.length===1?' has':'s have'} already reached the maximum of 3 assessors: ${labels}.`;
+      return false;
+    }
+    list.push(assignment);
+    return true;
+  });
+  if(!reserved) return res.status(400).json({error:reservationError||'The dissertation assignment could not be created.'});
   const secureUrl=`${baseUrlFor(req)}/secure/dissertations/${token}`;
   try {
     const email=await sendGmailEmail({to:assessorEmail,assessorName,departmentName:req.adminDepartmentName,dissertationCount:ids.length,expiresAt,secureUrl,message});
@@ -709,7 +920,21 @@ app.get('/api/admin/:department/info', departmentAuth, async(req,res)=>{
 });
 app.get('/api/admin/:department/submissions', departmentAuth, async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
-  res.json(adminRecordsMap(records));
+  const assignments=(await readAssignments()).filter(a=>a.department===req.adminDepartment);
+  res.json(adminRecordsMap(records,assignments));
+});
+app.delete('/api/admin/:department/submissions/:id', departmentAuth, async(req,res)=>{
+  const result=await deleteDepartmentSubmissions(req.adminDepartment,[req.params.id]);
+  if(!result.deleted) return res.status(404).json({error:'Submission not found in this department.'});
+  res.json({ok:true,deleted:result.deleted});
+});
+app.post('/api/admin/:department/submissions/delete-selected', departmentAuth, async(req,res)=>{
+  const ids=Array.isArray(req.body?.ids)?[...new Set(req.body.ids.map(String))]:[];
+  if(!ids.length) return res.status(400).json({error:'Select at least one submission to delete.'});
+  if(ids.length>500) return res.status(400).json({error:'A maximum of 500 submissions can be deleted at once.'});
+  const result=await deleteDepartmentSubmissions(req.adminDepartment,ids);
+  if(!result.deleted) return res.status(404).json({error:'No selected submissions were found in this department.'});
+  res.json({ok:true,deleted:result.deleted});
 });
 app.get('/api/admin/:department/submissions/:id', departmentAuth, async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
