@@ -50,3 +50,12 @@ async function loadPortalResources(portal, sectionId='resourcesSection', listId=
     section.hidden=true;
   }
 }
+
+async function loadStudyCentres(selectId='studyCentre'){
+  const select=document.getElementById(selectId);if(!select)return;
+  try{
+    const res=await fetch('/api/study-centres');const centres=await res.json();
+    if(!res.ok||!Array.isArray(centres))throw new Error('Could not load study centres.');
+    select.innerHTML='<option value="">Select study centre</option>'+centres.map(c=>`<option value="${resourceEscape(c)}">${resourceEscape(c)}</option>`).join('');
+  }catch(e){console.error(e);select.innerHTML='<option value="">Study centres unavailable</option>';}
+}
