@@ -12,7 +12,8 @@ async function submitForm(form, endpoint, statusEl, submitBtn){
     const data=await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(data.error||'Submission failed.');
     const destination=data.departmentName?` Destination: ${data.departmentName}.`:'';
-    setStatus(statusEl,true,`Submission received successfully. Reference: ${data.reference}.${destination}`);
+    const validation=data.titleValidated?' Dissertation title validated against the uploaded work.':'';
+    setStatus(statusEl,true,`Submission received successfully. Reference: ${data.reference}.${destination}${validation}`);
     form.reset();
     return data;
   }catch(err){
