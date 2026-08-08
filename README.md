@@ -1,6 +1,6 @@
 # UCC Departmental Academic Submission Portals
 
-Version 6 adds structured names, dissertation-title validation, administrator deletion controls, a three-assessor limit, and supervisor/assessor conflict protection while retaining Gmail secure-link distribution.
+Version 7 adds a developer-managed public Resources system. It retains structured names, dissertation-title validation, administrator deletion controls, the three-assessor limit, supervisor/assessor conflict protection, and Gmail secure-link distribution.
 
 ## Public portals
 
@@ -18,6 +18,42 @@ URLs:
 - `/assessor.html` — Assessor batch submission
 
 Each submitter now provides a **Title**, **First Name**, and **Surname / Last Name** as separate required fields. Suggested titles include Mr, Mrs, Ms, Miss, Dr, Prof., Rev., Ing. and Esq., while the field also allows another title to be typed.
+
+
+## Public Resources
+
+Each public submission portal has a **Resources** area above the submission form. The area is shown only when at least one resource is published to that portal.
+
+The Undergraduate Project Work portal ships with these three resources:
+
+- `SCORE SHEET_PROJECT WORK sample.xlsx`
+- `Supervisor Report sample.docx`
+- `Claim Form sample.docx`
+
+The files are downloadable directly from the portal and remain packaged with the application.
+
+### Developer Resource Portal
+
+Protected URL:
+
+- `/developer`
+
+The developer can upload a resource, add a title and description, and choose one or more destinations:
+
+- Undergraduate Project Work
+- Dissertation Submission
+- Assessment Report Submission
+
+Developer-uploaded files are stored on the persistent disk and immediately appear in the **Resources** area of the selected public portal(s). Uploaded resources can also be deleted from the developer portal. The three built-in Project Work resources are protected from deletion in the developer portal.
+
+Supported developer resource files include PDF, Word, Excel, CSV, PowerPoint, text, ZIP, PNG and JPEG, up to 100 MB per file.
+
+Developer credentials for Render:
+
+```text
+DEVELOPER_ADMIN_USER=developer
+DEVELOPER_ADMIN_PASSWORD=...
+```
 
 ## 1. Undergraduate Project Work
 
@@ -225,9 +261,10 @@ SCIENCE_MATH_ADMIN_PASSWORD=...
 ```text
 data/submissions.json
 data/dissertation-assignments.json
+data/resources.json
 ```
 
-Original submitted files remain under the persistent `files` directory.
+Original submitted files remain under the persistent `files` directory. Developer-uploaded resources are stored under the persistent `resources` directory.
 
 ## Health check
 
@@ -236,5 +273,5 @@ Original submitted files remain under the persistent `files` directory.
 Expected form:
 
 ```json
-{"ok":true,"departments":4,"emailConfigured":true,"emailProvider":"gmail"}
+{"ok":true,"departments":4,"emailConfigured":true,"emailProvider":"gmail","resources":3,"developerPortalConfigured":true}
 ```

@@ -21,6 +21,10 @@ services:
         value: UCC Dissertation Portal
       - key: ASSIGNMENT_EXPIRY_DAYS
         value: 14
+      - key: DEVELOPER_ADMIN_USER
+        value: developer
+      - key: DEVELOPER_ADMIN_PASSWORD
+        sync: false
       - key: EDUCATION_ADMIN_USER
         value: education-admin
       - key: EDUCATION_ADMIN_PASSWORD

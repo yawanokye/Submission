@@ -116,6 +116,8 @@ const DATA_DIR = path.join(STORAGE_DIR, 'data');
 const FILES_DIR = path.join(STORAGE_DIR, 'files');
 const DB_FILE = path.join(DATA_DIR, 'submissions.json');
 const ASSIGNMENTS_FILE = path.join(DATA_DIR, 'dissertation-assignments.json');
+const RESOURCES_FILE = path.join(DATA_DIR, 'resources.json');
+const RESOURCES_DIR = path.join(STORAGE_DIR, 'resources');
 const GMAIL_CLIENT_ID = String(process.env.GMAIL_CLIENT_ID || '').trim();
 const GMAIL_CLIENT_SECRET = String(process.env.GMAIL_CLIENT_SECRET || '').trim();
 const GMAIL_REFRESH_TOKEN = String(process.env.GMAIL_REFRESH_TOKEN || '').trim();
@@ -123,6 +125,8 @@ const GMAIL_SENDER_EMAIL = String(process.env.GMAIL_SENDER_EMAIL || '').trim();
 const GMAIL_FROM_NAME = String(process.env.GMAIL_FROM_NAME || 'UCC Dissertation Portal').trim();
 const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/$/, '');
 const ASSIGNMENT_EXPIRY_DAYS = Math.min(60, Math.max(1, Number(process.env.ASSIGNMENT_EXPIRY_DAYS || 14) || 14));
+const DEVELOPER_ADMIN_USER = String(process.env.DEVELOPER_ADMIN_USER || 'developer').trim();
+const DEVELOPER_ADMIN_PASSWORD = String(process.env.DEVELOPER_ADMIN_PASSWORD || 'change-this-password');
 
 const DEPARTMENTS = {
   'education': {
@@ -147,12 +151,44 @@ const DEPARTMENTS = {
   }
 };
 
+const RESOURCE_PORTALS = new Set(['project-work','dissertation','assessor']);
+const BUILTIN_RESOURCES = [
+  {
+    id: 'builtin-project-score-sheet',
+    title: 'Project Work Score Sheet Sample',
+    description: 'Use this sample score sheet for undergraduate project work. The submission validator checks only the five required headings.',
+    portals: ['project-work'],
+    originalName: 'SCORE SHEET_PROJECT WORK sample.xlsx',
+    builtIn: true,
+    sourcePath: path.join(__dirname, 'public', 'resources', 'project-work', 'score-sheet-project-work-sample.xlsx')
+  },
+  {
+    id: 'builtin-project-supervisor-report',
+    title: 'Supervisor Report Sample',
+    description: 'Supervisor report template for study centre, groups supervised, performance, challenges and recommendations.',
+    portals: ['project-work'],
+    originalName: 'Supervisor Report sample.docx',
+    builtIn: true,
+    sourcePath: path.join(__dirname, 'public', 'resources', 'project-work', 'supervisor-report-sample.docx')
+  },
+  {
+    id: 'builtin-project-claim-form',
+    title: 'Claim Form for Undergraduate Supervision',
+    description: 'Claim form template to complete and upload with the undergraduate project work submission.',
+    portals: ['project-work'],
+    originalName: 'Claim Form sample.docx',
+    builtIn: true,
+    sourcePath: path.join(__dirname, 'public', 'resources', 'project-work', 'claim-form-sample.docx')
+  }
+];
+
 const REQUIRED_HEADERS = ['S/N', 'NAME', 'REGISTRATION NO.', 'GROUP NO.', 'TOTAL SCORE'];
 const MAX_HEADER_SCAN_ROWS = 40;
 
-for (const dir of [STORAGE_DIR, DATA_DIR, FILES_DIR]) fs.mkdirSync(dir, { recursive: true });
+for (const dir of [STORAGE_DIR, DATA_DIR, FILES_DIR, RESOURCES_DIR]) fs.mkdirSync(dir, { recursive: true });
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]', 'utf8');
 if (!fs.existsSync(ASSIGNMENTS_FILE)) fs.writeFileSync(ASSIGNMENTS_FILE, '[]', 'utf8');
+if (!fs.existsSync(RESOURCES_FILE)) fs.writeFileSync(RESOURCES_FILE, '[]', 'utf8');
 
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
@@ -193,6 +229,28 @@ function departmentAuth(req, res, next) {
     next();
   } catch {
     return res.status(401).send('Invalid department administrator credentials.');
+  }
+}
+
+
+function developerAuth(req, res, next) {
+  const header = req.headers.authorization || '';
+  if (!header.startsWith('Basic ')) {
+    res.set('WWW-Authenticate', 'Basic realm="Developer Resource Administration"');
+    return res.status(401).send('Developer authentication required.');
+  }
+  try {
+    const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
+    const sep = decoded.indexOf(':');
+    const user = sep >= 0 ? decoded.slice(0, sep) : decoded;
+    const pass = sep >= 0 ? decoded.slice(sep + 1) : '';
+    if (!safeEqual(user, DEVELOPER_ADMIN_USER) || !safeEqual(pass, DEVELOPER_ADMIN_PASSWORD)) {
+      res.set('WWW-Authenticate', 'Basic realm="Developer Resource Administration"');
+      return res.status(401).send('Invalid developer credentials.');
+    }
+    next();
+  } catch {
+    return res.status(401).send('Invalid developer credentials.');
   }
 }
 
@@ -237,6 +295,46 @@ function mutateAssignments(mutator) {
     return result;
   });
   return assignmentWriteQueue;
+}
+
+
+async function readResources() {
+  try {
+    const raw = await fsp.readFile(RESOURCES_FILE, 'utf8');
+    const parsed = JSON.parse(raw || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+let resourceWriteQueue = Promise.resolve();
+function mutateResources(mutator) {
+  resourceWriteQueue = resourceWriteQueue.catch(() => {}).then(async () => {
+    const records = await readResources();
+    const result = await mutator(records);
+    const temp = RESOURCES_FILE + '.tmp';
+    await fsp.writeFile(temp, JSON.stringify(records, null, 2), 'utf8');
+    await fsp.rename(temp, RESOURCES_FILE);
+    return result;
+  });
+  return resourceWriteQueue;
+}
+function normalizeResourcePortals(value) {
+  const raw = Array.isArray(value) ? value : String(value || '').split(',');
+  return [...new Set(raw.map(v => String(v || '').trim()).filter(v => RESOURCE_PORTALS.has(v)))];
+}
+function publicResource(resource) {
+  return {
+    id: resource.id,
+    title: resource.title,
+    description: resource.description || '',
+    portals: resource.portals || [],
+    originalName: resource.originalName || 'Download resource',
+    size: Number(resource.size || 0),
+    uploadedAt: resource.uploadedAt || null,
+    builtIn: Boolean(resource.builtIn),
+    downloadUrl: `/api/resources/${encodeURIComponent(resource.id)}/download`
+  };
 }
 
 function assignmentTokenHash(token) {
@@ -513,6 +611,19 @@ const storage = multer.diskStorage({
   filename: (_req, file, cb) => cb(null, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}-${safeBaseName(file.originalname)}`)
 });
 const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024, files: 80 } });
+const resourceStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, RESOURCES_DIR),
+  filename: (_req, file, cb) => cb(null, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}-${safeBaseName(file.originalname)}`)
+});
+const RESOURCE_EXTENSIONS = new Set(['.pdf','.doc','.docx','.xls','.xlsx','.csv','.ppt','.pptx','.txt','.zip','.png','.jpg','.jpeg']);
+const resourceUpload = multer({
+  storage: resourceStorage,
+  limits: { fileSize: 100 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    cb(null, RESOURCE_EXTENSIONS.has(ext));
+  }
+});
 function filesFor(req, key) { return (req.files && req.files[key]) || []; }
 async function removeUploaded(req) { await Promise.all(Object.values(req.files || {}).flat().map(f => fsp.unlink(f.path).catch(() => {}))); }
 function fileRecord(f) { return f ? { storedName: path.basename(f.path), originalName: f.originalname, mimeType: f.mimetype, size: f.size } : null; }
@@ -800,6 +911,73 @@ app.get('/secure/dissertations/:token/download', async (req, res) => {
   }
 });
 
+// PUBLIC RESOURCES + DEVELOPER RESOURCE ADMINISTRATION
+app.get('/api/resources', async (req, res) => {
+  const portal = String(req.query.portal || '').trim();
+  if (portal && !RESOURCE_PORTALS.has(portal)) return res.status(400).json({ error:'Unknown submission portal.' });
+  const uploaded = await readResources();
+  const all = [...BUILTIN_RESOURCES, ...uploaded];
+  const filtered = portal ? all.filter(r => (r.portals || []).includes(portal)) : all;
+  res.json(filtered.map(publicResource));
+});
+
+app.get('/api/resources/:id/download', async (req, res) => {
+  const id = String(req.params.id || '');
+  const builtin = BUILTIN_RESOURCES.find(r => r.id === id);
+  if (builtin) {
+    if (!fs.existsSync(builtin.sourcePath)) return res.status(404).send('Resource file is unavailable.');
+    return res.download(builtin.sourcePath, builtin.originalName);
+  }
+  const resource = (await readResources()).find(r => r.id === id);
+  if (!resource) return res.status(404).send('Resource not found.');
+  const filePath = path.join(RESOURCES_DIR, path.basename(resource.storedName || ''));
+  if (!fs.existsSync(filePath)) return res.status(404).send('Resource file is unavailable.');
+  return res.download(filePath, resource.originalName || 'resource');
+});
+
+app.get('/developer', developerAuth, (_req,res)=>res.sendFile(path.join(__dirname,'developer','index.html')));
+app.get('/developer/developer.css', developerAuth, (_req,res)=>res.sendFile(path.join(__dirname,'developer','developer.css')));
+app.get('/developer/developer.js', developerAuth, (_req,res)=>res.sendFile(path.join(__dirname,'developer','developer.js')));
+app.get('/api/developer/resources', developerAuth, async (_req,res)=>{
+  const uploaded = await readResources();
+  res.json([...BUILTIN_RESOURCES.map(r => ({...publicResource(r), canDelete:false})), ...uploaded.map(r => ({...publicResource(r), canDelete:true}))]);
+});
+app.post('/api/developer/resources', developerAuth, resourceUpload.single('resourceFile'), async (req,res)=>{
+  try {
+    if (!req.file) return res.status(400).json({ error:'Select a supported resource file to upload.' });
+    const title = cleanHumanText(req.body?.title);
+    const description = String(req.body?.description || '').trim().slice(0, 1000);
+    const portals = normalizeResourcePortals(req.body?.portals);
+    if (!title) { await fsp.unlink(req.file.path).catch(()=>{}); return res.status(400).json({ error:'Resource title is required.' }); }
+    if (!portals.length) { await fsp.unlink(req.file.path).catch(()=>{}); return res.status(400).json({ error:'Select at least one submission portal where the resource should appear.' }); }
+    const record = {
+      id: crypto.randomUUID(), title: title.slice(0,180), description, portals,
+      originalName: req.file.originalname, storedName: path.basename(req.file.path), mimeType:req.file.mimetype,
+      size:req.file.size, uploadedAt:new Date().toISOString(), builtIn:false
+    };
+    await mutateResources(records => { records.push(record); return record; });
+    res.status(201).json({ ok:true, resource:publicResource(record) });
+  } catch (e) {
+    console.error('Developer resource upload failed:', e);
+    if (req.file?.path) await fsp.unlink(req.file.path).catch(()=>{});
+    res.status(500).json({ error:'The resource could not be uploaded.' });
+  }
+});
+app.delete('/api/developer/resources/:id', developerAuth, async (req,res)=>{
+  const id=String(req.params.id||'');
+  if (BUILTIN_RESOURCES.some(r=>r.id===id)) return res.status(400).json({ error:'Built-in resources cannot be deleted from the developer portal.' });
+  let removed=null;
+  await mutateResources(records => {
+    const index=records.findIndex(r=>r.id===id);
+    if(index<0) return null;
+    removed=records.splice(index,1)[0];
+    return removed;
+  });
+  if(!removed) return res.status(404).json({ error:'Resource not found.' });
+  if(removed.storedName) await fsp.unlink(path.join(RESOURCES_DIR,path.basename(removed.storedName))).catch(()=>{});
+  res.json({ ok:true, deleted:id });
+});
+
 // DEPARTMENT ADMIN: dissertation assignment by secure emailed link
 app.get('/api/admin/:department/dissertation-assignments', departmentAuth, async(req,res)=>{
   const list=(await readAssignments()).filter(a=>a.department===req.adminDepartment).slice().reverse().map(publicAssignment);
@@ -1021,7 +1199,7 @@ app.get('/api/admin/:department/summary',departmentAuth,async(req,res)=>{
   });
 });
 
-app.get('/health',(_req,res)=>res.json({ok:true,departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail'}));
+app.get('/health',async(_req,res)=>res.json({ok:true,departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',resources:(await readResources()).length+BUILTIN_RESOURCES.length,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'}));
 app.get('/vendor/xlsx.full.min.js', (_req,res)=>res.sendFile(path.join(__dirname,'node_modules','xlsx','dist','xlsx.full.min.js')));
 app.use(express.static(path.join(__dirname,'public'),{extensions:['html']}));
 app.use((err,req,res,_next)=>{
@@ -1034,4 +1212,5 @@ app.listen(PORT,'0.0.0.0',()=>{
   for (const [slug, dept] of Object.entries(DEPARTMENTS)) {
     if (dept.password === 'change-this-password') console.warn(`WARNING: Set a secure admin password for ${slug}.`);
   }
+  if (DEVELOPER_ADMIN_PASSWORD === 'change-this-password') console.warn('WARNING: Set DEVELOPER_ADMIN_PASSWORD before using the developer resource portal.');
 });

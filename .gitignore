@@ -3,3 +3,6 @@ storage/files/*
 !storage/files/.gitkeep
 storage/data/submissions.json
 .env
+storage/resources/*
+!storage/resources/.gitkeep
+storage/data/resources.json
