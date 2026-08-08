@@ -24,3 +24,29 @@ async function submitForm(form, endpoint, statusEl, submitBtn){
     submitBtn.textContent=old;
   }
 }
+
+function formatBytes(bytes){
+  const n=Number(bytes||0);
+  if(!n)return '';
+  if(n<1024)return `${n} B`;
+  if(n<1024*1024)return `${(n/1024).toFixed(n<10*1024?1:0)} KB`;
+  return `${(n/(1024*1024)).toFixed(n<10*1024*1024?1:0)} MB`;
+}
+function resourceEscape(value){
+  return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+}
+async function loadPortalResources(portal, sectionId='resourcesSection', listId='resourceList'){
+  const section=document.getElementById(sectionId),list=document.getElementById(listId);
+  if(!section||!list)return;
+  try{
+    const res=await fetch(`/api/resources?portal=${encodeURIComponent(portal)}`);
+    const resources=await res.json().catch(()=>[]);
+    if(!res.ok)throw new Error(resources.error||'Could not load resources.');
+    if(!Array.isArray(resources)||!resources.length){section.hidden=true;return;}
+    list.innerHTML=resources.map(r=>`<article class="resource-card"><div class="resource-icon">↓</div><div class="resource-copy"><h4>${resourceEscape(r.title)}</h4>${r.description?`<p>${resourceEscape(r.description)}</p>`:''}<div class="resource-meta">${resourceEscape(r.originalName||'Resource')}${r.size?` · ${resourceEscape(formatBytes(r.size))}`:''}</div></div><a class="btn secondary resource-download" href="${resourceEscape(r.downloadUrl)}">Download</a></article>`).join('');
+    section.hidden=false;
+  }catch(e){
+    console.error('Could not load portal resources:',e);
+    section.hidden=true;
+  }
+}
