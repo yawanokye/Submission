@@ -117,6 +117,8 @@ const FILES_DIR = path.join(STORAGE_DIR, 'files');
 const DB_FILE = path.join(DATA_DIR, 'submissions.json');
 const ASSIGNMENTS_FILE = path.join(DATA_DIR, 'dissertation-assignments.json');
 const RESOURCES_FILE = path.join(DATA_DIR, 'resources.json');
+const ADMIN_USERS_FILE = path.join(DATA_DIR, 'admin-users.json');
+const STUDY_CENTRES_FILE = path.join(DATA_DIR, 'study-centres.json');
 const RESOURCES_DIR = path.join(STORAGE_DIR, 'resources');
 const GMAIL_CLIENT_ID = String(process.env.GMAIL_CLIENT_ID || '').trim();
 const GMAIL_CLIENT_SECRET = String(process.env.GMAIL_CLIENT_SECRET || '').trim();
@@ -127,6 +129,7 @@ const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || process.env.RENDER
 const ASSIGNMENT_EXPIRY_DAYS = Math.min(60, Math.max(1, Number(process.env.ASSIGNMENT_EXPIRY_DAYS || 14) || 14));
 const DEVELOPER_ADMIN_USER = String(process.env.DEVELOPER_ADMIN_USER || 'developer').trim();
 const DEVELOPER_ADMIN_PASSWORD = String(process.env.DEVELOPER_ADMIN_PASSWORD || 'change-this-password');
+const STUDENT_FEEDBACK_EXPIRY_DAYS = Math.min(90, Math.max(1, Number(process.env.STUDENT_FEEDBACK_EXPIRY_DAYS || 30) || 30));
 
 const DEPARTMENTS = {
   'education': {
@@ -152,6 +155,15 @@ const DEPARTMENTS = {
 };
 
 const RESOURCE_PORTALS = new Set(['project-work','dissertation','assessor']);
+
+const DEFAULT_STUDY_CENTRES = [
+  'Bompeh','GHANASS','Lashibi','Sokode','Riverview Kasoa','Odorgonno','KTI','Tamale','Zenith',
+  'STU Sunyani','Fafraha','Lutheran Madina','Fiaseman','UCC','Enchi','Bolga','Wa','Chemu'
+];
+const ADMIN_SECTIONS = new Set(['project-work','dissertation','assessor']);
+const ADMIN_ROLES = new Set(['viewer','officer','administrator']);
+const ROLE_RANK = { viewer:1, officer:2, administrator:3 };
+
 const BUILTIN_RESOURCES = [
   {
     id: 'builtin-project-score-sheet',
@@ -189,6 +201,8 @@ for (const dir of [STORAGE_DIR, DATA_DIR, FILES_DIR, RESOURCES_DIR]) fs.mkdirSyn
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]', 'utf8');
 if (!fs.existsSync(ASSIGNMENTS_FILE)) fs.writeFileSync(ASSIGNMENTS_FILE, '[]', 'utf8');
 if (!fs.existsSync(RESOURCES_FILE)) fs.writeFileSync(RESOURCES_FILE, '[]', 'utf8');
+if (!fs.existsSync(ADMIN_USERS_FILE)) fs.writeFileSync(ADMIN_USERS_FILE, '[]', 'utf8');
+if (!fs.existsSync(STUDY_CENTRES_FILE)) fs.writeFileSync(STUDY_CENTRES_FILE, JSON.stringify(DEFAULT_STUDY_CENTRES, null, 2), 'utf8');
 
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
@@ -205,7 +219,52 @@ function departmentFromSlug(slug) {
   return Object.prototype.hasOwnProperty.call(DEPARTMENTS, slug) ? DEPARTMENTS[slug] : null;
 }
 
-function departmentAuth(req, res, next) {
+async function readAdminUsers() {
+  try {
+    const raw = await fsp.readFile(ADMIN_USERS_FILE, 'utf8');
+    const parsed = JSON.parse(raw || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+let adminUserWriteQueue = Promise.resolve();
+function mutateAdminUsers(mutator) {
+  adminUserWriteQueue = adminUserWriteQueue.catch(() => {}).then(async () => {
+    const records = await readAdminUsers();
+    const result = await mutator(records);
+    const temp = ADMIN_USERS_FILE + '.tmp';
+    await fsp.writeFile(temp, JSON.stringify(records, null, 2), 'utf8');
+    await fsp.rename(temp, ADMIN_USERS_FILE);
+    return result;
+  });
+  return adminUserWriteQueue;
+}
+function hashPassword(password, salt=crypto.randomBytes(16).toString('hex')) {
+  const hash = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  return { salt, hash };
+}
+function verifyPassword(password, salt, expectedHash) {
+  try {
+    const actual = crypto.scryptSync(String(password), String(salt || ''), 64);
+    const expected = Buffer.from(String(expectedHash || ''), 'hex');
+    return expected.length === actual.length && crypto.timingSafeEqual(actual, expected);
+  } catch { return false; }
+}
+function normalizeAdminSections(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(',');
+  return [...new Set(source.map(v => String(v || '').trim()).filter(v => ADMIN_SECTIONS.has(v)))];
+}
+function normalizeAdminDepartments(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(',');
+  return [...new Set(source.map(v => String(v || '').trim()).filter(v => departmentFromSlug(v)))];
+}
+function publicAdminUser(user) {
+  return {
+    id:user.id, name:user.name || user.username, username:user.username,
+    role:user.role || 'viewer', departments:user.departments || [], sections:user.sections || [],
+    active:user.active !== false, createdAt:user.createdAt || null
+  };
+}
+async function departmentAuth(req, res, next) {
   const slug = String(req.params.department || '');
   const dept = departmentFromSlug(slug);
   if (!dept) return res.status(404).send('Department administrator portal not found.');
@@ -220,18 +279,55 @@ function departmentAuth(req, res, next) {
     const sep = decoded.indexOf(':');
     const user = sep >= 0 ? decoded.slice(0, sep) : decoded;
     const pass = sep >= 0 ? decoded.slice(sep + 1) : '';
-    if (!safeEqual(user, dept.user) || !safeEqual(pass, dept.password)) {
+
+    // Existing department environment account remains the department master administrator.
+    if (safeEqual(user, dept.user) && safeEqual(pass, dept.password)) {
+      req.adminDepartment = slug;
+      req.adminDepartmentName = dept.name;
+      req.adminIdentity = {
+        id:`department-master:${slug}`, name:`${dept.name} Administrator`, username:user,
+        role:'administrator', sections:['project-work','dissertation','assessor'], departments:[slug], master:true
+      };
+      return next();
+    }
+
+    const accounts = await readAdminUsers();
+    const account = accounts.find(a => a.active !== false && String(a.username || '').toLowerCase() === user.toLowerCase());
+    const allowedDepartment = account && (account.departments || []).includes(slug);
+    if (!account || !allowedDepartment || !verifyPassword(pass, account.passwordSalt, account.passwordHash)) {
       res.set('WWW-Authenticate', `Basic realm="${dept.name} Administration"`);
       return res.status(401).send('Invalid department administrator credentials.');
     }
     req.adminDepartment = slug;
     req.adminDepartmentName = dept.name;
-    next();
-  } catch {
+    req.adminIdentity = {...publicAdminUser(account), master:false};
+    return next();
+  } catch (e) {
+    console.error('Department authentication failed:', e);
     return res.status(401).send('Invalid department administrator credentials.');
   }
 }
-
+function portalSectionForRecord(record) {
+  const type = record?.portalType || 'project-work';
+  return ADMIN_SECTIONS.has(type) ? type : 'project-work';
+}
+function adminCan(req, section, minimumRole='viewer') {
+  const identity=req.adminIdentity || {};
+  return (identity.sections || []).includes(section) && (ROLE_RANK[identity.role] || 0) >= (ROLE_RANK[minimumRole] || 1);
+}
+function requireAdminAccess(section, minimumRole='viewer') {
+  return (req,res,next) => adminCan(req, section, minimumRole)
+    ? next()
+    : res.status(403).json({error:`Your administrator account does not have ${minimumRole} access to this section.`});
+}
+function requireRecordAccess(req, res, record, minimumRole='viewer') {
+  const section=portalSectionForRecord(record);
+  if (!adminCan(req, section, minimumRole)) {
+    res.status(403).json({error:`Your administrator account does not have ${minimumRole} access to this submission section.`});
+    return false;
+  }
+  return true;
+}
 
 function developerAuth(req, res, next) {
   const header = req.headers.authorization || '';
@@ -323,6 +419,42 @@ function normalizeResourcePortals(value) {
   const raw = Array.isArray(value) ? value : String(value || '').split(',');
   return [...new Set(raw.map(v => String(v || '').trim()).filter(v => RESOURCE_PORTALS.has(v)))];
 }
+async function readStudyCentres() {
+  try {
+    const raw = await fsp.readFile(STUDY_CENTRES_FILE, 'utf8');
+    const parsed = JSON.parse(raw || '[]');
+    const centres = Array.isArray(parsed) ? parsed.map(cleanHumanText).filter(Boolean) : [];
+    return centres.length ? [...new Set(centres)] : DEFAULT_STUDY_CENTRES.slice();
+  } catch { return DEFAULT_STUDY_CENTRES.slice(); }
+}
+let studyCentreWriteQueue = Promise.resolve();
+function writeStudyCentres(centres) {
+  studyCentreWriteQueue = studyCentreWriteQueue.catch(() => {}).then(async () => {
+    const cleaned=[...new Set((centres || []).map(cleanHumanText).filter(Boolean))];
+    const temp=STUDY_CENTRES_FILE+'.tmp';
+    await fsp.writeFile(temp, JSON.stringify(cleaned, null, 2), 'utf8');
+    await fsp.rename(temp, STUDY_CENTRES_FILE);
+    return cleaned;
+  });
+  return studyCentreWriteQueue;
+}
+function parseStudyCentreCsv(filePath) {
+  const wb=XLSX.readFile(filePath,{raw:false});
+  if(!wb.SheetNames.length) throw new Error('The CSV contains no worksheet.');
+  const matrix=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:'',raw:false});
+  const values=[];
+  for(const row of matrix){
+    const first=cleanHumanText(row?.[0]);
+    if(!first) continue;
+    const normalized=first.toLowerCase().replace(/[^a-z]/g,'');
+    if(['studycentre','studycenter','centre','center','name'].includes(normalized)) continue;
+    values.push(first);
+  }
+  const unique=[...new Set(values)];
+  if(!unique.length) throw new Error('No study centres were found in the first column of the CSV file.');
+  return unique;
+}
+
 function publicResource(resource) {
   return {
     id: resource.id,
@@ -438,6 +570,7 @@ function assignmentState(a) {
 }
 function publicAssignment(a, dissertationRecordsForDepartment=[]) {
   const linked=(a.dissertationIds||[]).map(id=>dissertationRecordsForDepartment.find(r=>r.id===id)).filter(Boolean);
+  const fallbackDeadlines=assignmentDeadlineDates(new Date(a.sentAt||a.createdAt||Date.now()));
   return {
     id:a.id, reference:a.reference, department:a.department, departmentName:a.departmentName,
     assessorTitle:a.assessorTitle || '', assessorFirstName:a.assessorFirstName || '', assessorLastName:a.assessorLastName || '',
@@ -445,7 +578,7 @@ function publicAssignment(a, dissertationRecordsForDepartment=[]) {
     dissertationIds:(a.dissertationIds||[]).slice(),
     studentNames:linked.map(r=>r.studentName||r.name||r.reference).filter(Boolean),
     studentIndexNumbers:linked.map(r=>r.indexNumber||'').filter(Boolean),
-    createdAt:a.createdAt, sentAt:a.sentAt || null, expiresAt:a.expiresAt, downloadedAt:a.downloadedAt || null,
+    createdAt:a.createdAt, sentAt:a.sentAt || null, expiresAt:a.expiresAt, earlyBirdDueAt:a.earlyBirdDueAt||fallbackDeadlines.earlyBirdDueAt, assessmentDueAt:a.assessmentDueAt||fallbackDeadlines.assessmentDueAt, downloadedAt:a.downloadedAt || null,
     downloadCount:Number(a.downloadCount || 0), revokedAt:a.revokedAt || null, emailStatus:a.emailStatus || 'pending',
     status:assignmentState(a), resendCount:Number(a.resendCount || 0), lastEmailError:a.lastEmailError || ''
   };
@@ -520,35 +653,24 @@ async function getGmailAccessToken() {
   }
   return data.access_token;
 }
-async function sendGmailEmail({ to, assessorName, departmentName, dissertationCount, expiresAt, secureUrl, message }) {
-  if (!gmailConfigured()) {
-    throw new Error('Gmail API is not configured. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN and GMAIL_SENDER_EMAIL.');
-  }
-  if (!isEmail(to)) throw new Error('The assessor email address is invalid.');
+async function sendGmailHtmlEmail({to, subject, html}) {
+  if (!gmailConfigured()) throw new Error('Gmail API is not configured. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN and GMAIL_SENDER_EMAIL.');
+  if (!isEmail(to)) throw new Error('The recipient email address is invalid.');
   if (!isEmail(GMAIL_SENDER_EMAIL)) throw new Error('GMAIL_SENDER_EMAIL is not a valid email address.');
-
-  const expiresText = new Date(expiresAt).toLocaleString('en-GB', { dateStyle:'long', timeStyle:'short', timeZone:'UTC' }) + ' UTC';
-  const optionalMessage = message ? `<div style="margin:18px 0;padding:14px 16px;background:#f5f7fa;border-left:4px solid #d4a72c"><strong>Message from the department</strong><br>${htmlEscape(message).replace(/\n/g,'<br>')}</div>` : '';
-  const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:640px;margin:auto;padding:24px"><h2 style="color:#082b4c">Dissertations Assigned for Assessment</h2><p>Dear ${htmlEscape(assessorName)},</p><p>${htmlEscape(departmentName)} has assigned <strong>${dissertationCount}</strong> dissertation${dissertationCount===1?'':'s'} to you for assessment.</p>${optionalMessage}<p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Access Assigned Dissertations</a></p><p>This secure link expires on <strong>${htmlEscape(expiresText)}</strong>. Please do not forward the link.</p><p>After completing the assessment, submit the assessment reports and claim forms through the Assessor Submission Portal.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
-
   const fromName = encodeMailHeader(GMAIL_FROM_NAME || 'UCC Dissertation Portal');
   const fromHeader = fromName ? `${fromName} <${cleanMailHeader(GMAIL_SENDER_EMAIL)}>` : cleanMailHeader(GMAIL_SENDER_EMAIL);
-  const subject = encodeMailHeader(`Dissertations for Assessment - ${departmentName}`);
   const rawMessage = [
     `From: ${fromHeader}`,
     `To: ${cleanMailHeader(to)}`,
-    `Subject: ${subject}`,
+    `Subject: ${encodeMailHeader(subject)}`,
     'MIME-Version: 1.0',
     'Content-Type: text/html; charset="UTF-8"',
     'Content-Transfer-Encoding: 8bit',
-    '',
-    html
+    '', html
   ].join('\r\n');
-
   const accessToken = await getGmailAccessToken();
   const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-    method:'POST',
-    headers:{ Authorization:`Bearer ${accessToken}`, 'Content-Type':'application/json' },
+    method:'POST', headers:{ Authorization:`Bearer ${accessToken}`, 'Content-Type':'application/json' },
     body:JSON.stringify({ raw:base64Url(rawMessage) })
   });
   const data = await response.json().catch(() => ({}));
@@ -557,6 +679,26 @@ async function sendGmailEmail({ to, assessorName, departmentName, dissertationCo
     throw new Error(detail);
   }
   return data;
+}
+function assignmentDeadlineDates(baseDate=new Date()) {
+  const start=new Date(baseDate);
+  return {
+    earlyBirdDueAt:new Date(start.getTime()+28*24*60*60*1000).toISOString(),
+    assessmentDueAt:new Date(start.getTime()+56*24*60*60*1000).toISOString()
+  };
+}
+async function sendGmailEmail({ to, assessorName, departmentName, dissertationCount, expiresAt, secureUrl, assessorSubmissionUrl, earlyBirdDueAt, assessmentDueAt, message }) {
+  const expiresText = new Date(expiresAt).toLocaleString('en-GB', { dateStyle:'long', timeStyle:'short', timeZone:'UTC' }) + ' UTC';
+  const earlyText = new Date(earlyBirdDueAt).toLocaleDateString('en-GB', { dateStyle:'long', timeZone:'UTC' });
+  const dueText = new Date(assessmentDueAt).toLocaleDateString('en-GB', { dateStyle:'long', timeZone:'UTC' });
+  const optionalMessage = message ? `<div style="margin:18px 0;padding:14px 16px;background:#f5f7fa;border-left:4px solid #d4a72c"><strong>Message from the department</strong><br>${htmlEscape(message).replace(/\n/g,'<br>')}</div>` : '';
+  const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Dissertations Assigned for Assessment</h2><p>Dear ${htmlEscape(assessorName)},</p><p>${htmlEscape(departmentName)} has assigned <strong>${dissertationCount}</strong> dissertation${dissertationCount===1?'':'s'} to you for assessment.</p>${optionalMessage}<p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Access Assigned Dissertations</a></p><p>This secure dissertation download link expires on <strong>${htmlEscape(expiresText)}</strong>. Please do not forward the link.</p><div style="margin:20px 0;padding:16px;background:#fff7dc;border:1px solid #ead58c;border-radius:8px"><strong>Assessment submission timeline</strong><ul style="margin-bottom:0"><li>Please submit the assessment report and claim form within <strong>8 weeks</strong> of this assignment email, by <strong>${htmlEscape(dueText)}</strong>.</li><li>Assessors who complete and submit within <strong>4 weeks</strong>, by <strong>${htmlEscape(earlyText)}</strong>, qualify for the <strong>Early Bird</strong> completion category.</li></ul></div><p>After completing the assessment, submit the assessment report and claim form through the Assessor Submission Portal:</p><p><a href="${htmlEscape(assessorSubmissionUrl)}" style="display:inline-block;background:#137a45;color:#fff;text-decoration:none;padding:11px 16px;border-radius:7px;font-weight:bold">Submit Assessment Report</a></p><p style="font-size:13px;color:#526575">Portal link: ${htmlEscape(assessorSubmissionUrl)}</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+  return sendGmailHtmlEmail({to,subject:`Dissertations for Assessment - ${departmentName}`,html});
+}
+async function sendStudentFeedbackEmail({to, studentName, departmentName, assessorName, secureUrl, expiresAt}) {
+  const expiryText=new Date(expiresAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'})+' UTC';
+  const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Dissertation Assessment Feedback</h2><p>Dear ${htmlEscape(studentName)},</p><p>${htmlEscape(departmentName)} has made your dissertation assessment feedback available. The package contains the assessor's report${assessorName?` from <strong>${htmlEscape(assessorName)}</strong>`:''} and, where supplied by the assessor, the reviewed dissertation.</p><p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Access Assessment Feedback</a></p><p>This secure link expires on <strong>${htmlEscape(expiryText)}</strong>. Please do not forward the link.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+  return sendGmailHtmlEmail({to,subject:`Dissertation Assessment Feedback - ${departmentName}`,html});
 }
 async function assignmentByToken(token) {
   const hash = assignmentTokenHash(token);
@@ -568,6 +710,51 @@ function validateLiveAssignment(a) {
   if (a.revokedAt) return { ok:false, status:410, message:'This secure dissertation link has been revoked.' };
   if (new Date(a.expiresAt).getTime() <= Date.now()) return { ok:false, status:410, message:'This secure dissertation link has expired. Please contact the department for a new link.' };
   return { ok:true };
+}
+
+function normalizeIndexNumber(value){return String(value||'').trim().toLowerCase().replace(/\s+/g,'');}
+function feedbackState(feedback){
+  if(!feedback) return 'not-forwarded';
+  if(feedback.revokedAt) return 'revoked';
+  if(feedback.expiresAt && new Date(feedback.expiresAt).getTime()<=Date.now()) return 'expired';
+  if(feedback.downloadedAt) return 'downloaded';
+  if(feedback.emailStatus==='failed') return 'email-failed';
+  if(feedback.sentAt) return 'sent';
+  return feedback.emailStatus || 'pending';
+}
+async function feedbackByToken(token){
+  const hash=assignmentTokenHash(token);
+  const records=await readDb();
+  for(const record of assessorRecords(records)){
+    for(let i=0;i<(record.works||[]).length;i++){
+      const work=record.works[i];
+      if(work?.feedback?.tokenHash===hash) return {record,work,workIndex:i};
+    }
+  }
+  return null;
+}
+function validateLiveFeedback(found){
+  if(!found?.work?.feedback) return {ok:false,status:404,message:'This assessment feedback link is invalid.'};
+  const f=found.work.feedback;
+  if(f.revokedAt) return {ok:false,status:410,message:'This assessment feedback link has been revoked.'};
+  if(f.expiresAt && new Date(f.expiresAt).getTime()<=Date.now()) return {ok:false,status:410,message:'This assessment feedback link has expired. Please contact the department.'};
+  return {ok:true};
+}
+async function mutateAssessmentWork(recordId, workIndex, mutator){
+  let result=null;
+  const all=await readDb();
+  const record=all.find(r=>r.id===recordId && r.portalType==='assessor');
+  const work=record?.works?.[workIndex];
+  if(!record||!work) return null;
+  result=await mutator(work,record);
+  await writeDb(all);
+  return result;
+}
+function latestStudentDissertation(records, department, indexNumber){
+  const key=normalizeIndexNumber(indexNumber);
+  return dissertationRecords(recordsForDepartment(records,department))
+    .filter(r=>normalizeIndexNumber(r.indexNumber)===key && isEmail(r.email))
+    .sort((a,b)=>String(b.submittedAt||'').localeCompare(String(a.submittedAt||'')))[0] || null;
 }
 
 function normalizeHeader(value) {
@@ -611,8 +798,10 @@ function parseScoreWorkbook(filePath) {
 
     // Acceptance validation is header-only. These conditions are used only to avoid
     // treating blank template lines or signature/footer content as student score rows.
-    const looksLikeStudent = numericSn(sn) || (name && registrationNo && (groupNo || totalScore));
-    if (!looksLikeStudent) continue;
+    // Ignore empty template rows, including rows that contain only a pre-filled S/N.
+    // Header validation remains header-only.
+    const hasStudentData = Boolean(name || registrationNo || groupNo || totalScore);
+    if (!hasStudentData) continue;
     rows.push({ originalSn: sn, name, registrationNo, groupNo, totalScore });
   }
   return { sheetName: workbook.SheetNames[0], headerRow: header.rowIndex + 1, rows };
@@ -675,6 +864,8 @@ app.post('/api/project-work', upload.fields([
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
     const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount','studyCentre']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error: `Missing required field: ${missing}` }); }
+    const allowedCentres=await readStudyCentres();
+    if(!allowedCentres.includes(text(req,'studyCentre'))){await removeUploaded(req);return res.status(400).json({error:'Please select a valid study centre from the current list.'});}
     if (!filesFor(req,'claimForm').length || !filesFor(req,'reportFile').length || !filesFor(req,'completedWork').length || !filesFor(req,'scoresFile').length) {
       await removeUploaded(req); return res.status(400).json({ error: 'Claim form, report, score sheet and completed project work are required.' });
     }
@@ -699,18 +890,33 @@ app.post('/api/project-work', upload.fields([
 });
 
 // 2. STUDENT DISSERTATION
-app.post('/api/dissertation', upload.fields([{ name:'dissertationFile', maxCount:1 }]), async (req, res) => {
+app.post('/api/dissertation', upload.fields([
+  { name:'dissertationFile', maxCount:1 },
+  { name:'revisedDissertationFile', maxCount:1 },
+  { name:'reviewerResponses', maxCount:10 }
+]), async (req, res) => {
   try {
     const department = validateDepartment(req);
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
+    const submissionType=text(req,'submissionType');
+    if(!['fresh','revised'].includes(submissionType)) { await removeUploaded(req); return res.status(400).json({error:'Select Fresh Submission or Revised Submission.'}); }
     const missing = requireText(req, [
       'studentTitle','studentFirstName','studentLastName','indexNumber','phone','email',
       'supervisorTitle','supervisorFirstName','supervisorLastName','programme','dissertationTopic'
     ]);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error:`Missing required field: ${missing}` }); }
-    const dissertationFiles=filesFor(req,'dissertationFile');
-    if (!dissertationFiles.length) { await removeUploaded(req); return res.status(400).json({ error:'The dissertation file is required.' }); }
-    const dissertationFile=dissertationFiles[0];
+
+    const freshFile=filesFor(req,'dissertationFile')[0] || null;
+    const revisedFile=filesFor(req,'revisedDissertationFile')[0] || null;
+    const reviewerResponses=filesFor(req,'reviewerResponses');
+    const dissertationFile=submissionType==='revised' ? revisedFile : freshFile;
+    if (!dissertationFile) {
+      await removeUploaded(req);
+      return res.status(400).json({ error:submissionType==='revised'?'The revised dissertation file is required.':'The dissertation file is required.' });
+    }
+    if(submissionType==='revised' && !reviewerResponses.length){
+      await removeUploaded(req); return res.status(400).json({error:"At least one reviewers' response file is required for a revised submission."});
+    }
     const ext=path.extname(dissertationFile.originalname||'').toLowerCase();
     if(!['.pdf','.doc','.docx'].includes(ext)) { await removeUploaded(req); return res.status(400).json({error:'Upload the dissertation as a PDF, DOC or DOCX file.'}); }
 
@@ -721,16 +927,16 @@ app.post('/api/dissertation', upload.fields([{ name:'dissertationFile', maxCount
     const studentName=buildDisplayName(text(req,'studentTitle'),text(req,'studentFirstName'),text(req,'studentLastName'));
     const supervisorName=buildDisplayName(text(req,'supervisorTitle'),text(req,'supervisorFirstName'),text(req,'supervisorLastName'));
     const record = {
-      id: crypto.randomUUID(), portalType:'dissertation', department, departmentName: DEPARTMENTS[department].name,
-      reference:makeReference('DISS'), submittedAt:new Date().toISOString(),
+      id: crypto.randomUUID(), portalType:'dissertation', submissionType, department, departmentName: DEPARTMENTS[department].name,
+      reference:makeReference(submissionType==='revised'?'DREV':'DISS'), submittedAt:new Date().toISOString(),
       studentTitle:text(req,'studentTitle'), studentFirstName:text(req,'studentFirstName'), studentLastName:text(req,'studentLastName'), studentName,
       indexNumber:text(req,'indexNumber'), phone:text(req,'phone'), email:text(req,'email'),
       supervisorTitle:text(req,'supervisorTitle'), supervisorFirstName:text(req,'supervisorFirstName'), supervisorLastName:text(req,'supervisorLastName'), supervisorName,
       programme:text(req,'programme'), dissertationTopic:text(req,'dissertationTopic'), titleValidation,
-      files:{ dissertationFile:fileRecord(dissertationFile) }
+      files:{ dissertationFile:fileRecord(dissertationFile), reviewerResponses:reviewerResponses.map(fileRecord) }
     };
     await saveRecord(record);
-    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, titleValidated:true });
+    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, titleValidated:true, submissionType });
   } catch (e) { console.error(e); await removeUploaded(req).catch(()=>{}); res.status(500).json({ error:'The dissertation submission could not be saved.' }); }
 });
 
@@ -821,17 +1027,23 @@ function projectRecords(records) { return records.filter(r => r.portalType === '
 function dissertationRecords(records) { return records.filter(r => r.portalType === 'dissertation'); }
 function assessorRecords(records) { return records.filter(r => r.portalType === 'assessor'); }
 
+function validScoreRows(record) {
+  return (record?.scoreSheet?.rows || []).filter(row => {
+    const name=cellText(row?.name), registrationNo=cellText(row?.registrationNo), groupNo=cellText(row?.groupNo), totalScore=cellText(row?.totalScore);
+    return Boolean(name || registrationNo || groupNo || totalScore);
+  });
+}
 function allScoreRows(records) {
   const out=[]; let sn=1;
   projectRecords(records).slice().sort((a,b)=>String(a.submittedAt).localeCompare(String(b.submittedAt))).forEach(record => {
-    for (const row of (record.scoreSheet?.rows || [])) out.push({'S/N':sn++,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
+    for (const row of validScoreRows(record)) out.push({'S/N':sn++,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
   });
   return out;
 }
 function scoreSheetAoA(records) { const rows=allScoreRows(records); return [REQUIRED_HEADERS, ...rows.map(r=>REQUIRED_HEADERS.map(h=>r[h]))]; }
 function projectRegisterAoA(records) {
   const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED'];
-  const body=projectRecords(records).map((r,i)=>[i+1,r.reference,r.submittedAt,r.fullName,r.phone,r.email,r.studyCentre,r.groupCount,r.scoreSheet?.rowCount??0]); return [h,...body];
+  const body=projectRecords(records).map((r,i)=>[i+1,r.reference,r.submittedAt,r.fullName,r.phone,r.email,r.studyCentre,r.groupCount,validScoreRows(r).length]); return [h,...body];
 }
 function dissertationRegisterAoA(records) {
   const h=['S/N','Name of Student','Index Number','Dissertation Title','Programme',"Supervisor's Name"];
@@ -861,6 +1073,12 @@ function sendWorkbook(res,kind,records,filename){
   res.send(buffer);
 }
 
+function feedbackAdminInfoForWork(work, records, department){
+  const student=latestStudentDissertation(records,department,work?.indexNumber);
+  const email=student?.email || work?.feedback?.recipientEmail || '';
+  const state=!email?'unavailable':feedbackState(work?.feedback);
+  return {state,email,studentSubmissionId:student?.id||null,sentAt:work?.feedback?.sentAt||null,downloadedAt:work?.feedback?.downloadedAt||null,downloadCount:Number(work?.feedback?.downloadCount||0),lastEmailError:work?.feedback?.lastEmailError||''};
+}
 function adminRecordsMap(records, assignments=[]) {
   const activeMap=reservedAssessorMap(assignments);
   return records.slice().reverse().map(r=>{
@@ -869,15 +1087,16 @@ function adminRecordsMap(records, assignments=[]) {
       id:r.id, reference:r.reference, submittedAt:r.submittedAt, portalType:r.portalType||'project-work',
       name:r.fullName||r.studentName||r.assessorName||'', secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
       title:r.title||r.studentTitle||r.assessorTitle||'', firstName:r.firstName||r.studentFirstName||r.assessorFirstName||'', lastName:r.lastName||r.studentLastName||r.assessorLastName||'',
-      email:r.email||'', phone:r.phone||'', programme:r.programme||'', studyCentre:r.studyCentre||'', scoreRows:r.scoreSheet?.rowCount??0,
-      studentName:r.studentName||'', indexNumber:r.indexNumber||'', dissertationTopic:r.dissertationTopic||'', supervisorName:r.supervisorName||'',
+      email:r.email||'', phone:r.phone||'', programme:r.programme||'', studyCentre:r.studyCentre||'', scoreRows:validScoreRows(r).length,
+      studentName:r.studentName||'', indexNumber:r.indexNumber||'', dissertationTopic:r.dissertationTopic||'', supervisorName:r.supervisorName||'', submissionType:r.submissionType||'fresh',
       titleValidated:Boolean(r.titleValidation?.matched),
       assessorName:r.assessorName||'', workCount:r.workCount||1,
       assignmentCount:assignees.size, assignmentLimit:3, assignedAssessors:[...assignees.values()],
       reportFileCount:Array.isArray(r.files?.reportFile)?r.files.reportFile.length:(r.files?.reportFile?1:0),
       claimFormCount:Array.isArray(r.files?.claimForm)?r.files.claimForm.length:(r.files?.claimForm?1:0),
       dissertationFileCount:Array.isArray(r.files?.dissertationFile)?r.files.dissertationFile.length:(r.files?.dissertationFile?1:0),
-      dissertationFileName:Array.isArray(r.files?.dissertationFile)?(r.files.dissertationFile[0]?.originalName||''):(r.files?.dissertationFile?.originalName||'')
+      dissertationFileName:Array.isArray(r.files?.dissertationFile)?(r.files.dissertationFile[0]?.originalName||''):(r.files?.dissertationFile?.originalName||''),
+      feedbackStates:r.portalType==='assessor'?(r.works||[]).map(w=>feedbackAdminInfoForWork(w,records,r.department)):[]
     };
   });
 }
@@ -934,7 +1153,12 @@ app.get('/secure/dissertations/:token', async (req, res) => {
   if (!live.ok) return res.status(live.status).send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dissertation Access</title></head><body style="font-family:Arial,sans-serif;background:#f4f7fa;color:#182431"><main style="max-width:680px;margin:70px auto;background:#fff;padding:32px;border-radius:14px"><h2 style="color:#082b4c">Dissertation Access</h2><p>${htmlEscape(live.message)}</p></main></body></html>`);
   const count=(a.dissertationIds||[]).length;
   const expiry=new Date(a.expiresAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'})+' UTC';
-  res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Assigned Dissertations</title></head><body style="font-family:Arial,sans-serif;background:#f4f7fa;color:#182431;margin:0"><main style="max-width:680px;margin:60px auto;background:#fff;padding:32px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.08)"><div style="font-size:12px;text-transform:uppercase;color:#d4a72c;font-weight:bold">University of Cape Coast</div><h1 style="color:#082b4c;font-size:26px">Assigned Dissertations</h1><p>Dear ${htmlEscape(a.assessorName)},</p><p>You have <strong>${count}</strong> dissertation${count===1?'':'s'} assigned by ${htmlEscape(a.departmentName)}.</p><p>This link expires on <strong>${htmlEscape(expiry)}</strong>.</p><form method="get" action="/secure/dissertations/${encodeURIComponent(req.params.token)}/download"><button type="submit" style="background:#082b4c;color:white;border:0;border-radius:8px;padding:13px 18px;font-weight:bold;cursor:pointer">Download ${count} Dissertation${count===1?'':'s'} as ZIP</button></form><p style="margin-top:24px;color:#647382;font-size:13px">Keep this link private. If it has expired, contact the department administrator for a new link.</p></main></body></html>`);
+  const deadlineBase=new Date(a.sentAt||a.createdAt||Date.now());
+  const deadlines={earlyBirdDueAt:a.earlyBirdDueAt||assignmentDeadlineDates(deadlineBase).earlyBirdDueAt,assessmentDueAt:a.assessmentDueAt||assignmentDeadlineDates(deadlineBase).assessmentDueAt};
+  const early=new Date(deadlines.earlyBirdDueAt).toLocaleDateString('en-GB',{dateStyle:'long',timeZone:'UTC'});
+  const due=new Date(deadlines.assessmentDueAt).toLocaleDateString('en-GB',{dateStyle:'long',timeZone:'UTC'});
+  const submitUrl=`${baseUrlFor(req)}/assessor.html`;
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Assigned Dissertations</title></head><body style="font-family:Arial,sans-serif;background:#f4f7fa;color:#182431;margin:0"><main style="max-width:680px;margin:60px auto;background:#fff;padding:32px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.08)"><div style="font-size:12px;text-transform:uppercase;color:#d4a72c;font-weight:bold">University of Cape Coast</div><h1 style="color:#082b4c;font-size:26px">Assigned Dissertations</h1><p>Dear ${htmlEscape(a.assessorName)},</p><p>You have <strong>${count}</strong> dissertation${count===1?'':'s'} assigned by ${htmlEscape(a.departmentName)}.</p><p>This link expires on <strong>${htmlEscape(expiry)}</strong>.</p><form method="get" action="/secure/dissertations/${encodeURIComponent(req.params.token)}/download"><button type="submit" style="background:#082b4c;color:white;border:0;border-radius:8px;padding:13px 18px;font-weight:bold;cursor:pointer">Download ${count} Dissertation${count===1?'':'s'} as ZIP</button></form><div style="margin:22px 0;padding:16px;background:#fff7dc;border:1px solid #ead58c;border-radius:8px"><strong>Assessment timeline</strong><p style="margin:8px 0">Submit the report and claim form within <strong>8 weeks</strong>, by <strong>${htmlEscape(due)}</strong>.</p><p style="margin:8px 0 0">Submissions completed within <strong>4 weeks</strong>, by <strong>${htmlEscape(early)}</strong>, qualify for the <strong>Early Bird</strong> completion category.</p></div><p><a href="${htmlEscape(submitUrl)}" style="display:inline-block;background:#137a45;color:#fff;text-decoration:none;padding:11px 16px;border-radius:7px;font-weight:bold">Submit Assessment Report</a></p><p style="margin-top:24px;color:#647382;font-size:13px">Keep this link private. If it has expired, contact the department administrator for a new link.</p></main></body></html>`);
 });
 
 app.get('/secure/dissertations/:token/download', async (req, res) => {
@@ -972,6 +1196,29 @@ app.get('/secure/dissertations/:token/download', async (req, res) => {
     console.error('Secure dissertation ZIP download failed:', e);
     if(!res.headersSent) res.status(500).send('Could not prepare the dissertation ZIP file.'); else res.end();
   }
+});
+
+// SECURE STUDENT ASSESSMENT FEEDBACK LINKS
+app.get('/secure/feedback/:token', async(req,res)=>{
+  const found=await feedbackByToken(req.params.token);
+  const live=validateLiveFeedback(found);
+  res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Robots-Tag','noindex, nofollow');
+  res.setHeader('Content-Security-Policy',"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+  if(!live.ok) return res.status(live.status).send(`<!doctype html><html><body style="font-family:Arial,sans-serif;background:#f4f7fa;color:#182431"><main style="max-width:680px;margin:70px auto;background:#fff;padding:32px;border-radius:14px"><h2>Assessment Feedback</h2><p>${htmlEscape(live.message)}</p></main></body></html>`);
+  const {record,work}=found;const f=work.feedback;const expiry=new Date(f.expiresAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'})+' UTC';
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Assessment Feedback</title></head><body style="font-family:Arial,sans-serif;background:#f4f7fa;color:#182431;margin:0"><main style="max-width:680px;margin:60px auto;background:#fff;padding:32px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.08)"><div style="font-size:12px;text-transform:uppercase;color:#d4a72c;font-weight:bold">University of Cape Coast</div><h1 style="color:#082b4c;font-size:26px">Dissertation Assessment Feedback</h1><p>Dear ${htmlEscape(work.studentName||f.studentName||'Student')},</p><p>Your assessment feedback from ${htmlEscape(record.departmentName||'the department')} is ready.</p><p>The download contains the assessor's report${work.files?.dissertationFile?' and the reviewed dissertation supplied by the assessor':''}. The claim form is not included.</p><form method="get" action="/secure/feedback/${encodeURIComponent(req.params.token)}/download"><button type="submit" style="background:#082b4c;color:white;border:0;border-radius:8px;padding:13px 18px;font-weight:bold;cursor:pointer">Download Assessment Feedback</button></form><p style="margin-top:22px;color:#647382;font-size:13px">This secure link expires on <strong>${htmlEscape(expiry)}</strong>. Please keep it private.</p></main></body></html>`);
+});
+app.get('/secure/feedback/:token/download', async(req,res)=>{
+  const found=await feedbackByToken(req.params.token);const live=validateLiveFeedback(found);
+  res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');
+  if(!live.ok)return res.status(live.status).send(live.message);
+  const {record,work,workIndex}=found;const zipFiles=[];
+  const report=work.files?.reportFile;if(report){const fp=path.join(FILES_DIR,path.basename(report.storedName));if(fs.existsSync(fp))zipFiles.push({path:fp,name:safeBaseName(`Assessment Report - ${work.indexNumber||work.studentName}${path.extname(report.originalName||fp)}`),size:Number(report.size||fs.statSync(fp).size)});}
+  const reviewed=work.files?.dissertationFile;if(reviewed){const fp=path.join(FILES_DIR,path.basename(reviewed.storedName));if(fs.existsSync(fp))zipFiles.push({path:fp,name:safeBaseName(`Reviewed Dissertation - ${work.indexNumber||work.studentName}${path.extname(reviewed.originalName||fp)}`),size:Number(reviewed.size||fs.statSync(fp).size)});}
+  if(!zipFiles.length)return res.status(404).send('The assessment feedback files are unavailable.');
+  res.setHeader('Content-Type','application/zip');res.setHeader('Content-Disposition',`attachment; filename="${safeBaseName(`${record.reference}-${work.indexNumber||'student'}-feedback.zip`)}"`);
+  try{await streamZipArchive(res,zipFiles);await mutateAssessmentWork(record.id,workIndex,w=>{w.feedback.downloadedAt=w.feedback.downloadedAt||new Date().toISOString();w.feedback.lastDownloadedAt=new Date().toISOString();w.feedback.downloadCount=Number(w.feedback.downloadCount||0)+1;return true;});}
+  catch(e){console.error('Student feedback ZIP failed:',e);if(!res.headersSent)res.status(500).send('Could not prepare the feedback ZIP.');else res.end();}
 });
 
 // PUBLIC RESOURCES + DEVELOPER RESOURCE ADMINISTRATION
@@ -1041,14 +1288,51 @@ app.delete('/api/developer/resources/:id', developerAuth, async (req,res)=>{
   res.json({ ok:true, deleted:id });
 });
 
+// PUBLIC STUDY CENTRES + DEVELOPER ADMIN ACCOUNT / STUDY CENTRE MANAGEMENT
+app.get('/api/study-centres', async(_req,res)=>res.json(await readStudyCentres()));
+app.get('/api/developer/study-centres', developerAuth, async(_req,res)=>res.json(await readStudyCentres()));
+app.post('/api/developer/study-centres', developerAuth, upload.single('studyCentresCsv'), async(req,res)=>{
+  try{
+    if(!req.file) return res.status(400).json({error:'Select a CSV file containing study centres.'});
+    if(path.extname(req.file.originalname||'').toLowerCase()!=='.csv'){await fsp.unlink(req.file.path).catch(()=>{});return res.status(400).json({error:'Upload a CSV file. Put one study centre per row in the first column.'});}
+    const centres=parseStudyCentreCsv(req.file.path);await fsp.unlink(req.file.path).catch(()=>{});
+    const saved=await writeStudyCentres(centres);res.json({ok:true,count:saved.length,centres:saved});
+  }catch(e){if(req.file?.path)await fsp.unlink(req.file.path).catch(()=>{});res.status(400).json({error:e.message||'Could not update study centres.'});}
+});
+app.post('/api/developer/study-centres/reset', developerAuth, async(_req,res)=>{const centres=await writeStudyCentres(DEFAULT_STUDY_CENTRES);res.json({ok:true,count:centres.length,centres});});
+
+app.get('/api/developer/admin-users', developerAuth, async(_req,res)=>res.json((await readAdminUsers()).map(publicAdminUser)));
+app.post('/api/developer/admin-users', developerAuth, async(req,res)=>{
+  const name=cleanHumanText(req.body?.name).slice(0,160),username=cleanHumanText(req.body?.username).toLowerCase().slice(0,100),password=String(req.body?.password||'');
+  const role=String(req.body?.role||'viewer').trim();const departments=normalizeAdminDepartments(req.body?.departments);const sections=normalizeAdminSections(req.body?.sections);
+  if(!name||!username||password.length<10)return res.status(400).json({error:'Name, username and a password of at least 10 characters are required.'});
+  if(!/^[a-z0-9._@-]+$/i.test(username))return res.status(400).json({error:'Username may contain letters, numbers, dots, underscores, @ and hyphens only.'});
+  if(!ADMIN_ROLES.has(role))return res.status(400).json({error:'Select a valid role.'});
+  if(!departments.length)return res.status(400).json({error:'Assign at least one department.'});
+  if(!sections.length)return res.status(400).json({error:'Assign at least one portal section.'});
+  let error='';let created=null;
+  await mutateAdminUsers(list=>{
+    if(list.some(a=>String(a.username||'').toLowerCase()===username)){error='That administrator username already exists.';return null;}
+    const pw=hashPassword(password);created={id:crypto.randomUUID(),name,username,passwordSalt:pw.salt,passwordHash:pw.hash,role,departments,sections,active:true,createdAt:new Date().toISOString()};list.push(created);return created;
+  });
+  if(error)return res.status(400).json({error});res.status(201).json({ok:true,user:publicAdminUser(created)});
+});
+app.patch('/api/developer/admin-users/:id', developerAuth, async(req,res)=>{
+  const role=req.body?.role?String(req.body.role).trim():null;const departments=req.body?.departments!==undefined?normalizeAdminDepartments(req.body.departments):null;const sections=req.body?.sections!==undefined?normalizeAdminSections(req.body.sections):null;
+  let item=null;await mutateAdminUsers(list=>{const a=list.find(x=>x.id===req.params.id);if(!a)return null;if(role&&ADMIN_ROLES.has(role))a.role=role;if(departments?.length)a.departments=departments;if(sections?.length)a.sections=sections;if(req.body?.active!==undefined)a.active=Boolean(req.body.active);if(req.body?.password){const pw=String(req.body.password);if(pw.length<10)throw new Error('Password must be at least 10 characters.');const h=hashPassword(pw);a.passwordSalt=h.salt;a.passwordHash=h.hash;}item=publicAdminUser(a);return item;});
+  if(!item)return res.status(404).json({error:'Administrator account not found.'});res.json({ok:true,user:item});
+});
+app.delete('/api/developer/admin-users/:id', developerAuth, async(req,res)=>{let removed=false;await mutateAdminUsers(list=>{const i=list.findIndex(x=>x.id===req.params.id);if(i>=0){list.splice(i,1);removed=true;}return removed;});if(!removed)return res.status(404).json({error:'Administrator account not found.'});res.json({ok:true});});
+
 // DEPARTMENT ADMIN: dissertation assignment by secure emailed link
 app.get('/api/admin/:department/dissertation-assignments', departmentAuth, async(req,res)=>{
+  if(!adminCan(req,'dissertation','viewer'))return res.json([]);
   const records=dissertationRecords(recordsForDepartment(await readDb(),req.adminDepartment));
   const list=(await readAssignments()).filter(a=>a.department===req.adminDepartment).slice().reverse().map(a=>publicAssignment(a,records));
   res.json(list);
 });
 
-app.post('/api/admin/:department/dissertation-assignments/delete-selected', departmentAuth, async(req,res)=>{
+app.post('/api/admin/:department/dissertation-assignments/delete-selected', departmentAuth, requireAdminAccess('dissertation','administrator'), async(req,res)=>{
   const ids=Array.isArray(req.body?.ids)?[...new Set(req.body.ids.map(String))]:[];
   if(!ids.length) return res.status(400).json({error:'Select at least one dissertation assignment to delete.'});
   if(ids.length>500) return res.status(400).json({error:'A maximum of 500 assignment records can be deleted at once.'});
@@ -1064,7 +1348,7 @@ app.post('/api/admin/:department/dissertation-assignments/delete-selected', depa
   res.json({ok:true,deleted});
 });
 
-app.post('/api/admin/:department/dissertation-assignments', departmentAuth, async(req,res)=>{
+app.post('/api/admin/:department/dissertation-assignments', departmentAuth, requireAdminAccess('dissertation','officer'), async(req,res)=>{
   const ids=Array.isArray(req.body?.ids)?[...new Set(req.body.ids.map(String))]:[];
   const assessorTitle=String(req.body?.assessorTitle||'').trim();
   const assessorFirstName=String(req.body?.assessorFirstName||'').trim();
@@ -1092,10 +1376,11 @@ app.post('/api/admin/:department/dissertation-assignments', departmentAuth, asyn
   const token=newAssignmentToken();
   const now=new Date();
   const expiresAt=new Date(now.getTime()+expiryDays*24*60*60*1000).toISOString();
+  const deadlines=assignmentDeadlineDates(now);
   const assignment={
     id:crypto.randomUUID(), reference:makeReference('ASSIGN'), department:req.adminDepartment, departmentName:req.adminDepartmentName,
     assessorTitle, assessorFirstName, assessorLastName, assessorName, assessorEmail, dissertationIds:ids,
-    createdAt:now.toISOString(), expiresAt, tokenHash:assignmentTokenHash(token),
+    createdAt:now.toISOString(), expiresAt, earlyBirdDueAt:deadlines.earlyBirdDueAt, assessmentDueAt:deadlines.assessmentDueAt, tokenHash:assignmentTokenHash(token),
     sentAt:null, downloadedAt:null, lastDownloadedAt:null, downloadCount:0, revokedAt:null, emailStatus:'pending', resendCount:0, message
   };
   let reservationError='';
@@ -1125,7 +1410,7 @@ app.post('/api/admin/:department/dissertation-assignments', departmentAuth, asyn
   if(!reserved) return res.status(400).json({error:reservationError||'The dissertation assignment could not be created.'});
   const secureUrl=`${baseUrlFor(req)}/secure/dissertations/${token}`;
   try {
-    const email=await sendGmailEmail({to:assessorEmail,assessorName,departmentName:req.adminDepartmentName,dissertationCount:ids.length,expiresAt,secureUrl,message});
+    const email=await sendGmailEmail({to:assessorEmail,assessorName,departmentName:req.adminDepartmentName,dissertationCount:ids.length,expiresAt,secureUrl,assessorSubmissionUrl:`${baseUrlFor(req)}/assessor.html`,earlyBirdDueAt:assignment.earlyBirdDueAt,assessmentDueAt:assignment.assessmentDueAt,message});
     await mutateAssignments(list=>{const a=list.find(x=>x.id===assignment.id);if(a){a.sentAt=new Date().toISOString();a.emailStatus='sent';a.emailProvider='gmail';a.emailProviderMessageId=email.id||'';a.lastEmailError='';}});
     const final=(await readAssignments()).find(x=>x.id===assignment.id)||assignment;
     res.status(201).json({ok:true,assignment:publicAssignment(final)});
@@ -1136,7 +1421,7 @@ app.post('/api/admin/:department/dissertation-assignments', departmentAuth, asyn
   }
 });
 
-app.post('/api/admin/:department/dissertation-assignments/:id/revoke', departmentAuth, async(req,res)=>{
+app.post('/api/admin/:department/dissertation-assignments/:id/revoke', departmentAuth, requireAdminAccess('dissertation','officer'), async(req,res)=>{
   const item=await mutateAssignments(list=>{
     const a=list.find(x=>x.id===req.params.id&&x.department===req.adminDepartment);
     if(!a) return null;
@@ -1146,7 +1431,7 @@ app.post('/api/admin/:department/dissertation-assignments/:id/revoke', departmen
   res.json({ok:true,assignment:item});
 });
 
-app.post('/api/admin/:department/dissertation-assignments/:id/resend', departmentAuth, async(req,res)=>{
+app.post('/api/admin/:department/dissertation-assignments/:id/resend', departmentAuth, requireAdminAccess('dissertation','officer'), async(req,res)=>{
   if(!gmailConfigured()) return res.status(503).json({error:'Email sending is not configured. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN and GMAIL_SENDER_EMAIL in Render.'});
   const all=await readAssignments();
   const existing=all.find(x=>x.id===req.params.id&&x.department===req.adminDepartment);
@@ -1183,7 +1468,10 @@ app.post('/api/admin/:department/dissertation-assignments/:id/resend', departmen
   await mutateAssignments(list=>{const a=list.find(x=>x.id===existing.id);if(a){a.tokenHash=assignmentTokenHash(token);a.expiresAt=expiresAt;a.revokedAt=null;a.emailStatus='pending';a.lastEmailError='';a.resendCount=Number(a.resendCount||0)+1;}});
   const secureUrl=`${baseUrlFor(req)}/secure/dissertations/${token}`;
   try {
-    const email=await sendGmailEmail({to:existing.assessorEmail,assessorName:existing.assessorName,departmentName:existing.departmentName,dissertationCount:(existing.dissertationIds||[]).length,expiresAt,secureUrl,message:existing.message||''});
+    const deadlineBase=new Date(existing.sentAt||existing.createdAt||Date.now());
+    const deadlines={earlyBirdDueAt:existing.earlyBirdDueAt||assignmentDeadlineDates(deadlineBase).earlyBirdDueAt,assessmentDueAt:existing.assessmentDueAt||assignmentDeadlineDates(deadlineBase).assessmentDueAt};
+    await mutateAssignments(list=>{const a=list.find(x=>x.id===existing.id);if(a){a.earlyBirdDueAt=deadlines.earlyBirdDueAt;a.assessmentDueAt=deadlines.assessmentDueAt;}});
+    const email=await sendGmailEmail({to:existing.assessorEmail,assessorName:existing.assessorName,departmentName:existing.departmentName,dissertationCount:(existing.dissertationIds||[]).length,expiresAt,secureUrl,assessorSubmissionUrl:`${baseUrlFor(req)}/assessor.html`,earlyBirdDueAt:deadlines.earlyBirdDueAt,assessmentDueAt:deadlines.assessmentDueAt,message:existing.message||''});
     const item=await mutateAssignments(list=>{const a=list.find(x=>x.id===existing.id);if(a){a.sentAt=new Date().toISOString();a.emailStatus='sent';a.emailProvider='gmail';a.emailProviderMessageId=email.id||'';a.lastEmailError='';return publicAssignment(a);}return null;});
     res.json({ok:true,assignment:item});
   } catch(e) {
@@ -1200,30 +1488,36 @@ app.get('/admin/admin.js',(_req,res)=>res.sendFile(path.join(__dirname,'admin','
 app.get('/admin/:department',departmentAuth,(req,res)=>res.sendFile(path.join(__dirname,'admin','index.html')));
 
 app.get('/api/admin/:department/info', departmentAuth, async(req,res)=>{
-  res.json({ department:req.adminDepartment, departmentName:req.adminDepartmentName });
+  res.json({ department:req.adminDepartment, departmentName:req.adminDepartmentName, admin:{name:req.adminIdentity?.name||'',username:req.adminIdentity?.username||'',role:req.adminIdentity?.role||'viewer',sections:req.adminIdentity?.sections||[],master:Boolean(req.adminIdentity?.master)} });
 });
 app.get('/api/admin/:department/submissions', departmentAuth, async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
-  const assignments=(await readAssignments()).filter(a=>a.department===req.adminDepartment);
-  res.json(adminRecordsMap(records,assignments));
+  const assignments=adminCan(req,'dissertation','viewer')?(await readAssignments()).filter(a=>a.department===req.adminDepartment):[];
+  const mapped=adminRecordsMap(records,assignments).filter(r=>adminCan(req,portalSectionForRecord(r),'viewer'));
+  res.json(mapped);
 });
 app.delete('/api/admin/:department/submissions/:id', departmentAuth, async(req,res)=>{
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);const target=records.find(r=>r.id===req.params.id);
+  if(!target)return res.status(404).json({error:'Submission not found in this department.'});
+  if(!requireRecordAccess(req,res,target,'administrator'))return;
   const result=await deleteDepartmentSubmissions(req.adminDepartment,[req.params.id]);
-  if(!result.deleted) return res.status(404).json({error:'Submission not found in this department.'});
   res.json({ok:true,deleted:result.deleted});
 });
 app.post('/api/admin/:department/submissions/delete-selected', departmentAuth, async(req,res)=>{
   const ids=Array.isArray(req.body?.ids)?[...new Set(req.body.ids.map(String))]:[];
   if(!ids.length) return res.status(400).json({error:'Select at least one submission to delete.'});
   if(ids.length>500) return res.status(400).json({error:'A maximum of 500 submissions can be deleted at once.'});
-  const result=await deleteDepartmentSubmissions(req.adminDepartment,ids);
-  if(!result.deleted) return res.status(404).json({error:'No selected submissions were found in this department.'});
+  const all=recordsForDepartment(await readDb(),req.adminDepartment);const targets=all.filter(r=>ids.includes(String(r.id)));
+  if(!targets.length)return res.status(404).json({error:'No selected submissions were found in this department.'});
+  if(targets.some(r=>!adminCan(req,portalSectionForRecord(r),'administrator')))return res.status(403).json({error:'Your administrator account does not have permission to delete one or more selected submissions.'});
+  const result=await deleteDepartmentSubmissions(req.adminDepartment,targets.map(r=>r.id));
   res.json({ok:true,deleted:result.deleted});
 });
 app.get('/api/admin/:department/submissions/:id', departmentAuth, async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   const r=records.find(x=>x.id===req.params.id);
   if(!r)return res.status(404).json({error:'Submission not found in this department.'});
+  if(!requireRecordAccess(req,res,r,'viewer'))return;
   res.json(r);
 });
 app.get('/api/admin/:department/submissions/:id/works/:workIndex/files/:kind', departmentAuth, async(req,res)=>{
@@ -1231,6 +1525,7 @@ app.get('/api/admin/:department/submissions/:id/works/:workIndex/files/:kind', d
   const r=records.find(x=>x.id===req.params.id);
   if(!r)return res.status(404).send('Submission not found in this department.');
   if(r.portalType!=='assessor')return res.status(400).send('Work-level files are available only for assessment submissions.');
+  if(!adminCan(req,'assessor','viewer'))return res.status(403).send('You do not have access to assessment report files.');
   const workIndex=Number.parseInt(req.params.workIndex,10);
   const work=Array.isArray(r.works)?r.works[workIndex]:null;
   if(!work)return res.status(404).send('Assessment work not found.');
@@ -1243,11 +1538,35 @@ app.get('/api/admin/:department/submissions/:id/works/:workIndex/files/:kind', d
   res.download(fp,item.originalName);
 });
 
+app.post('/api/admin/:department/submissions/:id/works/:workIndex/forward-to-student', departmentAuth, requireAdminAccess('assessor','officer'), async(req,res)=>{
+  if(!gmailConfigured())return res.status(503).json({error:'Email sending is not configured for Gmail API.'});
+  const all=await readDb();const record=all.find(r=>r.id===req.params.id&&r.department===req.adminDepartment&&r.portalType==='assessor');
+  if(!record)return res.status(404).json({error:'Assessment submission not found.'});
+  const workIndex=Number.parseInt(req.params.workIndex,10),work=record.works?.[workIndex];if(!work)return res.status(404).json({error:'Assessment work not found.'});
+  const student=latestStudentDissertation(all,req.adminDepartment,work.indexNumber);
+  if(!student||!isEmail(student.email))return res.status(400).json({error:`No dissertation submission with a valid student email was found for index number ${work.indexNumber||''}.`});
+  if(!work.files?.reportFile)return res.status(400).json({error:'This work has no assessment report to forward.'});
+  const token=newAssignmentToken(),now=new Date(),expiresAt=new Date(now.getTime()+STUDENT_FEEDBACK_EXPIRY_DAYS*24*60*60*1000).toISOString();
+  work.feedback={...(work.feedback||{}),tokenHash:assignmentTokenHash(token),recipientEmail:student.email,studentSubmissionId:student.id,createdAt:work.feedback?.createdAt||now.toISOString(),expiresAt,sentAt:null,downloadedAt:null,lastDownloadedAt:null,downloadCount:0,revokedAt:null,emailStatus:'pending',lastEmailError:''};
+  await writeDb(all);
+  const secureUrl=`${baseUrlFor(req)}/secure/feedback/${token}`;
+  try{
+    const email=await sendStudentFeedbackEmail({to:student.email,studentName:student.studentName||work.studentName,departmentName:req.adminDepartmentName,assessorName:record.assessorName,secureUrl,expiresAt});
+    await mutateAssessmentWork(record.id,workIndex,w=>{w.feedback.sentAt=new Date().toISOString();w.feedback.emailStatus='sent';w.feedback.emailProvider='gmail';w.feedback.emailProviderMessageId=email.id||'';w.feedback.lastEmailError='';return true;});
+    res.json({ok:true,email:student.email,status:'sent'});
+  }catch(e){console.error('Student feedback email failed:',e);await mutateAssessmentWork(record.id,workIndex,w=>{w.feedback.emailStatus='failed';w.feedback.lastEmailError=String(e.message||e).slice(0,500);return true;});res.status(502).json({error:`The feedback link was prepared, but the email could not be sent: ${e.message||e}`});}
+});
+app.post('/api/admin/:department/submissions/:id/works/:workIndex/revoke-feedback', departmentAuth, requireAdminAccess('assessor','officer'), async(req,res)=>{
+  const workIndex=Number.parseInt(req.params.workIndex,10);const result=await mutateAssessmentWork(req.params.id,workIndex,(w,r)=>{if(r.department!==req.adminDepartment||!w.feedback)return null;w.feedback.revokedAt=new Date().toISOString();w.feedback.emailStatus='revoked';return true;});
+  if(!result)return res.status(404).json({error:'Feedback link not found.'});res.json({ok:true});
+});
+
 app.get('/api/admin/:department/submissions/:id/files/:kind/:index?', departmentAuth, async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   const r=records.find(x=>x.id===req.params.id);
   if(!r)return res.status(404).send('Submission not found in this department.');
-  const allowed=['claimForm','reportFile','scoresFile','completedWork','dissertationFile'];
+  if(!adminCan(req,portalSectionForRecord(r),'viewer'))return res.status(403).send('You do not have access to this submission section.');
+  const allowed=['claimForm','reportFile','scoresFile','completedWork','dissertationFile','reviewerResponses'];
   if(!allowed.includes(req.params.kind))return res.status(400).send('Invalid file type.');
   let item=r.files?.[req.params.kind];
   if(Array.isArray(item))item=item[Number(req.params.index||0)];
@@ -1256,7 +1575,7 @@ app.get('/api/admin/:department/submissions/:id/files/:kind/:index?', department
   if(!fs.existsSync(fp))return res.status(404).send('Stored file is unavailable.');
   res.download(fp,item.originalName);
 });
-app.get('/api/admin/:department/submissions/:id/scores.xlsx', departmentAuth, async(req,res)=>{
+app.get('/api/admin/:department/submissions/:id/scores.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   const r=records.find(x=>x.id===req.params.id);
   if(!r||!(r.portalType==='project-work'||!r.portalType))return res.status(404).send('Project work submission not found.');
@@ -1264,25 +1583,25 @@ app.get('/api/admin/:department/submissions/:id/scores.xlsx', departmentAuth, as
 });
 
 // UNDERGRADUATE PROJECT WORK exports only
-app.get('/api/admin/:department/export/project-scores.xlsx', departmentAuth, async(req,res)=>{
+app.get('/api/admin/:department/export/project-scores.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   sendWorkbook(res,'scores',records,`${req.adminDepartment}-consolidated-project-scores.xlsx`);
 });
-app.get('/api/admin/:department/export/project-register.xlsx', departmentAuth, async(req,res)=>{
+app.get('/api/admin/:department/export/project-register.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   sendWorkbook(res,'project-register',records,`${req.adminDepartment}-project-work-register.xlsx`);
 });
-app.get('/api/admin/:department/export/project-master.xlsx', departmentAuth, async(req,res)=>{
+app.get('/api/admin/:department/export/project-master.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   sendWorkbook(res,'project-master',records,`${req.adminDepartment}-master-project-scores.xlsx`);
 });
 
 // DISSERTATION register and selected-document ZIP. No dissertation content is consolidated.
-app.get('/api/admin/:department/export/dissertation-register.xlsx', departmentAuth, async(req,res)=>{
+app.get('/api/admin/:department/export/dissertation-register.xlsx', departmentAuth, requireAdminAccess('dissertation','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   sendWorkbook(res,'dissertation-register',records,`${req.adminDepartment}-dissertation-register.xlsx`);
 });
-app.post('/api/admin/:department/dissertations/download-selected', departmentAuth, async(req,res)=>{
+app.post('/api/admin/:department/dissertations/download-selected', departmentAuth, requireAdminAccess('dissertation','viewer'), async(req,res)=>{
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
   if (!ids.length) return res.status(400).json({ error:'Select at least one dissertation.' });
   if (ids.length > 500) return res.status(400).json({ error:'A maximum of 500 dissertations can be downloaded at once.' });
@@ -1312,17 +1631,17 @@ app.post('/api/admin/:department/dissertations/download-selected', departmentAut
 });
 
 app.get('/api/admin/:department/summary',departmentAuth,async(req,res)=>{
-  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  const records=recordsForDepartment(await readDb(), req.adminDepartment).filter(r=>adminCan(req,portalSectionForRecord(r),'viewer'));
   res.json({
     total:records.length,
-    project:projectRecords(records).length,
-    dissertation:dissertationRecords(records).length,
-    assessor:assessorRecords(records).length,
-    scoreRows:allScoreRows(records).length
+    project:adminCan(req,'project-work','viewer')?projectRecords(records).length:0,
+    dissertation:adminCan(req,'dissertation','viewer')?dissertationRecords(records).length:0,
+    assessor:adminCan(req,'assessor','viewer')?assessorRecords(records).length:0,
+    scoreRows:adminCan(req,'project-work','viewer')?allScoreRows(records).length:0
   });
 });
 
-app.get('/health',async(_req,res)=>res.json({ok:true,departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',resources:(await readResources()).length+BUILTIN_RESOURCES.length,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'}));
+app.get('/health',async(_req,res)=>res.json({ok:true,departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:(await readAdminUsers()).length,studyCentres:(await readStudyCentres()).length,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'}));
 app.get('/vendor/xlsx.full.min.js', (_req,res)=>res.sendFile(path.join(__dirname,'node_modules','xlsx','dist','xlsx.full.min.js')));
 app.use(express.static(path.join(__dirname,'public'),{extensions:['html']}));
 app.use((err,req,res,_next)=>{

@@ -1,10 +1,30 @@
-UCC Submission Portal v9 Admin Tabs & Assessor Status Patch
+UCC Submission Portal v10 patch over v9
 
-Replace these files in the current v8/v7-derived repository:
-1. server.js
-2. admin/index.html
-3. admin/admin.js
-4. admin/admin.css
+Replace these files in the existing repository:
+- server.js
+- package.json
+- render.yaml
+- README.md
+- admin/admin.css
+- admin/admin.js
+- admin/index.html
+- developer/developer.css
+- developer/developer.js
+- developer/index.html
+- public/assessor.html
+- public/common.js
+- public/dissertation.html
+- public/index.html
+- public/project-work.html
 
-No new npm packages or Render environment variables are required.
-Redeploy using the existing npm install / npm start commands.
+No new npm dependency was added.
+
+New optional Render environment variable:
+STUDENT_FEEDBACK_EXPIRY_DAYS=30
+
+Existing Gmail variables remain required.
+
+Runtime-created persistent data files:
+- data/admin-users.json
+- data/study-centres.json
+These are created automatically under STORAGE_DIR and do not need to be committed.
