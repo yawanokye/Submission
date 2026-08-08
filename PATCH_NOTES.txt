@@ -1,0 +1,10 @@
+UCC Submission Portal v9 Admin Tabs & Assessor Status Patch
+
+Replace these files in the current v8/v7-derived repository:
+1. server.js
+2. admin/index.html
+3. admin/admin.js
+4. admin/admin.css
+
+No new npm packages or Render environment variables are required.
+Redeploy using the existing npm install / npm start commands.

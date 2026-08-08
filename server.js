@@ -436,11 +436,15 @@ function assignmentState(a) {
   if (a.sentAt) return 'sent';
   return a.emailStatus || 'pending';
 }
-function publicAssignment(a) {
+function publicAssignment(a, dissertationRecordsForDepartment=[]) {
+  const linked=(a.dissertationIds||[]).map(id=>dissertationRecordsForDepartment.find(r=>r.id===id)).filter(Boolean);
   return {
     id:a.id, reference:a.reference, department:a.department, departmentName:a.departmentName,
     assessorTitle:a.assessorTitle || '', assessorFirstName:a.assessorFirstName || '', assessorLastName:a.assessorLastName || '',
     assessorName:a.assessorName, assessorEmail:a.assessorEmail, dissertationCount:(a.dissertationIds || []).length,
+    dissertationIds:(a.dissertationIds||[]).slice(),
+    studentNames:linked.map(r=>r.studentName||r.name||r.reference).filter(Boolean),
+    studentIndexNumbers:linked.map(r=>r.indexNumber||'').filter(Boolean),
     createdAt:a.createdAt, sentAt:a.sentAt || null, expiresAt:a.expiresAt, downloadedAt:a.downloadedAt || null,
     downloadCount:Number(a.downloadCount || 0), revokedAt:a.revokedAt || null, emailStatus:a.emailStatus || 'pending',
     status:assignmentState(a), resendCount:Number(a.resendCount || 0), lastEmailError:a.lastEmailError || ''
@@ -461,8 +465,23 @@ function activeAssessorMap(assignments, includePending=false) {
   }
   return map;
 }
+function reservedAssessorMap(assignments) {
+  const map = new Map();
+  for (const a of assignments || []) {
+    if (a.revokedAt) continue;
+    const email = String(a.assessorEmail || '').trim().toLowerCase();
+    const name = a.assessorName || a.assessorEmail || '';
+    const key = personKey(name,email);
+    if (!key) continue;
+    for (const id of a.dissertationIds || []) {
+      if (!map.has(id)) map.set(id, new Map());
+      if (!map.get(id).has(key)) map.get(id).set(key, {email,name,assignmentId:a.id});
+    }
+  }
+  return map;
+}
 function dissertationAssignmentInfo(dissertationId, assignments) {
-  const m = activeAssessorMap(assignments).get(dissertationId) || new Map();
+  const m = reservedAssessorMap(assignments).get(dissertationId) || new Map();
   return { count:m.size, assessors:[...m.values()] };
 }
 function gmailConfigured() {
@@ -843,7 +862,7 @@ function sendWorkbook(res,kind,records,filename){
 }
 
 function adminRecordsMap(records, assignments=[]) {
-  const activeMap=activeAssessorMap(assignments);
+  const activeMap=reservedAssessorMap(assignments);
   return records.slice().reverse().map(r=>{
     const assignees=activeMap.get(r.id)||new Map();
     return {
@@ -1024,8 +1043,25 @@ app.delete('/api/developer/resources/:id', developerAuth, async (req,res)=>{
 
 // DEPARTMENT ADMIN: dissertation assignment by secure emailed link
 app.get('/api/admin/:department/dissertation-assignments', departmentAuth, async(req,res)=>{
-  const list=(await readAssignments()).filter(a=>a.department===req.adminDepartment).slice().reverse().map(publicAssignment);
+  const records=dissertationRecords(recordsForDepartment(await readDb(),req.adminDepartment));
+  const list=(await readAssignments()).filter(a=>a.department===req.adminDepartment).slice().reverse().map(a=>publicAssignment(a,records));
   res.json(list);
+});
+
+app.post('/api/admin/:department/dissertation-assignments/delete-selected', departmentAuth, async(req,res)=>{
+  const ids=Array.isArray(req.body?.ids)?[...new Set(req.body.ids.map(String))]:[];
+  if(!ids.length) return res.status(400).json({error:'Select at least one dissertation assignment to delete.'});
+  if(ids.length>500) return res.status(400).json({error:'A maximum of 500 assignment records can be deleted at once.'});
+  const idSet=new Set(ids);
+  const deleted=await mutateAssignments(list=>{
+    let count=0;
+    for(let i=list.length-1;i>=0;i--){
+      if(list[i].department===req.adminDepartment && idSet.has(String(list[i].id))){list.splice(i,1);count++;}
+    }
+    return count;
+  });
+  if(!deleted) return res.status(404).json({error:'No selected dissertation assignments were found in this department.'});
+  res.json({ok:true,deleted});
 });
 
 app.post('/api/admin/:department/dissertation-assignments', departmentAuth, async(req,res)=>{
@@ -1064,7 +1100,7 @@ app.post('/api/admin/:department/dissertation-assignments', departmentAuth, asyn
   };
   let reservationError='';
   const reserved=await mutateAssignments(list=>{
-    const activeMap=activeAssessorMap(list.filter(a=>a.department===req.adminDepartment),true);
+    const activeMap=reservedAssessorMap(list.filter(a=>a.department===req.adminDepartment));
     const alreadyAssigned=[];
     const atLimit=[];
     for(const r of selected){
@@ -1115,6 +1151,32 @@ app.post('/api/admin/:department/dissertation-assignments/:id/resend', departmen
   const all=await readAssignments();
   const existing=all.find(x=>x.id===req.params.id&&x.department===req.adminDepartment);
   if(!existing) return res.status(404).json({error:'Assignment not found.'});
+  if(existing.revokedAt){
+    const records=dissertationRecords(recordsForDepartment(await readDb(),req.adminDepartment));
+    const selected=(existing.dissertationIds||[]).map(id=>records.find(r=>r.id===id)).filter(Boolean);
+    const supervisorConflicts=selected.filter(r=>samePersonName(existing.assessorName,r.supervisorName));
+    if(supervisorConflicts.length){
+      const labels=supervisorConflicts.slice(0,5).map(r=>r.indexNumber||r.studentName||r.reference).join(', ');
+      return res.status(400).json({error:`This revoked assignment cannot be reactivated because the assessor is recorded as supervisor for: ${labels}.`});
+    }
+    const otherAssignments=all.filter(a=>a.department===req.adminDepartment && a.id!==existing.id);
+    const reservedMap=reservedAssessorMap(otherAssignments);
+    const duplicates=[]; const atLimit=[];
+    for(const r of selected){
+      const people=reservedMap.get(r.id)||new Map();
+      const duplicate=[...people.values()].some(p=>String(p.email||'').toLowerCase()===String(existing.assessorEmail||'').toLowerCase() || samePersonName(p.name,existing.assessorName));
+      if(duplicate) duplicates.push(r);
+      if(people.size>=3) atLimit.push(r);
+    }
+    if(duplicates.length){
+      const labels=duplicates.slice(0,5).map(r=>r.indexNumber||r.studentName||r.reference).join(', ');
+      return res.status(400).json({error:`This assessor is already assigned to the following dissertation${duplicates.length===1?'':'s'} in another active assignment: ${labels}.`});
+    }
+    if(atLimit.length){
+      const labels=atLimit.slice(0,5).map(r=>r.indexNumber||r.studentName||r.reference).join(', ');
+      return res.status(400).json({error:`The following dissertation${atLimit.length===1?' has':'s have'} already reached the maximum of 3 assessors: ${labels}.`});
+    }
+  }
   const expiryDays=Math.min(60,Math.max(1,Number.parseInt(req.body?.expiryDays,10)||ASSIGNMENT_EXPIRY_DAYS));
   const token=newAssignmentToken();
   const expiresAt=new Date(Date.now()+expiryDays*24*60*60*1000).toISOString();
