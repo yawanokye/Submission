@@ -5,6 +5,8 @@ let dissertationAssignments=[];
 const selectedProject=new Set();
 const selectedDissertations=new Set();
 const selectedAssessors=new Set();
+const selectedAssignments=new Set();
+const dissertationSort=document.getElementById('dissertationSort');
 const search=document.getElementById('search');
 const dialog=document.getElementById('detailDialog');
 const assignmentDialog=document.getElementById('assignmentDialog');
@@ -23,9 +25,13 @@ async function load(){
   pruneSet(selectedProject,new Set(byType('project-work').map(x=>x.id)));
   pruneSet(selectedDissertations,new Set(byType('dissertation').map(x=>x.id)));
   pruneSet(selectedAssessors,new Set(byType('assessor').map(x=>x.id)));
+  pruneSet(selectedAssignments,new Set(dissertationAssignments.map(x=>x.id)));
   document.getElementById('departmentName').textContent=info.departmentName;
   document.title=`${info.departmentName} · Submission Administration`;
   for(const k of ['total','project','dissertation','assessor','scoreRows'])document.getElementById(k).textContent=s[k]??0;
+  document.getElementById('projectTabCount').textContent=s.project??0;
+  document.getElementById('dissertationTabCount').textContent=s.dissertation??0;
+  document.getElementById('assessorTabCount').textContent=s.assessor??0;
   document.getElementById('projectScoresLink').href=`${apiBase}/export/project-scores.xlsx`;
   document.getElementById('projectMasterLink').href=`${apiBase}/export/project-master.xlsx`;
   document.getElementById('projectRegisterLink').href=`${apiBase}/export/project-register.xlsx`;
@@ -42,15 +48,26 @@ function renderProject(){
   tbody.querySelectorAll('.project-check').forEach(cb=>cb.addEventListener('change',()=>{cb.checked?selectedProject.add(cb.dataset.id):selectedProject.delete(cb.dataset.id);updateSelectionButtons();}));
 }
 
+function assessorStateClass(count){
+  count=Number(count||0);
+  return count===0?'red':count===1?'amber':'green';
+}
 function assessorCounter(s){
   const count=Number(s.assignmentCount||0),limit=Number(s.assignmentLimit||3);
   const names=(s.assignedAssessors||[]).map(a=>a.name||a.email).filter(Boolean);
-  const cls=count>=limit?'counter-full':count===0?'counter-empty':'counter-used';
-  return `<span class="assignment-counter ${cls}" title="${esc(names.join(', ')||'No assessor assigned')}">${count} / ${limit}</span>${names.length?`<small class="assessor-list">${esc(names.join(', '))}</small>`:''}`;
+  const state=assessorStateClass(count);
+  return `<span class="assignment-counter counter-${state}" title="${esc(names.join(', ')||'No assessor assigned')}">${count} / ${limit}</span>${names.length?`<small class="assessor-list">${esc(names.join(', '))}</small>`:''}`;
+}
+function dissertationSortRows(rows){
+  const mode=dissertationSort?.value||'newest';
+  const copy=rows.slice();
+  if(mode==='assessors-asc') copy.sort((a,b)=>Number(a.assignmentCount||0)-Number(b.assignmentCount||0)||new Date(b.submittedAt||0)-new Date(a.submittedAt||0));
+  else if(mode==='assessors-desc') copy.sort((a,b)=>Number(b.assignmentCount||0)-Number(a.assignmentCount||0)||new Date(b.submittedAt||0)-new Date(a.submittedAt||0));
+  return copy;
 }
 function renderDissertations(){
-  const rows=byType('dissertation').filter(matchesSearch),tbody=document.getElementById('dissertationRows');
-  tbody.innerHTML=rows.map((s,i)=>`<tr><td>${i+1}</td><td>${esc(s.studentName||s.name)}</td><td><span class="ref">${esc(s.indexNumber)}</span></td><td class="title-cell">${esc(s.dissertationTopic)}${s.titleValidated?'<br><small class="validated-text">✓ Title validated</small>':''}</td><td>${esc(s.programme)}</td><td>${esc(s.supervisorName||s.secondaryName)}</td><td>${assessorCounter(s)}</td><td class="select-cell"><input class="row-check dissertation-check" type="checkbox" data-id="${esc(s.id)}" ${selectedDissertations.has(s.id)?'checked':''}></td><td><div class="files"><a class="btn small primary" href="${apiBase}/submissions/${s.id}/files/dissertationFile">Download</a><button class="btn small" onclick="showDetail('${s.id}')">View</button><button class="btn small danger" onclick="deleteOneSubmission('${s.id}','dissertation')">Delete</button></div></td></tr>`).join('');
+  const rows=dissertationSortRows(byType('dissertation').filter(matchesSearch)),tbody=document.getElementById('dissertationRows');
+  tbody.innerHTML=rows.map((s,i)=>{const state=assessorStateClass(s.assignmentCount);return `<tr class="dissertation-state-${state}"><td>${i+1}</td><td>${esc(s.studentName||s.name)}</td><td><span class="ref">${esc(s.indexNumber)}</span></td><td class="title-cell">${esc(s.dissertationTopic)}${s.titleValidated?'<br><small class="validated-text">✓ Title validated</small>':''}</td><td>${esc(s.programme)}</td><td>${esc(s.supervisorName||s.secondaryName)}</td><td>${assessorCounter(s)}</td><td class="select-cell"><input class="row-check dissertation-check" type="checkbox" data-id="${esc(s.id)}" ${selectedDissertations.has(s.id)?'checked':''}></td><td><div class="files"><a class="btn small primary" href="${apiBase}/submissions/${s.id}/files/dissertationFile">Download</a><button class="btn small" onclick="showDetail('${s.id}')">View</button><button class="btn small danger" onclick="deleteOneSubmission('${s.id}','dissertation')">Delete</button></div></td></tr>`}).join('');
   document.getElementById('dissertationEmpty').classList.toggle('hidden',rows.length>0);
   tbody.querySelectorAll('.dissertation-check').forEach(cb=>cb.addEventListener('change',()=>{cb.checked?selectedDissertations.add(cb.dataset.id):selectedDissertations.delete(cb.dataset.id);updateSelectionButtons();}));
 }
@@ -58,8 +75,9 @@ function renderDissertations(){
 function assignmentStatusBadge(a){const labelMap={'sent':'Sent','downloaded':'Downloaded','expired':'Expired','revoked':'Revoked','email-failed':'Email failed','pending':'Pending'};const label=labelMap[a.status]||a.status||'Pending';return `<span class="status-badge status-${esc(a.status||'pending')}">${esc(label)}</span>`;}
 function renderAssignments(){
   const tbody=document.getElementById('assignmentRows'),rows=dissertationAssignments;
-  tbody.innerHTML=rows.map((a,i)=>`<tr><td>${i+1}</td><td><span class="ref">${esc(a.reference)}</span></td><td>${esc(a.assessorName)}</td><td>${esc(a.assessorEmail)}</td><td>${esc(a.dissertationCount)}</td><td>${a.sentAt?esc(fmt(a.sentAt)):'<small>Not sent</small>'}</td><td>${esc(fmt(a.expiresAt))}</td><td>${assignmentStatusBadge(a)}</td><td>${a.downloadedAt?`${esc(fmt(a.downloadedAt))}<br><small>${esc(a.downloadCount)} download${Number(a.downloadCount)===1?'':'s'}</small>`:'<small>Not downloaded</small>'}</td><td><div class="files"><button class="btn small" type="button" onclick="resendAssignment('${esc(a.id)}')">Resend Link</button>${a.status!=='revoked'?`<button class="btn small danger" type="button" onclick="revokeAssignment('${esc(a.id)}')">Revoke</button>`:''}</div>${a.lastEmailError?`<small class="error-text">${esc(a.lastEmailError)}</small>`:''}</td></tr>`).join('');
+  tbody.innerHTML=rows.map((a,i)=>{const studentNames=(a.studentNames||[]).join(', ')||'—';return `<tr><td>${i+1}</td><td><span class="ref">${esc(a.reference)}</span></td><td class="title-cell">${esc(studentNames)}</td><td>${esc(a.assessorName)}</td><td>${esc(a.assessorEmail)}</td><td>${esc(a.dissertationCount)}</td><td>${a.sentAt?esc(fmt(a.sentAt)):'<small>Not sent</small>'}</td><td>${esc(fmt(a.expiresAt))}</td><td>${assignmentStatusBadge(a)}</td><td>${a.downloadedAt?`${esc(fmt(a.downloadedAt))}<br><small>${esc(a.downloadCount)} download${Number(a.downloadCount)===1?'':'s'}</small>`:'<small>Not downloaded</small>'}</td><td class="select-cell"><input class="row-check assignment-check" type="checkbox" data-id="${esc(a.id)}" ${selectedAssignments.has(a.id)?'checked':''} aria-label="Select assignment for deletion"></td><td><div class="files"><button class="btn small" type="button" onclick="resendAssignment('${esc(a.id)}')">Resend Link</button>${a.status!=='revoked'?`<button class="btn small danger" type="button" onclick="revokeAssignment('${esc(a.id)}')">Revoke</button>`:''}</div>${a.lastEmailError?`<small class="error-text">${esc(a.lastEmailError)}</small>`:''}</td></tr>`}).join('');
   document.getElementById('assignmentEmpty').classList.toggle('hidden',rows.length>0);
+  tbody.querySelectorAll('.assignment-check').forEach(cb=>cb.addEventListener('change',()=>{cb.checked?selectedAssignments.add(cb.dataset.id):selectedAssignments.delete(cb.dataset.id);updateSelectionButtons();}));
 }
 
 function renderAssessors(){
@@ -76,6 +94,7 @@ function updateSelectionButtons(){
   const selectedRows=[...selectedDissertations].map(id=>submissions.find(s=>s.id===id)).filter(Boolean);const atLimit=selectedRows.some(s=>Number(s.assignmentCount||0)>=3);
   const emailBtn=document.getElementById('emailSelectedDissertations');emailBtn.disabled=d===0||atLimit;emailBtn.title=atLimit?'At least one selected dissertation already has 3 assessors.':'';
   document.getElementById('assessorSelectedCount').textContent=`(${a})`;document.getElementById('deleteSelectedAssessors').disabled=a===0;
+  const da=selectedAssignments.size;document.getElementById('assignmentSelectedCount').textContent=`(${da})`;document.getElementById('deleteSelectedAssignments').disabled=da===0;
 }
 
 document.getElementById('selectAllProject').onclick=()=>{byType('project-work').filter(matchesSearch).forEach(s=>selectedProject.add(s.id));renderProject();updateSelectionButtons();};
@@ -84,6 +103,8 @@ document.getElementById('selectAllDissertations').onclick=()=>{byType('dissertat
 document.getElementById('clearDissertations').onclick=()=>{selectedDissertations.clear();renderDissertations();updateSelectionButtons();};
 document.getElementById('selectAllAssessors').onclick=()=>{byType('assessor').filter(matchesSearch).forEach(s=>selectedAssessors.add(s.id));renderAssessors();updateSelectionButtons();};
 document.getElementById('clearAssessors').onclick=()=>{selectedAssessors.clear();renderAssessors();updateSelectionButtons();};
+document.getElementById('selectAllAssignments').onclick=()=>{dissertationAssignments.forEach(a=>selectedAssignments.add(a.id));renderAssignments();updateSelectionButtons();};
+document.getElementById('clearAssignments').onclick=()=>{selectedAssignments.clear();renderAssignments();updateSelectionButtons();};
 
 async function deleteSelected(set,label){
   const ids=[...set];if(!ids.length)return;
@@ -96,6 +117,16 @@ document.getElementById('deleteSelectedProject').onclick=()=>deleteSelected(sele
 document.getElementById('deleteSelectedDissertations').onclick=()=>deleteSelected(selectedDissertations,'dissertation');
 document.getElementById('deleteSelectedAssessors').onclick=()=>deleteSelected(selectedAssessors,'assessment');
 
+document.getElementById('deleteSelectedAssignments').onclick=async()=>{
+  const ids=[...selectedAssignments];if(!ids.length)return;
+  if(!confirm(`Permanently delete ${ids.length} dissertation assignment record${ids.length===1?'':'s'}? Any secure link for a deleted assignment will immediately stop working. This does not delete the dissertation submissions.`))return;
+  try{
+    const res=await fetch(`${apiBase}/dissertation-assignments/delete-selected`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
+    const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.error||'Could not delete the selected assignment records.');
+    selectedAssignments.clear();await load();alert(`${data.deleted} assignment record${data.deleted===1?'':'s'} deleted.`);
+  }catch(e){alert(e.message||'Could not delete the selected assignment records.');}
+};
+
 document.getElementById('downloadSelectedDissertations').onclick=async()=>{if(!selectedDissertations.size)return;const btn=document.getElementById('downloadSelectedDissertations'),old=btn.innerHTML;btn.disabled=true;btn.textContent='Preparing ZIP…';try{const res=await fetch(`${apiBase}/dissertations/download-selected`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[...selectedDissertations]})});if(!res.ok){const data=await res.json().catch(()=>({}));throw new Error(data.error||'Could not create ZIP file.');}const blob=await res.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`${department}-selected-dissertations.zip`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){alert(e.message||'Could not download selected dissertations.');}finally{btn.innerHTML=old;updateSelectionButtons();}};
 
 document.getElementById('emailSelectedDissertations').onclick=()=>{if(!selectedDissertations.size)return;const rows=[...selectedDissertations].map(id=>submissions.find(s=>s.id===id)).filter(Boolean);if(rows.some(s=>Number(s.assignmentCount||0)>=3)){alert('At least one selected dissertation has already reached the maximum of 3 assessors.');return;}document.getElementById('assignmentSelectionCount').textContent=`${selectedDissertations.size} dissertation${selectedDissertations.size===1?'':'s'} selected`;const st=document.getElementById('assignmentFormStatus');st.classList.add('hidden');st.textContent='';assignmentDialog.showModal();};
@@ -105,6 +136,19 @@ assignmentForm.addEventListener('submit',async e=>{e.preventDefault();if(!select
 
 window.revokeAssignment=async id=>{if(!confirm('Revoke this secure dissertation link? The assessor will no longer be able to use it.'))return;try{const res=await fetch(`${apiBase}/dissertation-assignments/${encodeURIComponent(id)}/revoke`,{method:'POST'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.error||'Could not revoke the link.');await load();}catch(e){alert(e.message||'Could not revoke the link.');}};
 window.resendAssignment=async id=>{const a=dissertationAssignments.find(x=>x.id===id);if(!a)return;const days=prompt('How many days should the new secure link remain valid?','14');if(days===null)return;const expiryDays=Math.min(60,Math.max(1,Number.parseInt(days,10)||14));if(!confirm(`Generate a new secure link and email it to ${a.assessorEmail}? The previous link will stop working.`))return;try{const res=await fetch(`${apiBase}/dissertation-assignments/${encodeURIComponent(id)}/resend`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expiryDays})});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.error||'Could not resend the secure link.');await load();alert(`A new secure link was sent to ${data.assignment.assessorEmail}.`);}catch(e){alert(e.message||'Could not resend the secure link.');try{await load()}catch{}}};
+
+if(dissertationSort)dissertationSort.addEventListener('change',renderDissertations);
+
+const tabButtons=[...document.querySelectorAll('.admin-tab')];
+const tabPanels=[...document.querySelectorAll('.admin-tab-panel')];
+function activateAdminTab(tab){
+  const valid=['project','dissertation','assessor'];if(!valid.includes(tab))tab='project';
+  tabButtons.forEach(b=>{const active=b.dataset.tab===tab;b.classList.toggle('active',active);b.setAttribute('aria-selected',active?'true':'false');});
+  tabPanels.forEach(p=>p.classList.toggle('hidden',p.dataset.tabPanel!==tab));
+  if(location.hash!==`#${tab}`)history.replaceState(null,'',`${location.pathname}${location.search}#${tab}`);
+}
+tabButtons.forEach(b=>b.addEventListener('click',()=>activateAdminTab(b.dataset.tab)));
+activateAdminTab((location.hash||'').replace('#','')||'project');
 
 if(search)search.addEventListener('input',render);
 function item(labelTxt,value){return value!==undefined&&value!==null&&String(value)!==''?`<div class="detail-item"><span>${esc(labelTxt)}</span><strong>${esc(value)}</strong></div>`:''}

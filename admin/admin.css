@@ -13,3 +13,26 @@
 .assessment-admin-head strong{font-size:12px;background:#eaf2f8;color:#082b4c;border-radius:999px;padding:5px 9px}
 .work-file-list{margin-top:12px}
 .optional-missing{display:inline-flex;align-items:center;padding:9px 11px;border:1px dashed #c8d3dc;border-radius:8px;color:#6b7784;font-size:12px;background:white}
+
+/* v9: tabbed department administration */
+.admin-tabs{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 22px;padding:7px;background:#eaf0f5;border:1px solid #d8e1e8;border-radius:12px}
+.admin-tab{appearance:none;border:0;border-radius:9px;background:transparent;color:#405364;padding:11px 15px;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.admin-tab span{display:inline-grid;place-items:center;min-width:25px;height:25px;padding:0 7px;border-radius:999px;background:#fff;color:#647382;font-size:11px;border:1px solid #d9e1e8}
+.admin-tab.active{background:#082b4c;color:#fff;box-shadow:0 4px 12px rgba(8,43,76,.16)}
+.admin-tab.active span{background:#fff;color:#082b4c;border-color:#fff}
+.admin-tab-panel.hidden{display:none}
+
+/* Dissertation assessor-state colours */
+.assessor-state-legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:-4px 0 14px;color:#536574;font-size:12px;font-weight:700}
+.assessor-state-legend span{display:inline-flex;align-items:center;gap:6px}
+.legend-dot{width:10px;height:10px;border-radius:50%;display:inline-block}.legend-dot.red{background:#c73b3b}.legend-dot.amber{background:#d89400}.legend-dot.green{background:#238154}
+tr.dissertation-state-red td{background:#fff3f3}tr.dissertation-state-red td:first-child{box-shadow:inset 4px 0 #c73b3b}
+tr.dissertation-state-amber td{background:#fff9e8}tr.dissertation-state-amber td:first-child{box-shadow:inset 4px 0 #d89400}
+tr.dissertation-state-green td{background:#eef9f2}tr.dissertation-state-green td:first-child{box-shadow:inset 4px 0 #238154}
+.assignment-counter.counter-red{background:#fde7e7;color:#9d2929;border:1px solid #efbcbc}
+.assignment-counter.counter-amber{background:#fff0c9;color:#805600;border:1px solid #efd18a}
+.assignment-counter.counter-green{background:#dcf3e5;color:#17663d;border:1px solid #a9d8bc}
+.sort-control{display:grid;gap:4px;align-items:center;font-size:10px;text-transform:uppercase;letter-spacing:.04em;font-weight:850;color:#647382}
+.sort-control select{border:1px solid #b9c8d4;border-radius:8px;background:#fff;color:#082b4c;padding:8px 30px 8px 9px;font:inherit;font-size:12px;text-transform:none;letter-spacing:0;font-weight:750}
+.assignment-history .subsection-head{gap:16px}.assignment-history .subsection-head>.export-actions{margin-left:auto}
+@media(max-width:760px){.admin-tabs{display:grid;grid-template-columns:1fr}.admin-tab{justify-content:space-between}.assignment-history .subsection-head{display:block}.assignment-history .subsection-head>.export-actions{margin-top:12px}}
