@@ -41,3 +41,7 @@
   .assessment-work-card{padding:14px}
   .work-card-head{align-items:center}
 }
+
+/* v11: assignment-linked assessor submissions */
+input.locked-field,select.locked-field,input:disabled.locked-field,select:disabled.locked-field{background:#eef3f7;color:#405364;border-color:#cbd6df;opacity:1;cursor:not-allowed}
+#assignmentBanner{margin:0 0 22px;background:#eaf6ef;border:1px solid #b9dfc9;color:#12683d}
