@@ -1,8 +1,8 @@
 {
   "name": "ucc-departmental-submission-portals",
-  "version": "10.0.0",
+  "version": "12.0.0",
   "private": true,
-  "description": "UCC departmental submission portals with secure Gmail assignment, student feedback forwarding, revised dissertation submission, role-based admin accounts, developer resources and CSV-managed study centres",
+  "description": "UCC departmental submission portals with single secure assessor/vetter assignment workspaces, per-work report submission and progress tracking, dissertation/vetting workflows, Gmail distribution and student feedback forwarding",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

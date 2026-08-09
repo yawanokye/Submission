@@ -1,3 +1,7 @@
+# v12 update: single secure assessor/vetter assignment workspace
+
+When a department assigns several dissertations to one assessor or vetter, the system sends one email containing one secure assignment link. That workspace handles downloads and per-work report submission. Each work can be submitted separately, progress is retained, and Early Bird status is calculated per work.
+
 # UCC Departmental Submission Portals v10
 
 Three public submission portals and protected departmental administration for:
@@ -65,3 +69,13 @@ DEVELOPER_ADMIN_PASSWORD=your-secure-password
 ```
 
 Department master-account environment variables remain unchanged.
+
+## v11 workflow update
+
+- Department admin keeps Fresh Dissertation Submissions and Revised Dissertation Submissions in separate tables.
+- The public assessor portal accepts either Assessment Reports or Vetting Reports.
+- Department admin keeps Assessment Report Submissions and Vetting Report Submissions in separate tables.
+- Dissertation assignment now records an assignment type. Fresh dissertations can only be assigned for Assessment. Revised dissertations can be assigned for Vetting or Assessment.
+- Secure assignment emails link to `/assessor.html?assignment=<secure-token>`. The portal retrieves the assigned students from the server and locks student names, index numbers and programmes. Student email is linked server-side and is not exposed for editing.
+- A token-linked report submission stores the exact dissertation submission ID for each student, so forwarding feedback uses the email from the correct dissertation record instead of relying on typed names or index numbers.
+- Fresh dissertation submissions only accept Assessment feedback forwarding. Student feedback packages contain the report and optional reviewed dissertation only; claim forms are excluded.
