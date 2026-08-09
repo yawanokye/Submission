@@ -130,6 +130,7 @@ const ASSIGNMENT_EXPIRY_DAYS = Math.min(60, Math.max(1, Number(process.env.ASSIG
 const DEVELOPER_ADMIN_USER = String(process.env.DEVELOPER_ADMIN_USER || 'developer').trim();
 const DEVELOPER_ADMIN_PASSWORD = String(process.env.DEVELOPER_ADMIN_PASSWORD || 'change-this-password');
 const STUDENT_FEEDBACK_EXPIRY_DAYS = Math.min(90, Math.max(1, Number(process.env.STUDENT_FEEDBACK_EXPIRY_DAYS || 30) || 30));
+const ADMIN_INVITATION_EXPIRY_HOURS = Math.min(168, Math.max(1, Number(process.env.ADMIN_INVITATION_EXPIRY_HOURS || 24) || 24));
 
 const DEPARTMENTS = {
   'education': {
@@ -258,11 +259,48 @@ function normalizeAdminDepartments(value) {
   return [...new Set(source.map(v => String(v || '').trim()).filter(v => departmentFromSlug(v)))];
 }
 function publicAdminUser(user) {
+  const passwordSet=Boolean(user.passwordHash && user.passwordSalt);
+  const invitationExpiresAt=user.invitationExpiresAt || null;
+  const invitationExpired=Boolean(invitationExpiresAt && new Date(invitationExpiresAt).getTime() <= Date.now());
   return {
-    id:user.id, name:user.name || user.username, username:user.username,
+    id:user.id, name:user.name || user.username, username:user.username, email:user.email || '',
     role:user.role || 'viewer', departments:user.departments || [], sections:user.sections || [],
-    active:user.active !== false, createdAt:user.createdAt || null
+    active:user.active !== false, createdAt:user.createdAt || null,
+    passwordSet, passwordSetAt:user.passwordSetAt || null,
+    invitationSentAt:user.invitationSentAt || null, invitationExpiresAt,
+    invitationExpired, invitationEmailStatus:user.invitationEmailStatus || null,
+    invitationLastError:user.invitationLastError || null
   };
+}
+function hashOneTimeToken(token) {
+  return crypto.createHash('sha256').update(String(token || ''), 'utf8').digest('hex');
+}
+function newAdminInvitation() {
+  const token=crypto.randomBytes(32).toString('hex');
+  return {
+    token,
+    tokenHash:hashOneTimeToken(token),
+    expiresAt:new Date(Date.now()+ADMIN_INVITATION_EXPIRY_HOURS*60*60*1000).toISOString()
+  };
+}
+function requestBaseUrl(req) {
+  if (PUBLIC_BASE_URL) return PUBLIC_BASE_URL;
+  const forwarded=String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const protocol=forwarded || req.protocol || 'https';
+  return `${protocol}://${req.get('host')}`.replace(/\/$/, '');
+}
+function adminLoginLinks(departments, baseUrl) {
+  return (departments || []).map(slug=>({slug,name:departmentFromSlug(slug)?.name || slug,url:`${baseUrl}/admin/${encodeURIComponent(slug)}`}));
+}
+async function sendAdminPasswordSetupEmail({to,name,username,role,departments,sections,setupUrl,expiresAt,baseUrl,isReset=false}) {
+  const deptNames=(departments || []).map(slug=>departmentFromSlug(slug)?.name || slug);
+  const sectionNames=(sections || []).map(section=>section==='project-work'?'Undergraduate Project Work':section==='dissertation'?'Dissertation Submission':'Assessment/Vetting Reports');
+  const expiryText=new Date(expiresAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'})+' UTC';
+  const portalRows=adminLoginLinks(departments,baseUrl).map(x=>`<li><a href="${htmlEscape(x.url)}">${htmlEscape(x.name)} Administration Portal</a></li>`).join('');
+  const subject=isReset?'UCC Submission Portal password reset':'Your UCC Submission Portal administrator account';
+  const action=isReset?'reset your administrator password':'set your administrator password';
+  const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${isReset?'Password Reset':'Administrator Account Invitation'}</h2><p>Dear ${htmlEscape(name)},</p><p>${isReset?'A secure password-reset link has been issued for your':'An individual administrator account has been created for you on the'} UCC Academic Submission Portal.</p><div style="margin:18px 0;padding:16px;background:#f5f7fa;border-left:4px solid #d4a72c"><strong>Temporary account credential</strong><br>Username: <strong>${htmlEscape(username)}</strong><br>Password: <strong>Set by you using the one-time link below</strong></div><p><a href="${htmlEscape(setupUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">${isReset?'Set New Password':'Set Your Password'}</a></p><p>This one-time link expires on <strong>${htmlEscape(expiryText)}</strong>. After the password is set, the link cannot be used again.</p><p><strong>Role:</strong> ${htmlEscape(role)}<br><strong>Department access:</strong> ${htmlEscape(deptNames.join(', '))}<br><strong>Section access:</strong> ${htmlEscape(sectionNames.join(', '))}</p><p>After setting your password, sign in to the department administration portal using the username above and the password you create:</p><ul>${portalRows}</ul><p>If you did not expect this account, do not use the link and contact the portal administrator.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+  return sendGmailHtmlEmail({to,subject,html});
 }
 async function departmentAuth(req, res, next) {
   const slug = String(req.params.department || '');
@@ -1558,26 +1596,83 @@ app.post('/api/developer/study-centres/reset', developerAuth, async(_req,res)=>{
 
 app.get('/api/developer/admin-users', developerAuth, async(_req,res)=>res.json((await readAdminUsers()).map(publicAdminUser)));
 app.post('/api/developer/admin-users', developerAuth, async(req,res)=>{
-  const name=cleanHumanText(req.body?.name).slice(0,160),username=cleanHumanText(req.body?.username).toLowerCase().slice(0,100),password=String(req.body?.password||'');
+  const name=cleanHumanText(req.body?.name).slice(0,160),email=cleanHumanText(req.body?.email).toLowerCase().slice(0,254);
+  const requestedUsername=cleanHumanText(req.body?.username).toLowerCase().slice(0,100);
+  const username=requestedUsername || email;
   const role=String(req.body?.role||'viewer').trim();const departments=normalizeAdminDepartments(req.body?.departments);const sections=normalizeAdminSections(req.body?.sections);
-  if(!name||!username||password.length<10)return res.status(400).json({error:'Name, username and a password of at least 10 characters are required.'});
+  if(!name||!isEmail(email)||!username)return res.status(400).json({error:'Administrator name and a valid email address are required.'});
   if(!/^[a-z0-9._@-]+$/i.test(username))return res.status(400).json({error:'Username may contain letters, numbers, dots, underscores, @ and hyphens only.'});
   if(!ADMIN_ROLES.has(role))return res.status(400).json({error:'Select a valid role.'});
   if(!departments.length)return res.status(400).json({error:'Assign at least one department.'});
   if(!sections.length)return res.status(400).json({error:'Assign at least one portal section.'});
-  let error='';let created=null;
+  let error='';let created=null;const invitation=newAdminInvitation();
   await mutateAdminUsers(list=>{
     if(list.some(a=>String(a.username||'').toLowerCase()===username)){error='That administrator username already exists.';return null;}
-    const pw=hashPassword(password);created={id:crypto.randomUUID(),name,username,passwordSalt:pw.salt,passwordHash:pw.hash,role,departments,sections,active:true,createdAt:new Date().toISOString()};list.push(created);return created;
+    if(list.some(a=>String(a.email||'').toLowerCase()===email)){error='That administrator email address already has an account.';return null;}
+    created={id:crypto.randomUUID(),name,email,username,role,departments,sections,active:true,createdAt:new Date().toISOString(),invitationTokenHash:invitation.tokenHash,invitationExpiresAt:invitation.expiresAt,invitationEmailStatus:'pending'};
+    list.push(created);return created;
   });
-  if(error)return res.status(400).json({error});res.status(201).json({ok:true,user:publicAdminUser(created)});
+  if(error)return res.status(400).json({error});
+  const baseUrl=requestBaseUrl(req),setupUrl=`${baseUrl}/admin-set-password.html?token=${encodeURIComponent(invitation.token)}`;
+  let emailSent=false,warning='';
+  try{
+    await sendAdminPasswordSetupEmail({to:email,name,username,role,departments,sections,setupUrl,expiresAt:invitation.expiresAt,baseUrl});
+    emailSent=true;
+    await mutateAdminUsers(list=>{const a=list.find(x=>x.id===created.id);if(a){a.invitationEmailStatus='sent';a.invitationSentAt=new Date().toISOString();a.invitationLastError=null;}return null;});
+  }catch(e){
+    warning=`The administrator account was created, but the invitation email could not be sent: ${e.message}`;
+    console.error('Administrator invitation email failed:',e);
+    await mutateAdminUsers(list=>{const a=list.find(x=>x.id===created.id);if(a){a.invitationEmailStatus='failed';a.invitationLastError=String(e.message||e).slice(0,500);}return null;});
+  }
+  const current=(await readAdminUsers()).find(x=>x.id===created.id) || created;
+  res.status(201).json({ok:true,emailSent,warning:warning||null,user:publicAdminUser(current)});
+});
+app.post('/api/developer/admin-users/:id/resend-invitation', developerAuth, async(req,res)=>{
+  const invitation=newAdminInvitation();let account=null;
+  await mutateAdminUsers(list=>{const a=list.find(x=>x.id===req.params.id);if(!a)return null;if(!isEmail(a.email))return null;a.invitationTokenHash=invitation.tokenHash;a.invitationExpiresAt=invitation.expiresAt;a.invitationEmailStatus='pending';a.invitationLastError=null;account={...a};return account;});
+  if(!account)return res.status(404).json({error:'Administrator account not found or does not have a valid email address.'});
+  const baseUrl=requestBaseUrl(req),setupUrl=`${baseUrl}/admin-set-password.html?token=${encodeURIComponent(invitation.token)}`;
+  try{
+    await sendAdminPasswordSetupEmail({to:account.email,name:account.name||account.username,username:account.username,role:account.role||'viewer',departments:account.departments||[],sections:account.sections||[],setupUrl,expiresAt:invitation.expiresAt,baseUrl,isReset:Boolean(account.passwordHash)});
+    await mutateAdminUsers(list=>{const a=list.find(x=>x.id===req.params.id);if(a){a.invitationEmailStatus='sent';a.invitationSentAt=new Date().toISOString();a.invitationLastError=null;}return null;});
+    const updated=(await readAdminUsers()).find(x=>x.id===req.params.id);
+    return res.json({ok:true,emailSent:true,user:publicAdminUser(updated)});
+  }catch(e){
+    console.error('Administrator invitation resend failed:',e);
+    await mutateAdminUsers(list=>{const a=list.find(x=>x.id===req.params.id);if(a){a.invitationEmailStatus='failed';a.invitationLastError=String(e.message||e).slice(0,500);}return null;});
+    const updated=(await readAdminUsers()).find(x=>x.id===req.params.id);
+    return res.status(502).json({error:`The password setup email could not be sent: ${e.message}`,user:publicAdminUser(updated)});
+  }
 });
 app.patch('/api/developer/admin-users/:id', developerAuth, async(req,res)=>{
   const role=req.body?.role?String(req.body.role).trim():null;const departments=req.body?.departments!==undefined?normalizeAdminDepartments(req.body.departments):null;const sections=req.body?.sections!==undefined?normalizeAdminSections(req.body.sections):null;
-  let item=null;await mutateAdminUsers(list=>{const a=list.find(x=>x.id===req.params.id);if(!a)return null;if(role&&ADMIN_ROLES.has(role))a.role=role;if(departments?.length)a.departments=departments;if(sections?.length)a.sections=sections;if(req.body?.active!==undefined)a.active=Boolean(req.body.active);if(req.body?.password){const pw=String(req.body.password);if(pw.length<10)throw new Error('Password must be at least 10 characters.');const h=hashPassword(pw);a.passwordSalt=h.salt;a.passwordHash=h.hash;}item=publicAdminUser(a);return item;});
+  let item=null;await mutateAdminUsers(list=>{const a=list.find(x=>x.id===req.params.id);if(!a)return null;if(role&&ADMIN_ROLES.has(role))a.role=role;if(departments?.length)a.departments=departments;if(sections?.length)a.sections=sections;if(req.body?.active!==undefined)a.active=Boolean(req.body.active);item=publicAdminUser(a);return item;});
   if(!item)return res.status(404).json({error:'Administrator account not found.'});res.json({ok:true,user:item});
 });
 app.delete('/api/developer/admin-users/:id', developerAuth, async(req,res)=>{let removed=false;await mutateAdminUsers(list=>{const i=list.findIndex(x=>x.id===req.params.id);if(i>=0){list.splice(i,1);removed=true;}return removed;});if(!removed)return res.status(404).json({error:'Administrator account not found.'});res.json({ok:true});});
+
+// PUBLIC ONE-TIME ADMIN PASSWORD SETUP / RESET
+app.get('/api/admin-invitation/:token', async(req,res)=>{
+  const token=String(req.params.token||'');
+  if(!/^[a-f0-9]{64}$/i.test(token))return res.status(400).json({error:'This password setup link is invalid.'});
+  const tokenHash=hashOneTimeToken(token);const list=await readAdminUsers();const a=list.find(x=>x.invitationTokenHash===tokenHash);
+  if(!a)return res.status(404).json({error:'This password setup link is invalid or has already been used.'});
+  if(a.active===false)return res.status(403).json({error:'This administrator account is disabled. Contact the portal administrator.'});
+  if(!a.invitationExpiresAt||new Date(a.invitationExpiresAt).getTime()<=Date.now())return res.status(410).json({error:'This password setup link has expired. Ask the portal developer to send a new link.'});
+  const baseUrl=requestBaseUrl(req);
+  res.json({ok:true,name:a.name||a.username,username:a.username,email:a.email||'',role:a.role||'viewer',departments:(a.departments||[]).map(slug=>({slug,name:departmentFromSlug(slug)?.name||slug})),sections:a.sections||[],expiresAt:a.invitationExpiresAt,passwordAlreadySet:Boolean(a.passwordHash),loginUrls:adminLoginLinks(a.departments||[],baseUrl)});
+});
+app.post('/api/admin-invitation/:token/set-password', async(req,res)=>{
+  const token=String(req.params.token||''),password=String(req.body?.password||''),confirmPassword=String(req.body?.confirmPassword||'');
+  if(!/^[a-f0-9]{64}$/i.test(token))return res.status(400).json({error:'This password setup link is invalid.'});
+  if(password.length<10)return res.status(400).json({error:'Choose a password containing at least 10 characters.'});
+  if(password!==confirmPassword)return res.status(400).json({error:'The password confirmation does not match.'});
+  const tokenHash=hashOneTimeToken(token);let updated=null,error='';
+  await mutateAdminUsers(list=>{const a=list.find(x=>x.invitationTokenHash===tokenHash);if(!a){error='This password setup link is invalid or has already been used.';return null;}if(a.active===false){error='This administrator account is disabled.';return null;}if(!a.invitationExpiresAt||new Date(a.invitationExpiresAt).getTime()<=Date.now()){error='This password setup link has expired. Ask the portal developer to send a new link.';return null;}const pw=hashPassword(password);a.passwordSalt=pw.salt;a.passwordHash=pw.hash;a.passwordSetAt=new Date().toISOString();a.invitationAcceptedAt=a.passwordSetAt;delete a.invitationTokenHash;delete a.invitationExpiresAt;a.invitationEmailStatus='accepted';a.invitationLastError=null;updated={...a};return updated;});
+  if(error)return res.status(error.includes('expired')?410:400).json({error});
+  const baseUrl=requestBaseUrl(req);
+  res.json({ok:true,message:'Your administrator password has been set successfully.',user:publicAdminUser(updated),loginUrls:adminLoginLinks(updated.departments||[],baseUrl)});
+});
 
 // DEPARTMENT ADMIN: dissertation assignment by secure emailed link
 app.get('/api/admin/:department/dissertation-assignments', departmentAuth, async(req,res)=>{
@@ -1906,7 +2001,7 @@ app.get('/api/admin/:department/summary',departmentAuth,async(req,res)=>{
   });
 });
 
-app.get('/health',async(_req,res)=>res.json({ok:true,departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:(await readAdminUsers()).length,studyCentres:(await readStudyCentres()).length,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'}));
+app.get('/health',async(_req,res)=>{const admins=await readAdminUsers();res.json({ok:true,departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:admins.length,pendingAdminInvitations:admins.filter(a=>!a.passwordHash&&a.invitationTokenHash).length,studyCentres:(await readStudyCentres()).length,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'});});
 app.get('/vendor/xlsx.full.min.js', (_req,res)=>res.sendFile(path.join(__dirname,'node_modules','xlsx','dist','xlsx.full.min.js')));
 app.use(express.static(path.join(__dirname,'public'),{extensions:['html']}));
 app.use((err,req,res,_next)=>{
