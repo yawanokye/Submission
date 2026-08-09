@@ -38,3 +38,17 @@ tr.dissertation-state-green td{background:#eef9f2}tr.dissertation-state-green td
 @media(max-width:760px){.admin-tabs{display:grid;grid-template-columns:1fr}.admin-tab{justify-content:space-between}.assignment-history .subsection-head{display:block}.assignment-history .subsection-head>.export-actions{margin-top:12px}}
 /* v10: individual admin roles, revised submissions and student feedback forwarding */
 .admin-identity{font-size:11px;font-weight:800;color:#536574;background:#eef3f7;border:1px solid #dce4eb;border-radius:999px;padding:6px 10px}.submission-type{display:inline-flex;padding:3px 7px;border-radius:999px;font-size:10px;font-weight:850;margin-right:6px;vertical-align:1px}.submission-type.fresh{background:#e8f1fb;color:#0b4f7d}.submission-type.revised{background:#f4eafa;color:#6842a5}.feedback-summary{display:flex;gap:5px;flex-wrap:wrap}.feedback-chip{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:24px;border-radius:999px;padding:0 7px;font-size:10px;font-weight:850;border:1px solid transparent}.feedback-not-forwarded,.feedback-email-failed,.feedback-expired,.feedback-revoked{background:#fdeaea;color:#a12f2f;border-color:#efc2bd}.feedback-sent,.feedback-pending{background:#fff4dd;color:#8a5b00;border-color:#ead39b}.feedback-downloaded{background:#e8f6ee;color:#12683d;border-color:#b9dfc9}.feedback-unavailable{background:#eef2f5;color:#647382;border-color:#d7dfe5}.feedback-legend{display:flex;align-items:center;gap:7px;flex-wrap:wrap;color:#647382;font-size:11px;margin:12px 0}.feedback-control{display:grid;gap:7px;margin-top:12px;padding:12px;border-radius:9px;border:1px solid}.feedback-box-not-forwarded,.feedback-box-email-failed,.feedback-box-expired,.feedback-box-revoked{background:#fff8f7;border-color:#efc2bd}.feedback-box-sent,.feedback-box-pending{background:#fffaf0;border-color:#ead39b}.feedback-box-downloaded{background:#f3fbf6;border-color:#b9dfc9}.feedback-box-unavailable{background:#f6f8fa;border-color:#d7dfe5}.feedback-status{font-weight:850;font-size:12px}.feedback-status i{display:inline-block;width:9px;height:9px;border-radius:50%;background:currentColor;margin-right:7px}.feedback-control small{display:block}.feedback-control .files{margin-top:3px}
+
+/* v11: separate fresh/revised dissertations and assessment/vetting reports */
+.submission-subsection{margin-top:22px;padding:18px;border:1px solid #dce4eb;border-radius:12px;background:#fbfcfd}
+.submission-subsection+.submission-subsection{margin-top:18px}
+.submission-subsection .subsection-head{margin-bottom:12px}
+.sub-count{display:inline-grid;place-items:center;min-width:38px;height:38px;padding:0 10px;border-radius:999px;background:#eef3f7;color:var(--navy);font-size:14px}
+.fresh-subsection{border-left:4px solid #114a78}
+.revised-subsection{border-left:4px solid #6842a5}
+.assessment-report-subsection{border-left:4px solid #137a45}
+.vetting-report-subsection{border-left:4px solid #d4a72c}
+.form-grid select{width:100%;font:inherit;color:var(--text);border:1px solid #c5d0d9;border-radius:8px;padding:10px 11px;background:#fff}
+@media(max-width:700px){.submission-subsection{padding:12px}.subsection-head{gap:10px}}
+
+.status-in-progress{background:#fff4dd;color:#8a5b00}.status-completed{background:#e8f6ee;color:#12683d}.status-download-expired{background:#f1f3f5;color:#586674}
