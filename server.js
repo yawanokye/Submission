@@ -489,6 +489,10 @@ async function readStudyCentres() {
     return centres.length ? [...new Set(centres)] : DEFAULT_STUDY_CENTRES.slice();
   } catch { return DEFAULT_STUDY_CENTRES.slice(); }
 }
+async function readProjectStudyCentres() {
+  const centres = await readStudyCentres();
+  return centres.includes('Non-Residential') ? centres : [...centres, 'Non-Residential'];
+}
 let studyCentreWriteQueue = Promise.resolve();
 function writeStudyCentres(centres) {
   studyCentreWriteQueue = studyCentreWriteQueue.catch(() => {}).then(async () => {
@@ -1030,7 +1034,7 @@ app.post('/api/project-work', upload.fields([
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
     const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount','studyCentre']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error: `Missing required field: ${missing}` }); }
-    const allowedCentres=await readStudyCentres();
+    const allowedCentres=await readProjectStudyCentres();
     if(!allowedCentres.includes(text(req,'studyCentre'))){await removeUploaded(req);return res.status(400).json({error:'Please select a valid study centre from the current list.'});}
     if (!filesFor(req,'claimForm').length || !filesFor(req,'reportFile').length || !filesFor(req,'completedWork').length || !filesFor(req,'scoresFile').length) {
       await removeUploaded(req); return res.status(400).json({ error: 'Claim form, report, score sheet and completed project work are required.' });
@@ -1044,6 +1048,7 @@ app.post('/api/project-work', upload.fields([
       title:text(req,'title'), firstName:text(req,'firstName'), lastName:text(req,'lastName'),
       fullName:buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'lastName')),
       phone: text(req,'phone'), email: text(req,'email'), groupCount: text(req,'groupCount'), studyCentre: text(req,'studyCentre'),
+      projectStream: text(req,'studyCentre') === 'Non-Residential' ? 'non-residential' : 'distance',
       scoreSheet: { worksheet: scoreResult.sheetName, headerRow: scoreResult.headerRow, rowCount: scoreResult.rows.length, rows: scoreResult.rows },
       reviewStatus:'pending', reviewNote:'', reviewedAt:null, reviewedBy:'', reviewHistory:[],
       files: {
@@ -1052,7 +1057,7 @@ app.post('/api/project-work', upload.fields([
       }
     };
     await saveRecord(record);
-    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, scoreRowsIncluded:scoreResult.rows.length, reviewStatus:'pending', reviewStatusLabel:'Pending Verification' });
+    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, scoreRowsIncluded:scoreResult.rows.length, projectStream:record.projectStream, reviewStatus:'pending', reviewStatusLabel:'Pending Verification' });
   } catch (e) { console.error(e); await removeUploaded(req).catch(()=>{}); res.status(500).json({ error:'The project work submission could not be saved.' }); }
 });
 
@@ -1359,6 +1364,13 @@ app.post('/api/assessor', upload.fields(assessorUploadFields), async (req, res) 
 
 function recordsForDepartment(records, department) { return records.filter(r => r.department === department); }
 function projectRecords(records) { return records.filter(r => r.portalType === 'project-work' || !r.portalType); }
+function projectStream(record) {
+  const explicit=String(record?.projectStream||'').trim().toLowerCase();
+  if(explicit==='non-residential') return 'non-residential';
+  return String(record?.studyCentre||'').trim().toLowerCase()==='non-residential' ? 'non-residential' : 'distance';
+}
+function distanceProjectRecords(records) { return projectRecords(records).filter(r => projectStream(r)==='distance'); }
+function nonResidentialProjectRecords(records) { return projectRecords(records).filter(r => projectStream(r)==='non-residential'); }
 function fieldExperienceRecords(records) { return records.filter(r => r.portalType === 'field-experience'); }
 function dissertationRecords(records) { return records.filter(r => r.portalType === 'dissertation'); }
 function assessorRecords(records) { return records.filter(r => r.portalType === 'assessor'); }
@@ -1387,7 +1399,8 @@ function projectAccessWarning(record) {
 function projectSubmissionWarnings(record, records) {
   if(!record) return [];
   const warnings=[];
-  const projects=projectRecords(records||[]);
+  const stream=projectStream(record);
+  const projects=projectRecords(records||[]).filter(r=>projectStream(r)===stream);
   const others=projects.filter(r=>r.id!==record.id);
   const supervisorEmail=String(record.email||'').trim().toLowerCase();
   const supervisorName=record.fullName||record.name||'';
@@ -1396,7 +1409,7 @@ function projectSubmissionWarnings(record, records) {
     const emailMatch=isEmail(supervisorEmail)&&isEmail(otherEmail)&&supervisorEmail===otherEmail;
     return emailMatch||samePersonName(supervisorName,r.fullName||r.name||'');
   });
-  if(sameSupervisor.length) warnings.push({code:'repeat-supervisor',message:`Same supervisor/examiner has ${sameSupervisor.length} other project-work submission${sameSupervisor.length===1?'':'s'} in this department.`});
+  if(sameSupervisor.length) warnings.push({code:'repeat-supervisor',message:`Same supervisor/examiner has ${sameSupervisor.length} other ${stream==='non-residential'?'Non-Residential':'Distance'} project-work submission${sameSupervisor.length===1?'':'s'} in this department.`});
   const centreKey=String(record.studyCentre||'').trim().toLowerCase();
   const sameCombo=sameSupervisor.filter(r=>String(r.studyCentre||'').trim().toLowerCase()===centreKey);
   if(centreKey&&sameCombo.length) warnings.push({code:'repeat-supervisor-centre',message:`Same supervisor/examiner and study-centre combination appears in ${sameCombo.length} other submission${sameCombo.length===1?'':'s'}.`});
@@ -1475,14 +1488,17 @@ function validScoreRows(record) {
     return Boolean(name || registrationNo || groupNo || totalScore);
   });
 }
-function allScoreRows(records) {
+function projectScoreRowsForStream(records, stream='distance') {
   const out=[]; let sn=1;
-  projectRecords(records).filter(record=>projectReviewStatus(record)==='approved').slice().sort((a,b)=>String(a.submittedAt).localeCompare(String(b.submittedAt))).forEach(record => {
+  projectRecords(records).filter(record=>projectStream(record)===stream && projectReviewStatus(record)==='approved').slice().sort((a,b)=>String(a.submittedAt).localeCompare(String(b.submittedAt))).forEach(record => {
     for (const row of validScoreRows(record)) out.push({'S/N':sn++,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
   });
   return out;
 }
+function allScoreRows(records) { return projectScoreRowsForStream(records,'distance'); }
+function allNonResidentialScoreRows(records) { return projectScoreRowsForStream(records,'non-residential'); }
 function scoreSheetAoA(records) { const rows=allScoreRows(records); return [REQUIRED_HEADERS, ...rows.map(r=>REQUIRED_HEADERS.map(h=>r[h]))]; }
+function nonResidentialScoreSheetAoA(records) { const rows=allNonResidentialScoreRows(records); return [REQUIRED_HEADERS, ...rows.map(r=>REQUIRED_HEADERS.map(h=>r[h]))]; }
 function individualScoreSheetAoA(record) { const rows=validScoreRows(record); return [REQUIRED_HEADERS, ...rows.map((row,i)=>[i+1,row.name||'',row.registrationNo||'',row.groupNo||'',row.totalScore||''])]; }
 function allFieldExperienceScoreRows(records) {
   const out=[]; let sn=1;
@@ -1492,9 +1508,9 @@ function allFieldExperienceScoreRows(records) {
   return out;
 }
 function fieldExperienceScoreSheetAoA(records) { const rows=allFieldExperienceScoreRows(records); return [REQUIRED_HEADERS, ...rows.map(r=>REQUIRED_HEADERS.map(h=>r[h]))]; }
-function projectRegisterAoA(records) {
-  const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
-  const body=projectRecords(records).map((r,i)=>[i+1,r.reference,r.submittedAt,r.fullName,r.phone,r.email,r.studyCentre,r.groupCount,validScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']); return [h,...body];
+function projectRegisterAoA(records, stream='distance') {
+  const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE','STUDENT STREAM','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
+  const body=projectRecords(records).filter(r=>projectStream(r)===stream).map((r,i)=>[i+1,r.reference,r.submittedAt,r.fullName,r.phone,r.email,r.studyCentre,stream==='non-residential'?'Non-Residential (Regular)':'Distance',r.groupCount,validScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']); return [h,...body];
 }
 function fieldExperienceRegisterAoA(records) {
   const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
@@ -1522,12 +1538,18 @@ function addSheet(wb,name,aoa,widths) {
 }
 function workbookBuffer(kind,records) {
   const wb=XLSX.utils.book_new();
-  if(kind==='scores') addSheet(wb,'Consolidated Project Scores',scoreSheetAoA(records),[10,34,24,16,16]);
+  if(kind==='scores') addSheet(wb,'Consolidated Distance Scores',scoreSheetAoA(records),[10,34,24,16,16]);
+  if(kind==='non-residential-scores') addSheet(wb,'Consolidated Non-Residential',nonResidentialScoreSheetAoA(records),[10,34,24,16,16]);
   if(kind==='single-score') addSheet(wb,'Clean Scores',individualScoreSheetAoA(records[0]),[10,34,24,16,16]);
-  if(kind==='project-register') addSheet(wb,'Project Work Register',projectRegisterAoA(records),[8,22,24,32,18,30,22,24,20,24,24,28,38]);
+  if(kind==='project-register') addSheet(wb,'Distance Project Register',projectRegisterAoA(records,'distance'),[8,22,24,32,18,30,22,22,24,20,24,24,28,38]);
+  if(kind==='non-residential-project-register') addSheet(wb,'Non-Residential Register',projectRegisterAoA(records,'non-residential'),[8,22,24,32,18,30,22,22,24,20,24,24,28,38]);
   if(kind==='project-master') {
-    addSheet(wb,'Master Project Scores',scoreSheetAoA(records),[10,34,24,16,16]);
-    addSheet(wb,'Project Work Register',projectRegisterAoA(records),[8,22,24,32,18,30,22,24,20,24,24,28,38]);
+    addSheet(wb,'Master Distance Project Scores',scoreSheetAoA(records),[10,34,24,16,16]);
+    addSheet(wb,'Distance Project Register',projectRegisterAoA(records,'distance'),[8,22,24,32,18,30,22,22,24,20,24,24,28,38]);
+  }
+  if(kind==='non-residential-project-master') {
+    addSheet(wb,'Master Non-Residential Scores',nonResidentialScoreSheetAoA(records),[10,34,24,16,16]);
+    addSheet(wb,'Non-Residential Register',projectRegisterAoA(records,'non-residential'),[8,22,24,32,18,30,22,22,24,20,24,24,28,38]);
   }
   if(kind==='field-scores') addSheet(wb,'Consolidated Field Experience',fieldExperienceScoreSheetAoA(records),[10,34,24,16,16]);
   if(kind==='field-register') addSheet(wb,'Field Experience Register',fieldExperienceRegisterAoA(records),[8,22,24,32,18,30,22,24,20,24,24,28,38]);
@@ -1563,7 +1585,7 @@ function adminRecordsMap(records, assignments=[]) {
       id:r.id,reference:r.reference,submittedAt:r.submittedAt,portalType:r.portalType||'project-work',
       name:r.fullName||r.studentName||r.assessorName||'',secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
       title:r.title||r.studentTitle||r.assessorTitle||'',firstName:r.firstName||r.studentFirstName||r.assessorFirstName||'',lastName:r.lastName||r.studentLastName||r.assessorLastName||'',
-      email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:r.studyCentre||'',scoreRows:validScoreRows(r).length,
+      email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:r.studyCentre||'',projectStream:(r.portalType==='project-work'||!r.portalType)?projectStream(r):'',scoreRows:validScoreRows(r).length,
       projectReviewStatus:projectReviewStatus(r),projectReviewLabel:projectReviewLabel(projectReviewStatus(r)),projectReviewNote:r.reviewNote||'',projectReviewedAt:r.reviewedAt||null,projectReviewedBy:r.reviewedBy||'',projectWarnings:(r.portalType==='project-work'||!r.portalType)?projectSubmissionWarnings(r,records):[],
       fieldReviewStatus:projectReviewStatus(r),fieldReviewLabel:projectReviewLabel(projectReviewStatus(r)),fieldReviewNote:r.reviewNote||'',fieldReviewedAt:r.reviewedAt||null,fieldReviewedBy:r.reviewedBy||'',fieldWarnings:r.portalType==='field-experience'?fieldExperienceSubmissionWarnings(r,records):[],
       studentName:r.studentName||'',indexNumber:r.indexNumber||'',dissertationTopic:r.dissertationTopic||'',previousDissertationTopic:r.previousDissertationTopic||'',supervisorName:r.supervisorName||'',submissionType,
@@ -2259,18 +2281,30 @@ app.get('/api/admin/:department/submissions/:id/scores.xlsx', departmentAuth, as
   sendWorkbook(res,'single-score',[r],`${r.reference}-clean-scores.xlsx`);
 });
 
-// UNDERGRADUATE PROJECT WORK exports only
+// UNDERGRADUATE PROJECT WORK exports. Distance and Non-Residential (regular) results are kept separate.
 app.get('/api/admin/:department/export/project-scores.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
-  sendWorkbook(res,'scores',records,`${req.adminDepartment}-consolidated-project-scores.xlsx`);
+  sendWorkbook(res,'scores',records,`${req.adminDepartment}-consolidated-distance-project-scores.xlsx`);
 });
 app.get('/api/admin/:department/export/project-register.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
-  sendWorkbook(res,'project-register',records,`${req.adminDepartment}-project-work-register.xlsx`);
+  sendWorkbook(res,'project-register',records,`${req.adminDepartment}-distance-project-work-register.xlsx`);
 });
 app.get('/api/admin/:department/export/project-master.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
-  sendWorkbook(res,'project-master',records,`${req.adminDepartment}-master-project-scores.xlsx`);
+  sendWorkbook(res,'project-master',records,`${req.adminDepartment}-master-distance-project-scores.xlsx`);
+});
+app.get('/api/admin/:department/export/non-residential-project-scores.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  sendWorkbook(res,'non-residential-scores',records,`${req.adminDepartment}-consolidated-non-residential-project-scores.xlsx`);
+});
+app.get('/api/admin/:department/export/non-residential-project-register.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  sendWorkbook(res,'non-residential-project-register',records,`${req.adminDepartment}-non-residential-project-work-register.xlsx`);
+});
+app.get('/api/admin/:department/export/non-residential-project-master.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  sendWorkbook(res,'non-residential-project-master',records,`${req.adminDepartment}-master-non-residential-project-scores.xlsx`);
 });
 
 // FIELD EXPERIENCE score exports. Only Approved Field Experience submissions are consolidated.
@@ -2330,10 +2364,13 @@ app.get('/api/admin/:department/summary',departmentAuth,async(req,res)=>{
   res.json({
     total:records.length,
     project:adminCan(req,'project-work','viewer')?projectRecords(records).length:0,
+    distanceProject:adminCan(req,'project-work','viewer')?distanceProjectRecords(records).length:0,
+    nonResidentialProject:adminCan(req,'project-work','viewer')?nonResidentialProjectRecords(records).length:0,
     fieldExperience:adminCan(req,'field-experience','viewer')?fieldExperienceRecords(records).length:0,
     dissertation:adminCan(req,'dissertation','viewer')?dissertationRecords(records).length:0,
     assessor:adminCan(req,'assessor','viewer')?assessorRecords(records).length:0,
     scoreRows:adminCan(req,'project-work','viewer')?allScoreRows(records).length:0,
+    nonResidentialScoreRows:adminCan(req,'project-work','viewer')?allNonResidentialScoreRows(records).length:0,
     fieldScoreRows:adminCan(req,'field-experience','viewer')?allFieldExperienceScoreRows(records).length:0
   });
 });

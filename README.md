@@ -160,3 +160,17 @@ Version 16 strengthens dissertation processing and reviewer confidentiality:
 - Public submission pages include an **Admin Login** link. Department admins now have a form-based login and a **Logout** control. Existing Basic-auth access remains as a compatibility fallback.
 
 No new npm dependency or Render environment variable is required for v16.
+
+
+## v17: Separate Non-Residential regular-student project work
+
+- `Non-Residential` is now a fixed option in the **Undergraduate Project Work** Study Centre dropdown. It is intended for regular students and is not added to the Field Experience study-centre list.
+- Project-work submissions are classified as either **Distance** or **Non-Residential (Regular)**. Existing records whose Study Centre is `Non-Residential` are automatically recognised as regular-student records even if they were created before v17.
+- Department admins receive Project Work in two separate subsections: **Distance Undergraduate Project Work** and **Non-Residential Undergraduate Project Work**.
+- Both streams retain the Pending → Approved → Rejected / Returned review gate. Only Approved records enter consolidated outputs.
+- Existing project score exports now contain **Distance students only**.
+- New Non-Residential exports are available separately: **Consolidated Non-Residential Scores**, **Master Non-Residential Scores**, and **Non-Residential Project Work Register**.
+- Duplicate-registration and repeat-submission warnings are evaluated within the same project stream so a Non-Residential submission does not contaminate Distance verification.
+- Field Experience outputs remain unchanged and separate.
+
+No new environment variable or npm dependency is required for v17.
