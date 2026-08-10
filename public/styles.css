@@ -45,3 +45,4 @@
 /* v11: assignment-linked assessor submissions */
 input.locked-field,select.locked-field,input:disabled.locked-field,select:disabled.locked-field{background:#eef3f7;color:#405364;border-color:#cbd6df;opacity:1;cursor:not-allowed}
 #assignmentBanner{margin:0 0 22px;background:#eaf6ef;border:1px solid #b9dfc9;color:#12683d}
+.top-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.login-link{font-weight:800}.login-card{max-width:620px;margin:38px auto}.page-intro.compact{margin-bottom:10px}.locked-field{background:#f2f5f7}
