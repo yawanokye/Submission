@@ -142,3 +142,21 @@ GMAIL_REFRESH_TOKEN=...
 GMAIL_SENDER_EMAIL=...
 GMAIL_FROM_NAME=...
 ```
+
+## v16: Staged dissertation workflow, vetting controls and anonymous feedback
+
+Version 16 strengthens dissertation processing and reviewer confidentiality:
+
+- **Changed titles after review are supported.** Fresh, revised and final submissions validate the title against the dissertation uploaded at that stage. A revised title may therefore differ from the fresh-submission title when a reviewer has recommended a title change. The previous-stage title and lineage are retained for audit purposes.
+- **Assessor/vetter identity is never intentionally released through the student feedback route.** Department admins must prepare an anonymised student copy of the report, and optionally an anonymised reviewed dissertation, before forwarding. The original report, claim form and score sheet remain internal. The server also checks extractable document text for the reviewer name/email before accepting the student copy.
+- **Fresh dissertation assignments remain Assessment assignments** with a maximum of 3 assessors. Status colours remain red for 0, amber for 1 and green for 2 or 3.
+- **Revised dissertation assignments are Vetting assignments** with a maximum of 2 vetters. Revised records show Vetter(s), and the colour changes from red at 0 to green at 1 or 2.
+- The Revised Dissertation section has **Email Selected to Vetter**, which creates the same secure one-link workspace used for fresh Assessment assignments.
+- The public Dissertation portal now supports **Fresh Submission, Revised Submission and Final Dissertation**. Final submissions require the final dissertation, one or more reviewer-response files and a plagiarism/Turnitin report.
+- The department admin portal has separate **Fresh, Revised and Final Dissertation** subsections. Final records are retained as individual submissions and are not assigned for assessment/vetting.
+- Every Assessment/Vetting work submitted through a secure assignment now requires **Report + Claim Form + Score Sheet**. A reviewed dissertation remains optional.
+- Fresh and Revised Dissertation Registers are exported separately. Each register de-duplicates by index number within that stage and retains the latest submission for that student.
+- Department admins can **Return to Student Without Processing** at the Fresh, Revised or Final stage, with standard reasons for unpaid fees, unsatisfactory/invalid Turnitin report, incomplete/invalid reviewer response, or a custom reason. The student receives the reason by Gmail. Active assignment links containing a returned work are updated/revoked as appropriate.
+- Public submission pages include an **Admin Login** link. Department admins now have a form-based login and a **Logout** control. Existing Basic-auth access remains as a compatibility fallback.
+
+No new npm dependency or Render environment variable is required for v16.

@@ -211,6 +211,31 @@ app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Form-based administrator sessions. Basic authentication remains accepted for backward compatibility.
+const ADMIN_SESSIONS = new Map();
+const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+function parseCookies(req) {
+  const out={};
+  for(const part of String(req.headers.cookie||'').split(';')){
+    const i=part.indexOf('='); if(i<0) continue;
+    out[decodeURIComponent(part.slice(0,i).trim())]=decodeURIComponent(part.slice(i+1).trim());
+  }
+  return out;
+}
+function createAdminSession(identity, department) {
+  const token=crypto.randomBytes(32).toString('hex');
+  ADMIN_SESSIONS.set(token,{identity,department,expiresAt:Date.now()+ADMIN_SESSION_TTL_MS});
+  return token;
+}
+function sessionIdentity(req, department) {
+  const token=parseCookies(req).ucc_admin_session; if(!token) return null;
+  const s=ADMIN_SESSIONS.get(token);
+  if(!s || s.expiresAt<=Date.now() || s.department!==department){if(s)ADMIN_SESSIONS.delete(token);return null;}
+  s.expiresAt=Date.now()+ADMIN_SESSION_TTL_MS;
+  return s.identity;
+}
+function clearAdminSession(req) { const token=parseCookies(req).ucc_admin_session; if(token) ADMIN_SESSIONS.delete(token); }
+
 function safeEqual(a, b) {
   const aa = Buffer.from(String(a));
   const bb = Buffer.from(String(b));
@@ -303,49 +328,36 @@ async function sendAdminPasswordSetupEmail({to,name,username,role,departments,se
   const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${isReset?'Password Reset':'Administrator Account Invitation'}</h2><p>Dear ${htmlEscape(name)},</p><p>${isReset?'A secure password-reset link has been issued for your':'An individual administrator account has been created for you on the'} UCC Academic Submission Portal.</p><div style="margin:18px 0;padding:16px;background:#f5f7fa;border-left:4px solid #d4a72c"><strong>Temporary account credential</strong><br>Username: <strong>${htmlEscape(username)}</strong><br>Password: <strong>Set by you using the one-time link below</strong></div><p><a href="${htmlEscape(setupUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">${isReset?'Set New Password':'Set Your Password'}</a></p><p>This one-time link expires on <strong>${htmlEscape(expiryText)}</strong>. After the password is set, the link cannot be used again.</p><p><strong>Role:</strong> ${htmlEscape(role)}<br><strong>Department access:</strong> ${htmlEscape(deptNames.join(', '))}<br><strong>Section access:</strong> ${htmlEscape(sectionNames.join(', '))}</p><p>After setting your password, sign in to the department administration portal using the username above and the password you create:</p><ul>${portalRows}</ul><p>If you did not expect this account, do not use the link and contact the portal administrator.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
   return sendGmailHtmlEmail({to,subject,html});
 }
-async function departmentAuth(req, res, next) {
-  const slug = String(req.params.department || '');
-  const dept = departmentFromSlug(slug);
-  if (!dept) return res.status(404).send('Department administrator portal not found.');
-
-  const header = req.headers.authorization || '';
-  if (!header.startsWith('Basic ')) {
-    res.set('WWW-Authenticate', `Basic realm="${dept.name} Administration"`);
-    return res.status(401).send('Department administrator authentication required.');
-  }
-  try {
-    const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
-    const sep = decoded.indexOf(':');
-    const user = sep >= 0 ? decoded.slice(0, sep) : decoded;
-    const pass = sep >= 0 ? decoded.slice(sep + 1) : '';
-
-    // Existing department environment account remains the department master administrator.
-    if (safeEqual(user, dept.user) && safeEqual(pass, dept.password)) {
-      req.adminDepartment = slug;
-      req.adminDepartmentName = dept.name;
-      req.adminIdentity = {
-        id:`department-master:${slug}`, name:`${dept.name} Administrator`, username:user,
-        role:'administrator', sections:['project-work','field-experience','dissertation','assessor'], departments:[slug], master:true
-      };
-      return next();
-    }
-
-    const accounts = await readAdminUsers();
-    const account = accounts.find(a => a.active !== false && String(a.username || '').toLowerCase() === user.toLowerCase());
-    const allowedDepartment = account && (account.departments || []).includes(slug);
-    if (!account || !allowedDepartment || !verifyPassword(pass, account.passwordSalt, account.passwordHash)) {
-      res.set('WWW-Authenticate', `Basic realm="${dept.name} Administration"`);
-      return res.status(401).send('Invalid department administrator credentials.');
-    }
-    req.adminDepartment = slug;
-    req.adminDepartmentName = dept.name;
-    req.adminIdentity = {...publicAdminUser(account), master:false};
-    return next();
-  } catch (e) {
-    console.error('Department authentication failed:', e);
-    return res.status(401).send('Invalid department administrator credentials.');
-  }
+async function verifyDepartmentCredentials(slug,user,pass) {
+  const dept=departmentFromSlug(slug); if(!dept) return null;
+  if(safeEqual(user,dept.user)&&safeEqual(pass,dept.password)) return {
+    id:`department-master:${slug}`,name:`${dept.name} Administrator`,username:user,
+    role:'administrator',sections:['project-work','field-experience','dissertation','assessor'],departments:[slug],master:true
+  };
+  const accounts=await readAdminUsers();
+  const account=accounts.find(a=>a.active!==false&&String(a.username||'').toLowerCase()===String(user||'').toLowerCase());
+  if(!account || !(account.departments||[]).includes(slug) || !verifyPassword(pass,account.passwordSalt,account.passwordHash)) return null;
+  return {...publicAdminUser(account),master:false};
 }
+async function departmentAuth(req, res, next) {
+  const slug=String(req.params.department||''); const dept=departmentFromSlug(slug);
+  if(!dept) return res.status(404).send('Department administrator portal not found.');
+  try {
+    const session=sessionIdentity(req,slug);
+    if(session){req.adminDepartment=slug;req.adminDepartmentName=dept.name;req.adminIdentity=session;return next();}
+    const header=req.headers.authorization||'';
+    if(header.startsWith('Basic ')){
+      const decoded=Buffer.from(header.slice(6),'base64').toString('utf8'); const sep=decoded.indexOf(':');
+      const user=sep>=0?decoded.slice(0,sep):decoded,pass=sep>=0?decoded.slice(sep+1):'';
+      const identity=await verifyDepartmentCredentials(slug,user,pass);
+      if(identity){req.adminDepartment=slug;req.adminDepartmentName=dept.name;req.adminIdentity=identity;return next();}
+    }
+    const wantsHtml=req.method==='GET' && !req.path.startsWith('/api/') && (String(req.headers.accept||'').includes('text/html')||!req.headers.accept);
+    if(wantsHtml) return res.redirect(`/admin-login.html?department=${encodeURIComponent(slug)}`);
+    return res.status(401).json({error:'Department administrator authentication required.'});
+  } catch(e){console.error('Department authentication failed:',e);return res.status(401).json({error:'Invalid department administrator credentials.'});}
+}
+
 function portalSectionForRecord(record) {
   const type = record?.portalType || 'project-work';
   return ADMIN_SECTIONS.has(type) ? type : 'project-work';
@@ -584,6 +596,21 @@ async function extractDissertationText(file) {
   }
   throw new Error('Dissertation title validation supports PDF, DOC and DOCX files only.');
 }
+async function uploadedFileContainsReviewerIdentity(file, reviewerName='', reviewerEmail='') {
+  if(!file) return false;
+  const ext=path.extname(file.originalname||file.path).toLowerCase();
+  if(!['.pdf','.doc','.docx'].includes(ext)) return false;
+  try {
+    const raw=(await extractDissertationText(file)).slice(0,200000);
+    const normalized=normalizeDissertationTitle(raw);
+    const email=String(reviewerEmail||'').trim().toLowerCase();
+    if(email && raw.toLowerCase().includes(email)) return true;
+    const tokens=personNameTokens(reviewerName);
+    if(tokens.length>=2){const joined=tokens.join(' ');if(normalized.includes(joined))return true;}
+    return false;
+  } catch { return false; }
+}
+
 async function validateDissertationTitleAgainstFile(enteredTitle, file) {
   const expected = normalizeDissertationTitle(enteredTitle);
   const expectedCompact = compactDissertationTitle(enteredTitle);
@@ -676,9 +703,16 @@ function reservedAssessorMap(assignments) {
   }
   return map;
 }
-function dissertationAssignmentInfo(dissertationId, assignments) {
-  const m = reservedAssessorMap(assignments).get(dissertationId) || new Map();
-  return { count:m.size, assessors:[...m.values()] };
+function dissertationAssignmentInfo(dissertationId, assignments, assignmentType=null) {
+  const map=new Map();
+  for(const a of assignments||[]){
+    if(a.revokedAt) continue;
+    if(assignmentType && (a.assignmentType||'assessment')!==assignmentType) continue;
+    if(!(a.dissertationIds||[]).map(String).includes(String(dissertationId))) continue;
+    const email=String(a.assessorEmail||'').trim().toLowerCase(),name=a.assessorName||a.assessorEmail||'',key=personKey(name,email);
+    if(key&&!map.has(key))map.set(key,{email,name,assignmentId:a.id});
+  }
+  return {count:map.size,assessors:[...map.values()]};
 }
 function gmailConfigured() {
   return Boolean(GMAIL_CLIENT_ID && GMAIL_CLIENT_SECRET && GMAIL_REFRESH_TOKEN && GMAIL_SENDER_EMAIL);
@@ -758,16 +792,22 @@ async function sendGmailEmail({ to, assessorName, departmentName, dissertationCo
   const earlyText = new Date(earlyBirdDueAt).toLocaleDateString('en-GB', { dateStyle:'long', timeZone:'UTC' });
   const dueText = new Date(assessmentDueAt).toLocaleDateString('en-GB', { dateStyle:'long', timeZone:'UTC' });
   const optionalMessage = message ? `<div style="margin:18px 0;padding:14px 16px;background:#f5f7fa;border-left:4px solid #d4a72c"><strong>Message from the department</strong><br>${htmlEscape(message).replace(/\n/g,'<br>')}</div>` : '';
-  const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Dissertations Assigned for ${taskTitle}</h2><p>Dear ${htmlEscape(assessorName)},</p><p>${htmlEscape(departmentName)} has assigned <strong>${dissertationCount}</strong> dissertation${dissertationCount===1?'':'s'} to you for ${taskLabel}.</p>${optionalMessage}<p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Access Your ${taskTitle} Assignment</a></p><p>This <strong>single secure assignment link</strong> contains all assigned works. Use it to download the dissertations and to submit each ${taskLabel} report separately as you complete it. Please do not forward the link.</p><div style="margin:20px 0;padding:16px;background:#fff7dc;border:1px solid #ead58c;border-radius:8px"><strong>${taskTitle} timeline</strong><ul style="margin-bottom:0"><li>Dissertation downloads are available through <strong>${htmlEscape(expiresText)}</strong>. The same assignment workspace remains available for report submission through the 8-week due date.</li><li>Please submit each ${taskLabel} report and claim form within <strong>8 weeks</strong> of the original assignment, by <strong>${htmlEscape(dueText)}</strong>.</li><li>Each individual work submitted within <strong>4 weeks</strong>, by <strong>${htmlEscape(earlyText)}</strong>, qualifies for the <strong>Early Bird</strong> completion category.</li></ul></div><p>Your assigned student names, index numbers, programmes and student-email links are bound to the secure assignment. You do not need to re-enter student information.</p><p style="font-size:13px;color:#526575">Assignment link: ${htmlEscape(secureUrl)}<br>You can return to this same link to submit remaining reports until the 8-week due date unless the department revokes the assignment.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+  const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Dissertations Assigned for ${taskTitle}</h2><p>Dear ${htmlEscape(assessorName)},</p><p>${htmlEscape(departmentName)} has assigned <strong>${dissertationCount}</strong> dissertation${dissertationCount===1?'':'s'} to you for ${taskLabel}.</p>${optionalMessage}<p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Access Your ${taskTitle} Assignment</a></p><p>This <strong>single secure assignment link</strong> contains all assigned works. Use it to download the dissertations and to submit each ${taskLabel} report separately as you complete it. Please do not forward the link.</p><div style="margin:20px 0;padding:16px;background:#fff7dc;border:1px solid #ead58c;border-radius:8px"><strong>${taskTitle} timeline</strong><ul style="margin-bottom:0"><li>Dissertation downloads are available through <strong>${htmlEscape(expiresText)}</strong>. The same assignment workspace remains available for report submission through the 8-week due date.</li><li>Please submit each ${taskLabel} report, claim form and score sheet within <strong>8 weeks</strong> of the original assignment, by <strong>${htmlEscape(dueText)}</strong>.</li><li>Each individual work submitted within <strong>4 weeks</strong>, by <strong>${htmlEscape(earlyText)}</strong>, qualifies for the <strong>Early Bird</strong> completion category.</li></ul></div><p>Your assigned student names, index numbers, programmes and student-email links are bound to the secure assignment. You do not need to re-enter student information.</p><p style="font-size:13px;color:#526575">Assignment link: ${htmlEscape(secureUrl)}<br>You can return to this same link to submit remaining reports until the 8-week due date unless the department revokes the assignment.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
   return sendGmailHtmlEmail({to,subject:`Dissertations for ${taskTitle} - ${departmentName}`,html});
 }
-async function sendStudentFeedbackEmail({to, studentName, departmentName, assessorName, secureUrl, expiresAt, reportType='assessment'}) {
+async function sendStudentFeedbackEmail({to, studentName, departmentName, secureUrl, expiresAt, reportType='assessment'}) {
   const isVetting=reportType==='vetting';
   const label=isVetting?'Vetting':'Assessment';
   const expiryText=new Date(expiresAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'})+' UTC';
-  const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Dissertation ${label} Feedback</h2><p>Dear ${htmlEscape(studentName)},</p><p>${htmlEscape(departmentName)} has made your dissertation ${label.toLowerCase()} feedback available. The package contains the ${label.toLowerCase()} report${assessorName?` from <strong>${htmlEscape(assessorName)}</strong>`:''} and, where supplied by the assessor, the reviewed dissertation.</p><p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Access ${label} Feedback</a></p><p>This secure link expires on <strong>${htmlEscape(expiryText)}</strong>. Please do not forward the link.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
-  return sendGmailHtmlEmail({to,subject:`Dissertation ${label} Feedback - ${departmentName}`,html});
+  const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Dissertation ${label} Feedback</h2><p>Dear ${htmlEscape(studentName)},</p><p>${htmlEscape(departmentName)} has made your dissertation ${label.toLowerCase()} feedback available.</p><p>The feedback is provided anonymously. The portal does not disclose the identity, name or email address of the assessor/vetter.</p><p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Access ${label} Feedback</a></p><p>This secure link expires on <strong>${htmlEscape(expiryText)}</strong>. Please do not forward the link.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+  return sendGmailHtmlEmail({to,subject:`Dissertation ${label} Feedback`,html});
 }
+async function sendDissertationReturnedEmail({to,studentName,departmentName,submissionType,reason,portalUrl}) {
+  const typeLabel=submissionType==='final'?'Final Dissertation':submissionType==='revised'?'Revised Dissertation':'Fresh Dissertation';
+  const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${typeLabel} Returned for Correction</h2><p>Dear ${htmlEscape(studentName)},</p><p>${htmlEscape(departmentName)} has returned your ${typeLabel.toLowerCase()} submission without further processing.</p><div style="margin:18px 0;padding:15px;background:#fff4e5;border-left:4px solid #cf7b00"><strong>Reason</strong><br>${htmlEscape(reason)}</div><p>Please address the issue and submit the appropriate dissertation stage again through the Dissertation Submission Portal.</p><p><a href="${htmlEscape(portalUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:11px 16px;border-radius:7px;font-weight:bold">Open Dissertation Submission Portal</a></p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+  return sendGmailHtmlEmail({to,subject:`${typeLabel} returned for correction`,html});
+}
+
 async function assignmentByToken(token) {
   const hash = assignmentTokenHash(token);
   const assignments = await readAssignments();
@@ -870,6 +910,20 @@ function latestStudentDissertation(records, department, indexNumber){
     .filter(r=>normalizeIndexNumber(r.indexNumber)===key && isEmail(r.email))
     .sort((a,b)=>String(b.submittedAt||'').localeCompare(String(a.submittedAt||'')))[0] || null;
 }
+function latestDissertationOfType(records, department, indexNumber, submissionType) {
+  const key=normalizeIndexNumber(indexNumber);
+  return dissertationRecords(recordsForDepartment(records,department))
+    .filter(r=>normalizeIndexNumber(r.indexNumber)===key && (r.submissionType||'fresh')===submissionType)
+    .sort((a,b)=>String(b.submittedAt||'').localeCompare(String(a.submittedAt||'')))[0] || null;
+}
+function dissertationLineageParent(records, department, indexNumber, submissionType) {
+  if(submissionType==='revised') return latestDissertationOfType(records,department,indexNumber,'fresh');
+  if(submissionType==='final') return latestDissertationOfType(records,department,indexNumber,'revised') || latestDissertationOfType(records,department,indexNumber,'fresh');
+  return null;
+}
+function dissertationProcessingStatus(record){return record?.processingStatus||'received';}
+function dissertationReturnReason(record){return record?.returnReason||'';}
+
 
 function normalizeHeader(value) {
   return String(value ?? '')
@@ -1038,51 +1092,49 @@ app.post('/api/field-experience', upload.fields([
 app.post('/api/dissertation', upload.fields([
   { name:'dissertationFile', maxCount:1 },
   { name:'revisedDissertationFile', maxCount:1 },
-  { name:'reviewerResponses', maxCount:10 }
+  { name:'finalDissertationFile', maxCount:1 },
+  { name:'reviewerResponses', maxCount:10 },
+  { name:'turnitinReport', maxCount:1 }
 ]), async (req, res) => {
   try {
-    const department = validateDepartment(req);
-    if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
+    const department=validateDepartment(req);
+    if(!department){await removeUploaded(req);return res.status(400).json({error:'Please select a valid department.'});}
     const submissionType=text(req,'submissionType');
-    if(!['fresh','revised'].includes(submissionType)) { await removeUploaded(req); return res.status(400).json({error:'Select Fresh Submission or Revised Submission.'}); }
-    const missing = requireText(req, [
-      'studentTitle','studentFirstName','studentLastName','indexNumber','phone','email',
-      'supervisorTitle','supervisorFirstName','supervisorLastName','programme','dissertationTopic'
-    ]);
-    if (missing) { await removeUploaded(req); return res.status(400).json({ error:`Missing required field: ${missing}` }); }
-
-    const freshFile=filesFor(req,'dissertationFile')[0] || null;
-    const revisedFile=filesFor(req,'revisedDissertationFile')[0] || null;
+    if(!['fresh','revised','final'].includes(submissionType)){await removeUploaded(req);return res.status(400).json({error:'Select Fresh Submission, Revised Submission or Final Dissertation.'});}
+    const missing=requireText(req,['studentTitle','studentFirstName','studentLastName','indexNumber','phone','email','supervisorTitle','supervisorFirstName','supervisorLastName','programme','dissertationTopic']);
+    if(missing){await removeUploaded(req);return res.status(400).json({error:`Missing required field: ${missing}`});}
+    const freshFile=filesFor(req,'dissertationFile')[0]||null;
+    const revisedFile=filesFor(req,'revisedDissertationFile')[0]||null;
+    const finalFile=filesFor(req,'finalDissertationFile')[0]||null;
     const reviewerResponses=filesFor(req,'reviewerResponses');
-    const dissertationFile=submissionType==='revised' ? revisedFile : freshFile;
-    if (!dissertationFile) {
-      await removeUploaded(req);
-      return res.status(400).json({ error:submissionType==='revised'?'The revised dissertation file is required.':'The dissertation file is required.' });
-    }
-    if(submissionType==='revised' && !reviewerResponses.length){
-      await removeUploaded(req); return res.status(400).json({error:"At least one reviewers' response file is required for a revised submission."});
-    }
+    const turnitinReport=filesFor(req,'turnitinReport')[0]||null;
+    const dissertationFile=submissionType==='final'?finalFile:(submissionType==='revised'?revisedFile:freshFile);
+    if(!dissertationFile){await removeUploaded(req);return res.status(400).json({error:submissionType==='final'?'The final dissertation file is required.':submissionType==='revised'?'The revised dissertation file is required.':'The dissertation file is required.'});}
+    if(['revised','final'].includes(submissionType)&&!reviewerResponses.length){await removeUploaded(req);return res.status(400).json({error:"At least one reviewer-response file is required for revised and final submissions."});}
+    if(submissionType==='final'&&!turnitinReport){await removeUploaded(req);return res.status(400).json({error:'The plagiarism (Turnitin) report is required for the final dissertation submission.'});}
     const ext=path.extname(dissertationFile.originalname||'').toLowerCase();
-    if(!['.pdf','.doc','.docx'].includes(ext)) { await removeUploaded(req); return res.status(400).json({error:'Upload the dissertation as a PDF, DOC or DOCX file.'}); }
-
+    if(!['.pdf','.doc','.docx'].includes(ext)){await removeUploaded(req);return res.status(400).json({error:'Upload the dissertation as a PDF, DOC or DOCX file.'});}
     let titleValidation;
-    try { titleValidation=await validateDissertationTitleAgainstFile(text(req,'dissertationTopic'), dissertationFile); }
-    catch(e) { await removeUploaded(req); return res.status(400).json({error:e.message||String(e)}); }
-
+    try{titleValidation=await validateDissertationTitleAgainstFile(text(req,'dissertationTopic'),dissertationFile);}
+    catch(e){await removeUploaded(req);return res.status(400).json({error:e.message||String(e)});}
+    const all=await readDb();
+    const parent=dissertationLineageParent(all,department,text(req,'indexNumber'),submissionType);
     const studentName=buildDisplayName(text(req,'studentTitle'),text(req,'studentFirstName'),text(req,'studentLastName'));
     const supervisorName=buildDisplayName(text(req,'supervisorTitle'),text(req,'supervisorFirstName'),text(req,'supervisorLastName'));
-    const record = {
-      id: crypto.randomUUID(), portalType:'dissertation', submissionType, department, departmentName: DEPARTMENTS[department].name,
-      reference:makeReference(submissionType==='revised'?'DREV':'DISS'), submittedAt:new Date().toISOString(),
-      studentTitle:text(req,'studentTitle'), studentFirstName:text(req,'studentFirstName'), studentLastName:text(req,'studentLastName'), studentName,
-      indexNumber:text(req,'indexNumber'), phone:text(req,'phone'), email:text(req,'email'),
-      supervisorTitle:text(req,'supervisorTitle'), supervisorFirstName:text(req,'supervisorFirstName'), supervisorLastName:text(req,'supervisorLastName'), supervisorName,
-      programme:text(req,'programme'), dissertationTopic:text(req,'dissertationTopic'), titleValidation,
-      files:{ dissertationFile:fileRecord(dissertationFile), reviewerResponses:reviewerResponses.map(fileRecord) }
+    const id=crypto.randomUUID();
+    const record={
+      id,portalType:'dissertation',submissionType,department,departmentName:DEPARTMENTS[department].name,
+      reference:makeReference(submissionType==='final'?'DFINAL':submissionType==='revised'?'DREV':'DISS'),submittedAt:new Date().toISOString(),processingStatus:'received',
+      lineageId:parent?.lineageId||parent?.id||id,previousSubmissionId:parent?.id||null,previousDissertationTopic:parent?.dissertationTopic||'',
+      studentTitle:text(req,'studentTitle'),studentFirstName:text(req,'studentFirstName'),studentLastName:text(req,'studentLastName'),studentName,
+      indexNumber:text(req,'indexNumber'),phone:text(req,'phone'),email:text(req,'email'),
+      supervisorTitle:text(req,'supervisorTitle'),supervisorFirstName:text(req,'supervisorFirstName'),supervisorLastName:text(req,'supervisorLastName'),supervisorName,
+      programme:text(req,'programme'),dissertationTopic:text(req,'dissertationTopic'),titleValidation,
+      files:{dissertationFile:fileRecord(dissertationFile),reviewerResponses:reviewerResponses.map(fileRecord),turnitinReport:turnitinReport?fileRecord(turnitinReport):null}
     };
-    await saveRecord(record);
-    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, titleValidated:true, submissionType });
-  } catch (e) { console.error(e); await removeUploaded(req).catch(()=>{}); res.status(500).json({ error:'The dissertation submission could not be saved.' }); }
+    all.push(record); await writeDb(all);
+    res.status(201).json({ok:true,reference:record.reference,submittedAt:record.submittedAt,departmentName:record.departmentName,titleValidated:true,submissionType,titleChangedFromPrevious:Boolean(parent&&normalizeDissertationTitle(parent.dissertationTopic)!==normalizeDissertationTitle(record.dissertationTopic))});
+  } catch(e){console.error(e);await removeUploaded(req).catch(()=>{});res.status(500).json({error:'The dissertation submission could not be saved.'});}
 });
 
 // 3. ASSESSOR / VETTING SUBMISSION
@@ -1092,6 +1144,7 @@ for (let i = 0; i < 25; i++) {
   assessorUploadFields.push(
     { name:`reportFile_${i}`, maxCount:1 },
     { name:`claimForm_${i}`, maxCount:1 },
+    { name:`scoreSheet_${i}`, maxCount:1 },
     { name:`dissertationFile_${i}`, maxCount:1 }
   );
 }
@@ -1150,6 +1203,7 @@ app.get('/api/assessor/assignment-context/:token', async(req,res)=>{
 const assignmentWorkUpload=upload.fields([
   {name:'reportFile',maxCount:1},
   {name:'claimForm',maxCount:1},
+  {name:'scoreSheet',maxCount:1},
   {name:'dissertationFile',maxCount:1}
 ]);
 
@@ -1169,19 +1223,20 @@ app.post('/api/assessor/assignment/:token/works/:dissertationId', assignmentWork
       const existing=assignmentSubmittedWorkMap(assignment.id,allRecords).get(dissertationId);
       if(existing){await removeUploaded(req);return res.status(409).json({error:`This work has already been submitted under reference ${existing.record.reference}. If a replacement is required, contact the department administrator.`});}
       const phone=text(req,'phone');
-      if(!phone){await removeUploaded(req);return res.status(400).json({error:'Enter the assessor telephone number before submitting this work.'});}
+      if(!phone){await removeUploaded(req);return res.status(400).json({error:`Enter the ${((assignment.assignmentType||'assessment')==='vetting')?'vetter':'assessor'} telephone number before submitting this work.`});}
       const report=filesFor(req,'reportFile')[0];
       const claim=filesFor(req,'claimForm')[0];
+      const scoreSheet=filesFor(req,'scoreSheet')[0];
       const reviewed=filesFor(req,'dissertationFile')[0]||null;
       const reportType=assignment.assignmentType||'assessment';
-      if(!report||!claim){await removeUploaded(req);return res.status(400).json({error:`One ${reportType==='vetting'?'vetting':'assessment'} report and one claim form are required for this work.`});}
+      if(!report||!claim||!scoreSheet){await removeUploaded(req);return res.status(400).json({error:`One ${reportType==='vetting'?'vetting':'assessment'} report, one claim form and one score sheet are required for this work.`});}
       const submittedAt=new Date().toISOString();
       const workNo=Math.max(1,(assignment.dissertationIds||[]).map(String).indexOf(dissertationId)+1);
       const work={
         workNo,
         studentFirstName:student.studentFirstName||'',studentLastName:student.studentLastName||'',studentName:student.studentName||'',
         indexNumber:student.indexNumber||'',programme:student.programme||'',studentEmail:student.email||'',studentSubmissionId:student.id,studentSubmissionType:student.submissionType||'fresh',
-        files:{reportFile:fileRecord(report),claimForm:fileRecord(claim),dissertationFile:reviewed?fileRecord(reviewed):null}
+        files:{reportFile:fileRecord(report),claimForm:fileRecord(claim),scoreSheet:fileRecord(scoreSheet),dissertationFile:reviewed?fileRecord(reviewed):null}
       };
       const earlyBirdQualified=earlyBirdForSubmission(assignment,submittedAt);
       const record={
@@ -1191,7 +1246,7 @@ app.post('/api/assessor/assignment/:token/works/:dissertationId', assignmentWork
         earlyBirdQualified,earlyBirdDueAt:assignment.earlyBirdDueAt||null,assessmentDueAt:assignment.assessmentDueAt||null,
         assessorTitle:assignment.assessorTitle||'',assessorFirstName:assignment.assessorFirstName||'',assessorLastName:assignment.assessorLastName||'',assessorName:assignment.assessorName||'',
         phone,email:assignment.assessorEmail||'',workCount:1,works:[work],studentName:work.studentName,indexNumber:work.indexNumber,programme:work.programme,
-        files:{reportFile:[work.files.reportFile],claimForm:[work.files.claimForm],dissertationFile:work.files.dissertationFile?[work.files.dissertationFile]:[]}
+        files:{reportFile:[work.files.reportFile],claimForm:[work.files.claimForm],scoreSheet:[work.files.scoreSheet],dissertationFile:work.files.dissertationFile?[work.files.dissertationFile]:[]}
       };
       await saveRecord(record);
       if(!assignment.assessorPhone){await mutateAssignments(list=>{const a=list.find(x=>x.id===assignment.id);if(a&&!a.assessorPhone)a.assessorPhone=phone;return true;});}
@@ -1266,15 +1321,16 @@ app.post('/api/assessor', upload.fields(assessorUploadFields), async (req, res) 
       if(!studentFirstName||!studentLastName||!indexNumber||!programme){await removeUploaded(req);return res.status(400).json({error:`Complete all required student details for Work ${i+1}.`});}
       const report=filesFor(req,`reportFile_${i}`)[0];
       const claim=filesFor(req,`claimForm_${i}`)[0];
+      const scoreSheet=filesFor(req,`scoreSheet_${i}`)[0];
       const dissertation=filesFor(req,`dissertationFile_${i}`)[0]||null;
-      if(!report||!claim){await removeUploaded(req);return res.status(400).json({error:`Work ${i+1} requires one ${reportType==='vetting'?'vetting':'assessment'} report and one claim form.`});}
+      if(!report||!claim||!scoreSheet){await removeUploaded(req);return res.status(400).json({error:`Work ${i+1} requires one ${reportType==='vetting'?'vetting':'assessment'} report, one claim form and one score sheet.`});}
       works.push({
         workNo:i+1,
         studentFirstName,studentLastName,
         studentName:buildDisplayName('',studentFirstName,studentLastName),
         indexNumber,programme,
         studentEmail,studentSubmissionId,studentSubmissionType,
-        files:{reportFile:fileRecord(report),claimForm:fileRecord(claim),dissertationFile:dissertation?fileRecord(dissertation):null}
+        files:{reportFile:fileRecord(report),claimForm:fileRecord(claim),scoreSheet:fileRecord(scoreSheet),dissertationFile:dissertation?fileRecord(dissertation):null}
       });
     }
 
@@ -1292,6 +1348,7 @@ app.post('/api/assessor', upload.fields(assessorUploadFields), async (req, res) 
       files:{
         reportFile:works.map(w=>w.files.reportFile),
         claimForm:works.map(w=>w.files.claimForm),
+        scoreSheet:works.map(w=>w.files.scoreSheet),
         dissertationFile:works.map(w=>w.files.dissertationFile).filter(Boolean)
       }
     };
@@ -1443,9 +1500,19 @@ function fieldExperienceRegisterAoA(records) {
   const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
   const body=fieldExperienceRecords(records).map((r,i)=>[i+1,r.reference,r.submittedAt,r.fullName,r.phone,r.email,r.studyCentre,r.groupCount,validScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']); return [h,...body];
 }
-function dissertationRegisterAoA(records) {
+function dedupDissertationStage(records, submissionType) {
+  const map=new Map();
+  dissertationRecords(records).filter(r=>(r.submissionType||'fresh')===submissionType).forEach(r=>{
+    const key=normalizeIndexNumber(r.indexNumber)||String(r.id);
+    const prev=map.get(key);
+    if(!prev||String(r.submittedAt||'').localeCompare(String(prev.submittedAt||''))>0)map.set(key,r);
+  });
+  return [...map.values()].sort((a,b)=>String(a.studentName||'').localeCompare(String(b.studentName||'')));
+}
+function dissertationRegisterAoA(records, submissionType='fresh') {
   const h=['S/N','Name of Student','Index Number','Dissertation Title','Programme',"Supervisor's Name"];
-  const body=dissertationRecords(records).map((r,i)=>[i+1,r.studentName,r.indexNumber,r.dissertationTopic,r.programme,r.supervisorName]); return [h,...body];
+  const body=dedupDissertationStage(records,submissionType).map((r,i)=>[i+1,r.studentName,r.indexNumber,r.dissertationTopic,r.programme,r.supervisorName]);
+  return [h,...body];
 }
 function addSheet(wb,name,aoa,widths) {
   const ws=XLSX.utils.aoa_to_sheet(aoa);
@@ -1468,7 +1535,8 @@ function workbookBuffer(kind,records) {
     addSheet(wb,'Master Field Experience Scores',fieldExperienceScoreSheetAoA(records),[10,34,24,16,16]);
     addSheet(wb,'Field Experience Register',fieldExperienceRegisterAoA(records),[8,22,24,32,18,30,22,24,20,24,24,28,38]);
   }
-  if(kind==='dissertation-register') addSheet(wb,'Dissertation Register',dissertationRegisterAoA(records),[8,34,24,58,32,34]);
+  if(kind==='fresh-dissertation-register') addSheet(wb,'Fresh Dissertation Register',dissertationRegisterAoA(records,'fresh'),[8,34,24,58,32,34]);
+  if(kind==='revised-dissertation-register') addSheet(wb,'Revised Dissertation Register',dissertationRegisterAoA(records,'revised'),[8,34,24,58,32,34]);
   return XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
 }
 function sendWorkbook(res,kind,records,filename){
@@ -1486,32 +1554,31 @@ function feedbackAdminInfoForWork(work, records, department){
   return {state,email,studentSubmissionId:student?.id||work?.studentSubmissionId||null,studentSubmissionType:student?.submissionType||work?.studentSubmissionType||'',sentAt:work?.feedback?.sentAt||null,downloadedAt:work?.feedback?.downloadedAt||null,downloadCount:Number(work?.feedback?.downloadCount||0),lastEmailError:work?.feedback?.lastEmailError||''};
 }
 function adminRecordsMap(records, assignments=[]) {
-  const activeMap=reservedAssessorMap(assignments);
   return records.slice().reverse().map(r=>{
-    const assignees=activeMap.get(r.id)||new Map();
+    const submissionType=r.submissionType||'fresh';
+    const expectedAssignmentType=submissionType==='revised'?'vetting':submissionType==='fresh'?'assessment':null;
+    const info=expectedAssignmentType?dissertationAssignmentInfo(r.id,assignments,expectedAssignmentType):{count:0,assessors:[]};
+    const assignmentLimit=submissionType==='revised'?2:submissionType==='fresh'?3:0;
     return {
-      id:r.id, reference:r.reference, submittedAt:r.submittedAt, portalType:r.portalType||'project-work',
-      name:r.fullName||r.studentName||r.assessorName||'', secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
-      title:r.title||r.studentTitle||r.assessorTitle||'', firstName:r.firstName||r.studentFirstName||r.assessorFirstName||'', lastName:r.lastName||r.studentLastName||r.assessorLastName||'',
-      email:r.email||'', phone:r.phone||'', programme:r.programme||'', studyCentre:r.studyCentre||'', scoreRows:validScoreRows(r).length,
-      projectReviewStatus:projectReviewStatus(r), projectReviewLabel:projectReviewLabel(projectReviewStatus(r)), projectReviewNote:r.reviewNote||'', projectReviewedAt:r.reviewedAt||null, projectReviewedBy:r.reviewedBy||'',
-      projectWarnings:(r.portalType==='project-work'||!r.portalType)?projectSubmissionWarnings(r,records):[],
-      fieldReviewStatus:projectReviewStatus(r), fieldReviewLabel:projectReviewLabel(projectReviewStatus(r)), fieldReviewNote:r.reviewNote||'', fieldReviewedAt:r.reviewedAt||null, fieldReviewedBy:r.reviewedBy||'',
-      fieldWarnings:r.portalType==='field-experience'?fieldExperienceSubmissionWarnings(r,records):[],
-      studentName:r.studentName||'', indexNumber:r.indexNumber||'', dissertationTopic:r.dissertationTopic||'', supervisorName:r.supervisorName||'', submissionType:r.submissionType||'fresh',
-      titleValidated:Boolean(r.titleValidation?.matched),
-      assessorName:r.assessorName||'', workCount:r.workCount||1, reportType:r.reportType||'assessment', assignmentId:r.assignmentId||null, assignmentReference:r.assignmentReference||'',
-      assignmentWorkNo:r.assignmentWorkNo||null, assignmentTotalWorks:r.assignmentTotalWorks||null, earlyBirdQualified:Boolean(r.earlyBirdQualified),
-      assignmentCount:assignees.size, assignmentLimit:3, assignedAssessors:[...assignees.values()],
-      reportFileCount:Array.isArray(r.files?.reportFile)?r.files.reportFile.length:(r.files?.reportFile?1:0),
-      claimFormCount:Array.isArray(r.files?.claimForm)?r.files.claimForm.length:(r.files?.claimForm?1:0),
-      dissertationFileCount:Array.isArray(r.files?.dissertationFile)?r.files.dissertationFile.length:(r.files?.dissertationFile?1:0),
-      dissertationFileName:Array.isArray(r.files?.dissertationFile)?(r.files.dissertationFile[0]?.originalName||''):(r.files?.dissertationFile?.originalName||''),
+      id:r.id,reference:r.reference,submittedAt:r.submittedAt,portalType:r.portalType||'project-work',
+      name:r.fullName||r.studentName||r.assessorName||'',secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
+      title:r.title||r.studentTitle||r.assessorTitle||'',firstName:r.firstName||r.studentFirstName||r.assessorFirstName||'',lastName:r.lastName||r.studentLastName||r.assessorLastName||'',
+      email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:r.studyCentre||'',scoreRows:validScoreRows(r).length,
+      projectReviewStatus:projectReviewStatus(r),projectReviewLabel:projectReviewLabel(projectReviewStatus(r)),projectReviewNote:r.reviewNote||'',projectReviewedAt:r.reviewedAt||null,projectReviewedBy:r.reviewedBy||'',projectWarnings:(r.portalType==='project-work'||!r.portalType)?projectSubmissionWarnings(r,records):[],
+      fieldReviewStatus:projectReviewStatus(r),fieldReviewLabel:projectReviewLabel(projectReviewStatus(r)),fieldReviewNote:r.reviewNote||'',fieldReviewedAt:r.reviewedAt||null,fieldReviewedBy:r.reviewedBy||'',fieldWarnings:r.portalType==='field-experience'?fieldExperienceSubmissionWarnings(r,records):[],
+      studentName:r.studentName||'',indexNumber:r.indexNumber||'',dissertationTopic:r.dissertationTopic||'',previousDissertationTopic:r.previousDissertationTopic||'',supervisorName:r.supervisorName||'',submissionType,
+      processingStatus:dissertationProcessingStatus(r),returnReason:dissertationReturnReason(r),returnedAt:r.returnedAt||null,returnedBy:r.returnedBy||'',returnEmailStatus:r.returnEmailStatus||'',
+      titleValidated:Boolean(r.titleValidation?.matched),lineageId:r.lineageId||r.id,previousSubmissionId:r.previousSubmissionId||null,
+      reviewerResponseCount:Array.isArray(r.files?.reviewerResponses)?r.files.reviewerResponses.length:0,turnitinReportPresent:Boolean(r.files?.turnitinReport),
+      assessorName:r.assessorName||'',workCount:r.workCount||1,reportType:r.reportType||'assessment',assignmentId:r.assignmentId||null,assignmentReference:r.assignmentReference||'',
+      assignmentWorkNo:r.assignmentWorkNo||null,assignmentTotalWorks:r.assignmentTotalWorks||null,earlyBirdQualified:Boolean(r.earlyBirdQualified),
+      assignmentCount:info.count,assignmentLimit,assignedAssessors:info.assessors,assignmentRole:submissionType==='revised'?'vetter':submissionType==='fresh'?'assessor':'none',
+      reportFileCount:Array.isArray(r.files?.reportFile)?r.files.reportFile.length:(r.files?.reportFile?1:0),claimFormCount:Array.isArray(r.files?.claimForm)?r.files.claimForm.length:(r.files?.claimForm?1:0),scoreSheetCount:Array.isArray(r.files?.scoreSheet)?r.files.scoreSheet.length:(r.files?.scoreSheet?1:0),
+      dissertationFileCount:Array.isArray(r.files?.dissertationFile)?r.files.dissertationFile.length:(r.files?.dissertationFile?1:0),dissertationFileName:Array.isArray(r.files?.dissertationFile)?(r.files.dissertationFile[0]?.originalName||''):(r.files?.dissertationFile?.originalName||''),
       feedbackStates:r.portalType==='assessor'?(r.works||[]).map(w=>feedbackAdminInfoForWork(w,records,r.department)):[]
     };
   });
 }
-
 function collectStoredFiles(record) {
   const out=[];
   const visit=v=>{
@@ -1523,6 +1590,7 @@ function collectStoredFiles(record) {
     }
   };
   visit(record?.files);
+  visit(record?.works);
   return [...new Set(out)];
 }
 async function deleteDepartmentSubmissions(department, ids) {
@@ -1585,11 +1653,11 @@ app.get('/secure/dissertations/:token', async (req, res) => {
     const reviewerCount=Array.isArray(r.files?.reviewerResponses)?r.files.reviewerResponses.length:0;
     const revised=(r.submissionType||'fresh')==='revised';
     const downloadButtons=downloadActive?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"><a href="/secure/dissertations/${encodeURIComponent(req.params.token)}/works/${encodeURIComponent(r.id)}/dissertation" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:9px 12px;border-radius:7px;font-weight:700">Download ${revised?'Revised ':''}Dissertation</a>${revised&&reviewerCount?`<a href="/secure/dissertations/${encodeURIComponent(req.params.token)}/works/${encodeURIComponent(r.id)}/package" style="display:inline-block;background:#5b6670;color:#fff;text-decoration:none;padding:9px 12px;border-radius:7px;font-weight:700">Download Work Package (${reviewerCount} response${reviewerCount===1?'':'s'})</a>`:''}</div>`:`<div style="margin:12px 0;padding:10px 12px;background:#fff4dd;border:1px solid #ecd7a3;border-radius:7px;color:#795600"><strong>Download period ended.</strong> Report submission remains available until the 8-week due date.</div>`;
-    const statusBlock=submitted?`<div style="margin-top:14px;padding:14px;background:#eaf7ef;border:1px solid #b9dfc9;border-radius:8px;color:#12683d"><strong>✓ Submitted</strong><br>Reference: ${htmlEscape(found.record.reference)}<br>Submitted: ${htmlEscape(new Date(submittedAt).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short',timeZone:'UTC'}))} UTC${earlyBird?'<br><strong>Early Bird ✓</strong>':''}</div>`:`<form class="work-submit-form" data-work-id="${htmlEscape(r.id)}" style="margin-top:16px;padding-top:14px;border-top:1px solid #dde5eb"><div class="upload-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px"><label style="display:grid;gap:5px;font-weight:700;font-size:13px">${taskTitle} Report *<input name="reportFile" type="file" accept=".pdf,.doc,.docx" required style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label><label style="display:grid;gap:5px;font-weight:700;font-size:13px">Claim Form *<input name="claimForm" type="file" accept=".pdf,.doc,.docx" required style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label><label style="display:grid;gap:5px;font-weight:700;font-size:13px">Reviewed Dissertation <span style="font-weight:400;color:#657584">Optional</span><input name="dissertationFile" type="file" accept=".pdf,.doc,.docx" style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label></div><button type="submit" style="margin-top:12px;background:#137a45;color:#fff;border:0;border-radius:7px;padding:10px 15px;font-weight:800;cursor:pointer">Submit Work ${i+1}</button><div class="work-message" aria-live="polite" style="margin-top:9px;font-size:13px"></div></form>`;
+    const statusBlock=submitted?`<div style="margin-top:14px;padding:14px;background:#eaf7ef;border:1px solid #b9dfc9;border-radius:8px;color:#12683d"><strong>✓ Submitted</strong><br>Reference: ${htmlEscape(found.record.reference)}<br>Submitted: ${htmlEscape(new Date(submittedAt).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short',timeZone:'UTC'}))} UTC${earlyBird?'<br><strong>Early Bird ✓</strong>':''}</div>`:`<form class="work-submit-form" data-work-id="${htmlEscape(r.id)}" style="margin-top:16px;padding-top:14px;border-top:1px solid #dde5eb"><div class="upload-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px"><label style="display:grid;gap:5px;font-weight:700;font-size:13px">${taskTitle} Report *<input name="reportFile" type="file" accept=".pdf,.doc,.docx" required style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label><label style="display:grid;gap:5px;font-weight:700;font-size:13px">Claim Form *<input name="claimForm" type="file" accept=".pdf,.doc,.docx" required style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label><label style="display:grid;gap:5px;font-weight:700;font-size:13px">Score Sheet *<input name="scoreSheet" type="file" accept=".xlsx,.xls,.csv,.pdf,.doc,.docx" required style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label><label style="display:grid;gap:5px;font-weight:700;font-size:13px">Reviewed Dissertation <span style="font-weight:400;color:#657584">Optional</span><input name="dissertationFile" type="file" accept=".pdf,.doc,.docx" style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label></div><button type="submit" style="margin-top:12px;background:#137a45;color:#fff;border:0;border-radius:7px;padding:10px 15px;font-weight:800;cursor:pointer">Submit Work ${i+1}</button><div class="work-message" aria-live="polite" style="margin-top:9px;font-size:13px"></div></form>`;
     return `<section style="background:#fff;border:1px solid #d8e1e8;border-radius:12px;padding:20px;margin:16px 0;box-shadow:0 2px 8px rgba(8,43,76,.04)"><div style="display:flex;justify-content:space-between;gap:15px;align-items:flex-start"><div><span style="font-size:12px;font-weight:800;color:#a57900;text-transform:uppercase">Work ${i+1} · ${revised?'Revised':'Fresh'} submission</span><h3 style="margin:5px 0;color:#082b4c">${htmlEscape(r.studentName||'Student')}</h3><div style="color:#526575;font-size:14px">${htmlEscape(r.indexNumber||'')} · ${htmlEscape(r.programme||'')}</div></div><span style="border-radius:999px;padding:6px 10px;font-size:12px;font-weight:800;${submitted?'background:#e8f6ee;color:#12683d':'background:#fff4dd;color:#8a5b00'}">${submitted?'Submitted':'Pending'}</span></div><p style="margin:12px 0 4px;color:#34495a"><strong>Title:</strong> ${htmlEscape(r.dissertationTopic||'')}</p>${revised?`<p style="margin:5px 0;color:#526575;font-size:13px">Reviewer response files linked: <strong>${reviewerCount}</strong></p>`:''}${downloadButtons}${statusBlock}</section>`;
   }).join('');
   const phoneValue=htmlEscape(a.assessorPhone||'');
-  res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${taskTitle} Assignment</title></head><body style="font-family:Arial,sans-serif;background:#f4f7fa;color:#182431;margin:0"><main style="max-width:900px;margin:38px auto;padding:0 16px 50px"><section style="background:#fff;padding:28px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.07)"><div style="font-size:12px;text-transform:uppercase;color:#d4a72c;font-weight:bold">University of Cape Coast</div><h1 style="color:#082b4c;font-size:28px;margin-bottom:6px">Your ${taskTitle} Assignment</h1><p style="margin-top:0;color:#526575">${htmlEscape(a.departmentName)} · ${htmlEscape(a.reference)}</p><p>Dear <strong>${htmlEscape(a.assessorName)}</strong>, you have <strong>${selected.length}</strong> assigned dissertation${selected.length===1?'':'s'}.</p><div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#eef5f9;padding:14px;border-radius:10px;margin:18px 0"><strong style="font-size:20px;color:#082b4c">${completion.submittedCount} of ${completion.total} submitted</strong><span style="color:#526575">${completion.pendingCount} pending</span></div><div style="margin:18px 0;padding:14px 16px;background:#fff7dc;border:1px solid #ead58c;border-radius:8px"><strong>${taskTitle} timeline</strong><p style="margin:7px 0">Early Bird per work: submit by <strong>${htmlEscape(early)}</strong>.</p><p style="margin:7px 0">Final ${taskLabel} deadline: <strong>${htmlEscape(due)}</strong>.</p><p style="margin:7px 0">Dissertation download access: <strong>${htmlEscape(expiry)}</strong>.</p></div>${downloadActive?`<a href="/secure/dissertations/${encodeURIComponent(req.params.token)}/download" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 17px;border-radius:8px;font-weight:bold">Download All ${selected.length} Work${selected.length===1?'':'s'} as ZIP</a>`:''}<div style="margin-top:20px;max-width:420px"><label style="display:grid;gap:6px;font-weight:800">Assessor Telephone Number *<input id="assessorPhone" value="${phoneValue}" placeholder="Enter once for report submissions" style="font:inherit;padding:10px 11px;border:1px solid #bcc9d3;border-radius:8px"></label><small style="color:#657584">Student details are securely linked and cannot be edited.</small></div></section><div>${cards}</div></main><script>const assignmentToken=${JSON.stringify(req.params.token).replace(/</g,'\u003c')};document.querySelectorAll('.work-submit-form').forEach(form=>{form.addEventListener('submit',async e=>{e.preventDefault();const msg=form.querySelector('.work-message'),btn=form.querySelector('button[type="submit"]'),phone=document.getElementById('assessorPhone').value.trim();if(!phone){msg.style.color='#a12f2f';msg.textContent='Enter the assessor telephone number above.';document.getElementById('assessorPhone').focus();return;}if(!form.reportValidity())return;const fd=new FormData(form);fd.append('phone',phone);btn.disabled=true;msg.style.color='#526575';msg.textContent='Uploading and saving this report…';try{const r=await fetch('/api/assessor/assignment/'+encodeURIComponent(assignmentToken)+'/works/'+encodeURIComponent(form.dataset.workId),{method:'POST',body:fd});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'The report could not be submitted.');msg.style.color='#12683d';msg.textContent='Submitted successfully. Updating progress…';setTimeout(()=>location.reload(),600);}catch(err){msg.style.color='#a12f2f';msg.textContent=err.message||'The report could not be submitted.';btn.disabled=false;}});});</script></body></html>`);
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${taskTitle} Assignment</title></head><body style="font-family:Arial,sans-serif;background:#f4f7fa;color:#182431;margin:0"><main style="max-width:900px;margin:38px auto;padding:0 16px 50px"><section style="background:#fff;padding:28px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.07)"><div style="font-size:12px;text-transform:uppercase;color:#d4a72c;font-weight:bold">University of Cape Coast</div><h1 style="color:#082b4c;font-size:28px;margin-bottom:6px">Your ${taskTitle} Assignment</h1><p style="margin-top:0;color:#526575">${htmlEscape(a.departmentName)} · ${htmlEscape(a.reference)}</p><p>Dear <strong>${htmlEscape(a.assessorName)}</strong>, you have <strong>${selected.length}</strong> assigned dissertation${selected.length===1?'':'s'}.</p><div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#eef5f9;padding:14px;border-radius:10px;margin:18px 0"><strong style="font-size:20px;color:#082b4c">${completion.submittedCount} of ${completion.total} submitted</strong><span style="color:#526575">${completion.pendingCount} pending</span></div><div style="margin:18px 0;padding:14px 16px;background:#fff7dc;border:1px solid #ead58c;border-radius:8px"><strong>${taskTitle} timeline</strong><p style="margin:7px 0">Early Bird per work: submit by <strong>${htmlEscape(early)}</strong>.</p><p style="margin:7px 0">Final ${taskLabel} deadline: <strong>${htmlEscape(due)}</strong>.</p><p style="margin:7px 0">Dissertation download access: <strong>${htmlEscape(expiry)}</strong>.</p></div>${downloadActive?`<a href="/secure/dissertations/${encodeURIComponent(req.params.token)}/download" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 17px;border-radius:8px;font-weight:bold">Download All ${selected.length} Work${selected.length===1?'':'s'} as ZIP</a>`:''}<div style="margin-top:20px;max-width:420px"><label style="display:grid;gap:6px;font-weight:800">${taskTitle==='Vetting'?'Vetter':'Assessor'} Telephone Number *<input id="assessorPhone" value="${phoneValue}" placeholder="Enter once for report submissions" style="font:inherit;padding:10px 11px;border:1px solid #bcc9d3;border-radius:8px"></label><small style="color:#657584">Student details are securely linked and cannot be edited.</small></div></section><div>${cards}</div></main><script>const assignmentToken=${JSON.stringify(req.params.token).replace(/</g,'\u003c')};document.querySelectorAll('.work-submit-form').forEach(form=>{form.addEventListener('submit',async e=>{e.preventDefault();const msg=form.querySelector('.work-message'),btn=form.querySelector('button[type="submit"]'),phone=document.getElementById('assessorPhone').value.trim();if(!phone){msg.style.color='#a12f2f';msg.textContent='Enter the assessor/vetter telephone number above.';document.getElementById('assessorPhone').focus();return;}if(!form.reportValidity())return;const fd=new FormData(form);fd.append('phone',phone);btn.disabled=true;msg.style.color='#526575';msg.textContent='Uploading and saving this report…';try{const r=await fetch('/api/assessor/assignment/'+encodeURIComponent(assignmentToken)+'/works/'+encodeURIComponent(form.dataset.workId),{method:'POST',body:fd});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'The report could not be submitted.');msg.style.color='#12683d';msg.textContent='Submitted successfully. Updating progress…';setTimeout(()=>location.reload(),600);}catch(err){msg.style.color='#a12f2f';msg.textContent=err.message||'The report could not be submitted.';btn.disabled=false;}});});</script></body></html>`);
 });
 
 app.get('/secure/dissertations/:token/works/:dissertationId/dissertation', async(req,res)=>{
@@ -1664,15 +1732,15 @@ app.get('/secure/feedback/:token', async(req,res)=>{
   if(!live.ok) return res.status(live.status).send(`<!doctype html><html><body style="font-family:Arial,sans-serif;background:#f4f7fa;color:#182431"><main style="max-width:680px;margin:70px auto;background:#fff;padding:32px;border-radius:14px"><h2>Assessment Feedback</h2><p>${htmlEscape(live.message)}</p></main></body></html>`);
   const {record,work}=found;const f=work.feedback;const expiry=new Date(f.expiresAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'})+' UTC';
   const reportType=f.reportType||record.reportType||'assessment';const label=reportType==='vetting'?'Vetting':'Assessment';
-  res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${label} Feedback</title></head><body style="font-family:Arial,sans-serif;background:#f4f7fa;color:#182431;margin:0"><main style="max-width:680px;margin:60px auto;background:#fff;padding:32px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.08)"><div style="font-size:12px;text-transform:uppercase;color:#d4a72c;font-weight:bold">University of Cape Coast</div><h1 style="color:#082b4c;font-size:26px">Dissertation ${label} Feedback</h1><p>Dear ${htmlEscape(work.studentName||f.studentName||'Student')},</p><p>Your ${label.toLowerCase()} feedback from ${htmlEscape(record.departmentName||'the department')} is ready.</p><p>The download contains the ${label.toLowerCase()} report${work.files?.dissertationFile?' and the reviewed dissertation supplied by the assessor':''}. The claim form is not included.</p><form method="get" action="/secure/feedback/${encodeURIComponent(req.params.token)}/download"><button type="submit" style="background:#082b4c;color:white;border:0;border-radius:8px;padding:13px 18px;font-weight:bold;cursor:pointer">Download ${label} Feedback</button></form><p style="margin-top:22px;color:#647382;font-size:13px">This secure link expires on <strong>${htmlEscape(expiry)}</strong>. Please keep it private.</p></main></body></html>`);
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${label} Feedback</title></head><body style="font-family:Arial,sans-serif;background:#f4f7fa;color:#182431;margin:0"><main style="max-width:680px;margin:60px auto;background:#fff;padding:32px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.08)"><div style="font-size:12px;text-transform:uppercase;color:#d4a72c;font-weight:bold">University of Cape Coast</div><h1 style="color:#082b4c;font-size:26px">Dissertation ${label} Feedback</h1><p>Dear ${htmlEscape(work.studentName||f.studentName||'Student')},</p><p>Your ${label.toLowerCase()} feedback from ${htmlEscape(record.departmentName||'the department')} is ready.</p><p>The download contains an anonymised ${label.toLowerCase()} report${work.feedback?.studentFiles?.dissertationFile?' and an anonymised reviewed dissertation':''}. The claim form, score sheet and assessor/vetter identity are not included.</p><form method="get" action="/secure/feedback/${encodeURIComponent(req.params.token)}/download"><button type="submit" style="background:#082b4c;color:white;border:0;border-radius:8px;padding:13px 18px;font-weight:bold;cursor:pointer">Download ${label} Feedback</button></form><p style="margin-top:22px;color:#647382;font-size:13px">This secure link expires on <strong>${htmlEscape(expiry)}</strong>. Please keep it private.</p></main></body></html>`);
 });
 app.get('/secure/feedback/:token/download', async(req,res)=>{
   const found=await feedbackByToken(req.params.token);const live=validateLiveFeedback(found);
   res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');
   if(!live.ok)return res.status(live.status).send(live.message);
   const {record,work,workIndex}=found;const zipFiles=[];const reportType=work.feedback?.reportType||record.reportType||'assessment';const reportLabel=reportType==='vetting'?'Vetting Report':'Assessment Report';
-  const report=work.files?.reportFile;if(report){const fp=path.join(FILES_DIR,path.basename(report.storedName));if(fs.existsSync(fp))zipFiles.push({path:fp,name:safeBaseName(`${reportLabel} - ${work.indexNumber||work.studentName}${path.extname(report.originalName||fp)}`),size:Number(report.size||fs.statSync(fp).size)});}
-  const reviewed=work.files?.dissertationFile;if(reviewed){const fp=path.join(FILES_DIR,path.basename(reviewed.storedName));if(fs.existsSync(fp))zipFiles.push({path:fp,name:safeBaseName(`Reviewed Dissertation - ${work.indexNumber||work.studentName}${path.extname(reviewed.originalName||fp)}`),size:Number(reviewed.size||fs.statSync(fp).size)});}
+  const report=work.feedback?.studentFiles?.reportFile;if(report){const fp=path.join(FILES_DIR,path.basename(report.storedName));if(fs.existsSync(fp))zipFiles.push({path:fp,name:safeBaseName(`${reportLabel} - ${work.indexNumber||work.studentName}${path.extname(report.originalName||fp)}`),size:Number(report.size||fs.statSync(fp).size)});}
+  const reviewed=work.feedback?.studentFiles?.dissertationFile;if(reviewed){const fp=path.join(FILES_DIR,path.basename(reviewed.storedName));if(fs.existsSync(fp))zipFiles.push({path:fp,name:safeBaseName(`Reviewed Dissertation - ${work.indexNumber||work.studentName}${path.extname(reviewed.originalName||fp)}`),size:Number(reviewed.size||fs.statSync(fp).size)});}
   if(!zipFiles.length)return res.status(404).send('The assessment feedback files are unavailable.');
   res.setHeader('Content-Type','application/zip');res.setHeader('Content-Disposition',`attachment; filename="${safeBaseName(`${record.reference}-${work.indexNumber||'student'}-feedback.zip`)}"`);
   try{await streamZipArchive(res,zipFiles);await mutateAssessmentWork(record.id,workIndex,w=>{w.feedback.downloadedAt=w.feedback.downloadedAt||new Date().toISOString();w.feedback.lastDownloadedAt=new Date().toISOString();w.feedback.downloadCount=Number(w.feedback.downloadCount||0)+1;return true;});}
@@ -1876,23 +1944,31 @@ app.post('/api/admin/:department/dissertation-assignments', departmentAuth, requ
   const assignmentType=String(req.body?.assignmentType||'assessment').trim().toLowerCase();
   const expiryDays=Math.min(60,Math.max(1,Number.parseInt(req.body?.expiryDays,10)||ASSIGNMENT_EXPIRY_DAYS));
   if(!['assessment','vetting'].includes(assignmentType)) return res.status(400).json({error:'Select Assessment or Vetting as the assignment type.'});
+  const requestedRoleLabel=assignmentType==='vetting'?'vetter':'assessor';
   if(!gmailConfigured()) return res.status(503).json({error:'Email sending is not configured. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN and GMAIL_SENDER_EMAIL in Render.'});
   if(!ids.length) return res.status(400).json({error:'Select at least one dissertation.'});
   if(ids.length>500) return res.status(400).json({error:'A maximum of 500 dissertations can be assigned at once.'});
-  if(!assessorTitle || !assessorFirstName || !assessorLastName) return res.status(400).json({error:"Enter the assessor's title, first name and surname."});
-  if(!isEmail(assessorEmail)) return res.status(400).json({error:'Enter a valid assessor email address.'});
+  if(!assessorTitle || !assessorFirstName || !assessorLastName) return res.status(400).json({error:`Enter the ${requestedRoleLabel}'s title, first name and surname.`});
+  if(!isEmail(assessorEmail)) return res.status(400).json({error:`Enter a valid ${requestedRoleLabel} email address.`});
 
   const records=dissertationRecords(recordsForDepartment(await readDb(),req.adminDepartment));
   const selected=ids.map(id=>records.find(r=>r.id===id)).filter(Boolean);
   if(selected.length!==ids.length) return res.status(400).json({error:'One or more selected dissertations are unavailable in this department.'});
   const selectedTypes=new Set(selected.map(r=>r.submissionType||'fresh'));
   if(selectedTypes.size>1) return res.status(400).json({error:'Fresh and revised dissertation submissions must be assigned separately.'});
-  if(selected.some(r=>(r.submissionType||'fresh')==='fresh') && assignmentType!=='assessment') return res.status(400).json({error:'Fresh dissertation submissions can only be assigned for Assessment. Use Vetting for revised submissions.'});
+  const selectedType=[...selectedTypes][0]||'fresh';
+  if(selectedType==='final') return res.status(400).json({error:'Final dissertation submissions are archival/final-stage records and cannot be assigned to an assessor or vetter.'});
+  if(selected.some(r=>dissertationProcessingStatus(r)==='returned')) return res.status(400).json({error:'One or more selected dissertations were returned to the student and cannot be assigned until a new submission is received.'});
+  if(selectedType==='fresh' && assignmentType!=='assessment') return res.status(400).json({error:'Fresh dissertation submissions can only be assigned for Assessment.'});
+  if(selectedType==='revised' && assignmentType!=='vetting') return res.status(400).json({error:'Revised dissertation submissions can only be assigned for Vetting.'});
+  const maxAssignments=selectedType==='revised'?2:3;
+  const roleLabel=selectedType==='revised'?'vetter':'assessor';
+  for(const r of selected){const info=dissertationAssignmentInfo(r.id,await readAssignments(),assignmentType);if(info.count>=maxAssignments)return res.status(400).json({error:`${r.studentName||r.indexNumber||'A selected dissertation'} has already reached the maximum of ${maxAssignments} ${roleLabel}${maxAssignments===1?'':'s'}.`});}
 
   const supervisorConflicts=selected.filter(r=>samePersonName(assessorName,r.supervisorName));
   if(supervisorConflicts.length){
     const labels=supervisorConflicts.slice(0,5).map(r=>`${r.indexNumber||r.studentName||r.reference}`).join(', ');
-    return res.status(400).json({error:`This assessor is recorded as the supervisor for the following selected dissertation${supervisorConflicts.length===1?'':'s'}: ${labels}. A supervisor cannot be assigned as assessor for the same work.`});
+    return res.status(400).json({error:`This assessor is recorded as the supervisor for the following selected dissertation${supervisorConflicts.length===1?'':'s'}: ${labels}. A supervisor cannot be assigned as assessor/vetter for the same work.`});
   }
 
   const token=newAssignmentToken();
@@ -1914,16 +1990,16 @@ app.post('/api/admin/:department/dissertation-assignments', departmentAuth, requ
       const people=activeMap.get(r.id)||new Map();
       const duplicate=[...people.values()].some(p=>String(p.email||'').toLowerCase()===assessorEmail.toLowerCase() || samePersonName(p.name,assessorName));
       if(duplicate) alreadyAssigned.push(r);
-      if(people.size>=3) atLimit.push(r);
+      if(people.size>=maxAssignments) atLimit.push(r);
     }
     if(alreadyAssigned.length){
       const labels=alreadyAssigned.slice(0,5).map(r=>r.indexNumber||r.studentName||r.reference).join(', ');
-      reservationError=`This assessor has already been assigned the following dissertation${alreadyAssigned.length===1?'':'s'}: ${labels}. Use Resend Link on the existing assignment instead.`;
+      reservationError=`This ${roleLabel} has already been assigned the following dissertation${alreadyAssigned.length===1?'':'s'}: ${labels}. Use Resend Link on the existing assignment instead.`;
       return false;
     }
     if(atLimit.length){
       const labels=atLimit.slice(0,5).map(r=>r.indexNumber||r.studentName||r.reference).join(', ');
-      reservationError=`The following dissertation${atLimit.length===1?' has':'s have'} already reached the maximum of 3 assessors: ${labels}.`;
+      reservationError=`The following dissertation${atLimit.length===1?' has':'s have'} already reached the maximum of ${maxAssignments} ${roleLabel}s: ${labels}.`;
       return false;
     }
     list.push(assignment);
@@ -1959,12 +2035,14 @@ app.post('/api/admin/:department/dissertation-assignments/:id/resend', departmen
   const existing=all.find(x=>x.id===req.params.id&&x.department===req.adminDepartment);
   if(!existing) return res.status(404).json({error:'Assignment not found.'});
   if(existing.revokedAt){
+    const maxAssignments=(existing.assignmentType||'assessment')==='vetting'?2:3;
+    const roleLabel=(existing.assignmentType||'assessment')==='vetting'?'vetter':'assessor';
     const records=dissertationRecords(recordsForDepartment(await readDb(),req.adminDepartment));
     const selected=(existing.dissertationIds||[]).map(id=>records.find(r=>r.id===id)).filter(Boolean);
     const supervisorConflicts=selected.filter(r=>samePersonName(existing.assessorName,r.supervisorName));
     if(supervisorConflicts.length){
       const labels=supervisorConflicts.slice(0,5).map(r=>r.indexNumber||r.studentName||r.reference).join(', ');
-      return res.status(400).json({error:`This revoked assignment cannot be reactivated because the assessor is recorded as supervisor for: ${labels}.`});
+      return res.status(400).json({error:`This revoked assignment cannot be reactivated because the ${roleLabel} is recorded as supervisor for: ${labels}.`});
     }
     const otherAssignments=all.filter(a=>a.department===req.adminDepartment && a.id!==existing.id);
     const reservedMap=reservedAssessorMap(otherAssignments);
@@ -1973,15 +2051,15 @@ app.post('/api/admin/:department/dissertation-assignments/:id/resend', departmen
       const people=reservedMap.get(r.id)||new Map();
       const duplicate=[...people.values()].some(p=>String(p.email||'').toLowerCase()===String(existing.assessorEmail||'').toLowerCase() || samePersonName(p.name,existing.assessorName));
       if(duplicate) duplicates.push(r);
-      if(people.size>=3) atLimit.push(r);
+      if(people.size>=maxAssignments) atLimit.push(r);
     }
     if(duplicates.length){
       const labels=duplicates.slice(0,5).map(r=>r.indexNumber||r.studentName||r.reference).join(', ');
-      return res.status(400).json({error:`This assessor is already assigned to the following dissertation${duplicates.length===1?'':'s'} in another active assignment: ${labels}.`});
+      return res.status(400).json({error:`This ${roleLabel} is already assigned to the following dissertation${duplicates.length===1?'':'s'} in another active assignment: ${labels}.`});
     }
     if(atLimit.length){
       const labels=atLimit.slice(0,5).map(r=>r.indexNumber||r.studentName||r.reference).join(', ');
-      return res.status(400).json({error:`The following dissertation${atLimit.length===1?' has':'s have'} already reached the maximum of 3 assessors: ${labels}.`});
+      return res.status(400).json({error:`The following dissertation${atLimit.length===1?' has':'s have'} already reached the maximum of ${maxAssignments} ${roleLabel}s: ${labels}.`});
     }
   }
   const expiryDays=Math.min(60,Math.max(1,Number.parseInt(req.body?.expiryDays,10)||ASSIGNMENT_EXPIRY_DAYS));
@@ -2002,6 +2080,20 @@ app.post('/api/admin/:department/dissertation-assignments/:id/resend', departmen
     res.status(502).json({error:`The secure link was regenerated, but the email could not be sent: ${e.message||e}`});
   }
 });
+
+// Form-based administrator login/logout.
+app.get('/admin-login.html',(_req,res)=>res.sendFile(path.join(__dirname,'public','admin-login.html')));
+app.post('/api/admin-login',async(req,res)=>{
+  const department=String(req.body?.department||'').trim(),username=String(req.body?.username||'').trim(),password=String(req.body?.password||'');
+  if(!departmentFromSlug(department))return res.status(400).json({error:'Select a valid department.'});
+  const identity=await verifyDepartmentCredentials(department,username,password);
+  if(!identity)return res.status(401).json({error:'Invalid username or password for the selected department.'});
+  const token=createAdminSession(identity,department);
+  res.cookie('ucc_admin_session',token,{httpOnly:true,secure:req.secure||String(req.headers['x-forwarded-proto']||'').includes('https'),sameSite:'lax',maxAge:ADMIN_SESSION_TTL_MS,path:'/'});
+  res.json({ok:true,redirect:`/admin/${encodeURIComponent(department)}`});
+});
+app.post('/api/admin-logout',(req,res)=>{clearAdminSession(req);res.clearCookie('ucc_admin_session',{path:'/'});res.json({ok:true,redirect:'/'});});
+app.get('/admin/logout',(req,res)=>{clearAdminSession(req);res.clearCookie('ucc_admin_session',{path:'/'});res.redirect('/');});
 
 // Public admin chooser. Department data remain protected behind department-specific credentials.
 app.get('/admin',(_req,res)=>res.sendFile(path.join(__dirname,'admin','chooser.html')));
@@ -2054,6 +2146,22 @@ app.post('/api/admin/:department/field-experience/:id/review', departmentAuth, r
   res.json({ok:true,status,label:projectReviewLabel(status),reviewedAt:now,reviewedBy:reviewer,warnings:fieldExperienceSubmissionWarnings(target,departmentRecords)});
 });
 
+app.post('/api/admin/:department/dissertations/:id/return-to-student', departmentAuth, requireAdminAccess('dissertation','officer'), async(req,res)=>{
+  const reasonCode=String(req.body?.reasonCode||'').trim();
+  const otherReason=String(req.body?.otherReason||'').trim().slice(0,1500);
+  const reasons={fees:'Fees not paid in full',turnitin:'Plagiarism (Turnitin) report not satisfactory / not valid',reviewer:'Reviewer response not complete / invalid',other:otherReason};
+  const reason=reasons[reasonCode]; if(!reason)return res.status(400).json({error:'Select a valid reason. If Other is selected, enter the reason.'});
+  const all=await readDb();const record=all.find(r=>r.id===req.params.id&&r.portalType==='dissertation'&&r.department===req.adminDepartment);
+  if(!record)return res.status(404).json({error:'Dissertation submission not found.'});
+  if(!isEmail(record.email))return res.status(400).json({error:'This submission has no valid student email address.'});
+  record.processingStatus='returned';record.returnReasonCode=reasonCode;record.returnReason=reason;record.returnedAt=new Date().toISOString();record.returnedBy=req.adminIdentity?.name||req.adminIdentity?.username||'Department administrator';record.returnEmailStatus='pending';
+  await writeDb(all);
+  await mutateAssignments(list=>{for(const a of list){if(a.department!==req.adminDepartment||a.revokedAt)continue;if(!(a.dissertationIds||[]).map(String).includes(String(record.id)))continue;a.dissertationIds=(a.dissertationIds||[]).filter(x=>String(x)!==String(record.id));a.returnedWorkIds=[...new Set([...(a.returnedWorkIds||[]),record.id])];if(!a.dissertationIds.length){a.revokedAt=new Date().toISOString();a.emailStatus='revoked';a.revokedReason='All works in this assignment were returned to students.';}}return true;});
+  try{const mail=await sendDissertationReturnedEmail({to:record.email,studentName:record.studentName,departmentName:req.adminDepartmentName,submissionType:record.submissionType||'fresh',reason,portalUrl:`${baseUrlFor(req)}/dissertation.html`});
+    const fresh=await readDb();const target=fresh.find(r=>r.id===record.id);if(target){target.returnEmailStatus='sent';target.returnEmailMessageId=mail.id||'';await writeDb(fresh);}return res.json({ok:true,status:'returned',reason});
+  }catch(e){const fresh=await readDb();const target=fresh.find(r=>r.id===record.id);if(target){target.returnEmailStatus='failed';target.returnEmailError=String(e.message||e).slice(0,500);await writeDb(fresh);}return res.status(502).json({error:`The dissertation was marked Returned to Student, but the email could not be sent: ${e.message||e}`});}
+});
+
 app.delete('/api/admin/:department/submissions/:id', departmentAuth, async(req,res)=>{
   const records=recordsForDepartment(await readDb(),req.adminDepartment);const target=records.find(r=>r.id===req.params.id);
   if(!target)return res.status(404).json({error:'Submission not found in this department.'});
@@ -2087,7 +2195,7 @@ app.get('/api/admin/:department/submissions/:id/works/:workIndex/files/:kind', d
   const workIndex=Number.parseInt(req.params.workIndex,10);
   const work=Array.isArray(r.works)?r.works[workIndex]:null;
   if(!work)return res.status(404).send('Assessment work not found.');
-  const allowed=['reportFile','claimForm','dissertationFile'];
+  const allowed=['reportFile','claimForm','scoreSheet','dissertationFile'];
   if(!allowed.includes(req.params.kind))return res.status(400).send('Invalid file type.');
   const item=work.files?.[req.params.kind];
   if(!item)return res.status(404).send('File not found.');
@@ -2096,26 +2204,33 @@ app.get('/api/admin/:department/submissions/:id/works/:workIndex/files/:kind', d
   res.download(fp,item.originalName);
 });
 
-app.post('/api/admin/:department/submissions/:id/works/:workIndex/forward-to-student', departmentAuth, requireAdminAccess('assessor','officer'), async(req,res)=>{
-  if(!gmailConfigured())return res.status(503).json({error:'Email sending is not configured for Gmail API.'});
+const studentFeedbackUpload=upload.fields([{name:'studentReportFile',maxCount:1},{name:'studentDissertationFile',maxCount:1}]);
+app.post('/api/admin/:department/submissions/:id/works/:workIndex/forward-to-student', departmentAuth, requireAdminAccess('assessor','officer'), studentFeedbackUpload, async(req,res)=>{
+  if(!gmailConfigured()){await removeUploaded(req);return res.status(503).json({error:'Email sending is not configured for Gmail API.'});}
   const all=await readDb();const record=all.find(r=>r.id===req.params.id&&r.department===req.adminDepartment&&r.portalType==='assessor');
-  if(!record)return res.status(404).json({error:'Assessment submission not found.'});
-  const workIndex=Number.parseInt(req.params.workIndex,10),work=record.works?.[workIndex];if(!work)return res.status(404).json({error:'Assessment work not found.'});
+  if(!record){await removeUploaded(req);return res.status(404).json({error:'Assessment submission not found.'});}
+  const workIndex=Number.parseInt(req.params.workIndex,10),work=record.works?.[workIndex];if(!work){await removeUploaded(req);return res.status(404).json({error:'Assessment work not found.'});}
   const exact=work.studentSubmissionId?all.find(r=>r.id===work.studentSubmissionId&&r.portalType==='dissertation'&&r.department===req.adminDepartment):null;
   const student=exact||latestStudentDissertation(all,req.adminDepartment,work.indexNumber);
-  if(!student||!isEmail(student.email))return res.status(400).json({error:`No dissertation submission with a valid student email was found for index number ${work.indexNumber||''}.`});
+  if(!student||!isEmail(student.email)){await removeUploaded(req);return res.status(400).json({error:`No dissertation submission with a valid student email was found for index number ${work.indexNumber||''}.`});}
   const reportType=record.reportType||'assessment';
-  if((student.submissionType||'fresh')==='fresh'&&reportType!=='assessment')return res.status(400).json({error:'Fresh dissertation submissions can only receive an Assessment Report. Vetting reports are for revised submissions.'});
-  if(!work.files?.reportFile)return res.status(400).json({error:`This work has no ${reportType==='vetting'?'vetting':'assessment'} report to forward.`});
+  if((student.submissionType||'fresh')==='fresh'&&reportType!=='assessment'){await removeUploaded(req);return res.status(400).json({error:'Fresh dissertation submissions can only receive an Assessment Report.'});}
+  const priorStudentFiles=work.feedback?.studentFiles||{};
+  const newReport=filesFor(req,'studentReportFile')[0]||null,newDissertation=filesFor(req,'studentDissertationFile')[0]||null;
+  if(newReport && await uploadedFileContainsReviewerIdentity(newReport,record.assessorName,record.email)){await removeUploaded(req);return res.status(400).json({error:'The proposed student report copy still appears to contain the assessor/vetter name or email. Remove all reviewer identity before forwarding.'});}
+  if(newDissertation && await uploadedFileContainsReviewerIdentity(newDissertation,record.assessorName,record.email)){await removeUploaded(req);return res.status(400).json({error:'The proposed student reviewed-dissertation copy appears to contain the assessor/vetter name or email. Upload an anonymised copy.'});}
+  const reportFile=newReport?fileRecord(newReport):priorStudentFiles.reportFile||null;
+  const reviewedFile=newDissertation?fileRecord(newDissertation):priorStudentFiles.dissertationFile||null;
+  if(!reportFile){await removeUploaded(req);return res.status(400).json({error:'Upload an anonymised student copy of the report before forwarding. The original assessor/vetter report is never sent directly to the student.'});}
   const token=newAssignmentToken(),now=new Date(),expiresAt=new Date(now.getTime()+STUDENT_FEEDBACK_EXPIRY_DAYS*24*60*60*1000).toISOString();
-  work.feedback={...(work.feedback||{}),tokenHash:assignmentTokenHash(token),recipientEmail:student.email,studentSubmissionId:student.id,studentSubmissionType:student.submissionType||'fresh',reportType,createdAt:work.feedback?.createdAt||now.toISOString(),expiresAt,sentAt:null,downloadedAt:null,lastDownloadedAt:null,downloadCount:0,revokedAt:null,emailStatus:'pending',lastEmailError:''};
+  work.feedback={...(work.feedback||{}),tokenHash:assignmentTokenHash(token),recipientEmail:student.email,studentSubmissionId:student.id,studentSubmissionType:student.submissionType||'fresh',reportType,createdAt:work.feedback?.createdAt||now.toISOString(),expiresAt,sentAt:null,downloadedAt:null,lastDownloadedAt:null,downloadCount:0,revokedAt:null,emailStatus:'pending',lastEmailError:'',studentFiles:{reportFile,dissertationFile:reviewedFile}};
   await writeDb(all);
   const secureUrl=`${baseUrlFor(req)}/secure/feedback/${token}`;
   try{
-    const email=await sendStudentFeedbackEmail({to:student.email,studentName:student.studentName||work.studentName,departmentName:req.adminDepartmentName,assessorName:record.assessorName,secureUrl,expiresAt,reportType});
+    const email=await sendStudentFeedbackEmail({to:student.email,studentName:student.studentName||work.studentName,departmentName:req.adminDepartmentName,secureUrl,expiresAt,reportType});
     await mutateAssessmentWork(record.id,workIndex,w=>{w.feedback.sentAt=new Date().toISOString();w.feedback.emailStatus='sent';w.feedback.emailProvider='gmail';w.feedback.emailProviderMessageId=email.id||'';w.feedback.lastEmailError='';return true;});
     res.json({ok:true,email:student.email,status:'sent'});
-  }catch(e){console.error('Student feedback email failed:',e);await mutateAssessmentWork(record.id,workIndex,w=>{w.feedback.emailStatus='failed';w.feedback.lastEmailError=String(e.message||e).slice(0,500);return true;});res.status(502).json({error:`The feedback link was prepared, but the email could not be sent: ${e.message||e}`});}
+  }catch(e){console.error('Student feedback email failed:',e);await mutateAssessmentWork(record.id,workIndex,w=>{w.feedback.emailStatus='failed';w.feedback.lastEmailError=String(e.message||e).slice(0,500);return true;});res.status(502).json({error:`The anonymous feedback link was prepared, but the email could not be sent: ${e.message||e}`});}
 });
 app.post('/api/admin/:department/submissions/:id/works/:workIndex/revoke-feedback', departmentAuth, requireAdminAccess('assessor','officer'), async(req,res)=>{
   const workIndex=Number.parseInt(req.params.workIndex,10);const result=await mutateAssessmentWork(req.params.id,workIndex,(w,r)=>{if(r.department!==req.adminDepartment||!w.feedback)return null;w.feedback.revokedAt=new Date().toISOString();w.feedback.emailStatus='revoked';return true;});
@@ -2127,7 +2242,7 @@ app.get('/api/admin/:department/submissions/:id/files/:kind/:index?', department
   const r=records.find(x=>x.id===req.params.id);
   if(!r)return res.status(404).send('Submission not found in this department.');
   if(!adminCan(req,portalSectionForRecord(r),'viewer'))return res.status(403).send('You do not have access to this submission section.');
-  const allowed=['claimForm','reportFile','scoresFile','completedWork','dissertationFile','reviewerResponses'];
+  const allowed=['claimForm','reportFile','scoresFile','completedWork','dissertationFile','reviewerResponses','turnitinReport'];
   if(!allowed.includes(req.params.kind))return res.status(400).send('Invalid file type.');
   let item=r.files?.[req.params.kind];
   if(Array.isArray(item))item=item[Number(req.params.index||0)];
@@ -2173,9 +2288,13 @@ app.get('/api/admin/:department/export/field-experience-master.xlsx', department
 });
 
 // DISSERTATION register and selected-document ZIP. No dissertation content is consolidated.
-app.get('/api/admin/:department/export/dissertation-register.xlsx', departmentAuth, requireAdminAccess('dissertation','viewer'), async(req,res)=>{
+app.get('/api/admin/:department/export/fresh-dissertation-register.xlsx', departmentAuth, requireAdminAccess('dissertation','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
-  sendWorkbook(res,'dissertation-register',records,`${req.adminDepartment}-dissertation-register.xlsx`);
+  sendWorkbook(res,'fresh-dissertation-register',records,`${req.adminDepartment}-fresh-dissertation-register.xlsx`);
+});
+app.get('/api/admin/:department/export/revised-dissertation-register.xlsx', departmentAuth, requireAdminAccess('dissertation','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  sendWorkbook(res,'revised-dissertation-register',records,`${req.adminDepartment}-revised-dissertation-register.xlsx`);
 });
 app.post('/api/admin/:department/dissertations/download-selected', departmentAuth, requireAdminAccess('dissertation','viewer'), async(req,res)=>{
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];

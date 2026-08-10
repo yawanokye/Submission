@@ -1,8 +1,8 @@
 {
   "name": "ucc-departmental-submission-portals",
-  "version": "15.0.0",
+  "version": "16.0.0",
   "private": true,
-  "description": "UCC departmental submission portals with approved-only project and Field Experience score consolidation, secure assessor/vetter workspaces, individual-admin email invitations, Gmail distribution and student feedback forwarding",
+  "description": "UCC departmental submission portals with staged dissertation workflows, anonymous student feedback, assessor/vetter assignment controls, required score sheets, final dissertation intake, score verification, Field Experience, Gmail delivery and role-based administration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
