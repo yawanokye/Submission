@@ -13,7 +13,8 @@ async function submitForm(form, endpoint, statusEl, submitBtn){
     if(!res.ok) throw new Error(data.error||'Submission failed.');
     const destination=data.departmentName?` Destination: ${data.departmentName}.`:'';
     const validation=data.titleValidated?' Dissertation title validated against the uploaded work.':'';
-    setStatus(statusEl,true,`Submission received successfully. Reference: ${data.reference}.${destination}${validation}`);
+    const review=data.reviewStatusLabel?` Status: ${data.reviewStatusLabel}. Scores will enter consolidated outputs only after departmental approval.`:'';
+    setStatus(statusEl,true,`Submission received successfully. Reference: ${data.reference}.${destination}${validation}${review}`);
     form.reset();
     return data;
   }catch(err){
