@@ -52,3 +52,18 @@ tr.dissertation-state-green td{background:#eef9f2}tr.dissertation-state-green td
 @media(max-width:700px){.submission-subsection{padding:12px}.subsection-head{gap:10px}}
 
 .status-in-progress{background:#fff4dd;color:#8a5b00}.status-completed{background:#e8f6ee;color:#12683d}.status-download-expired{background:#f1f3f5;color:#586674}
+
+/* v14: undergraduate project-work verification gate */
+.project-review-legend{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:2px 0 14px;color:#647382;font-size:11px}
+.project-review-badge{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:850;white-space:nowrap;border:1px solid transparent}
+.review-pending{background:#fff4dd;color:#8a5b00;border-color:#ead39b}.review-approved{background:#e8f6ee;color:#12683d;border-color:#b9dfc9}.review-rejected{background:#fdeaea;color:#a12f2f;border-color:#efc2bd}.review-returned{background:#e8f1fb;color:#0b4f7d;border-color:#bfd3e7}
+tr.review-row-pending td{background:#fffaf0}tr.review-row-pending td:first-child{box-shadow:inset 4px 0 #d89400}
+tr.review-row-approved td{background:#f3fbf6}tr.review-row-approved td:first-child{box-shadow:inset 4px 0 #238154}
+tr.review-row-rejected td{background:#fff7f7}tr.review-row-rejected td:first-child{box-shadow:inset 4px 0 #c73b3b}
+tr.review-row-returned td{background:#f3f8fd}tr.review-row-returned td:first-child{box-shadow:inset 4px 0 #2a6f9e}
+.warning-count{display:inline-flex;align-items:center;border-radius:999px;padding:5px 8px;background:#fff0c9;color:#805600;border:1px solid #efd18a;font-size:10px;font-weight:850;white-space:nowrap}.warning-clear{font-size:10px;font-weight:750;color:#5b7464}.project-warning-panel{margin-top:18px;border-radius:11px;padding:14px 16px;border:1px solid}.project-warning-panel h3,.project-review-controls h3{margin:0 0 7px;color:var(--navy);font-size:15px}.project-warning-panel p{margin:0;color:#536574}.project-warning-panel ul{margin:0;padding-left:20px}.project-warning-panel li+li{margin-top:6px}.project-warning-panel.has-warnings{background:#fffaf0;border-color:#ead39b;color:#6f5500}.project-warning-panel.no-warnings{background:#f3fbf6;border-color:#b9dfc9}.project-review-controls{margin-top:14px;padding:14px 16px;border:1px solid #d5e0e8;border-radius:11px;background:#f8fbfd}.project-review-controls p{margin:0 0 10px;color:#647382;font-size:12px}.btn.approve{background:#137a45;color:#fff;border-color:#137a45}.btn.return{background:#e8f1fb;color:#0b4f7d;border-color:#bfd3e7}.btn:disabled{opacity:.55;cursor:not-allowed}
+
+/* v15 Field Experience score workflow */
+.summary-grid{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.field-experience-subsection{margin-top:26px;padding-top:24px;border-top:2px solid #dbe4eb}
+.field-experience-subsection .subsection-head{align-items:flex-start}
