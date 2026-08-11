@@ -73,3 +73,20 @@ tr.review-row-returned td{background:#f3f8fd}tr.review-row-returned td:first-chi
 .non-residential-project-subsection{border-left:4px solid #6d4aa2;background:linear-gradient(90deg,rgba(109,74,162,.055),transparent 28%)}
 .non-residential-project-subsection .section-kicker{color:#6d4aa2}
 .distance-project-subsection{border-left:4px solid #1f6f8b}
+
+/* v19: inline undergraduate score review and row-level approval selection */
+.score-review-section{margin-top:18px;padding:16px;border:1px solid #d5e0e8;border-radius:12px;background:#fbfcfd}
+.score-review-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:10px}
+.score-review-head h3{margin:0 0 5px;color:var(--navy);font-size:17px}
+.score-review-head p{margin:0;color:#607181;font-size:12px;line-height:1.5;max-width:760px}
+.score-review-head strong{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;background:#e8f6ee;color:#12683d;border:1px solid #b9dfc9;border-radius:999px;padding:6px 10px;font-size:11px}
+.score-review-actions{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}
+.score-review-table-wrap{max-height:390px;border:1px solid #dbe4eb;border-radius:10px;background:white}
+.score-review-table{margin:0;min-width:720px}
+.score-review-table th{position:sticky;top:0;z-index:1;background:#eef3f7;color:#173b5b}
+.score-review-table th:first-child,.score-review-table td:first-child{text-align:center;width:70px}
+.score-review-table input[type=checkbox]{width:18px;height:18px;accent-color:#137a45;cursor:pointer}
+.score-review-table tr.score-row-excluded td{background:#fff4f4;color:#8c5a5a;text-decoration:none}
+.score-review-table tr.score-row-excluded td:not(:first-child){opacity:.68}
+.score-review-table tr.score-row-excluded td:first-child{box-shadow:inset 4px 0 #c73b3b}
+@media(max-width:760px){.score-review-head{display:block}.score-review-head strong{margin-top:10px}.score-review-section{padding:12px}}
