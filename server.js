@@ -812,6 +812,13 @@ async function sendDissertationReturnedEmail({to,studentName,departmentName,subm
   return sendGmailHtmlEmail({to,subject:`${typeLabel} returned for correction`,html});
 }
 
+async function sendScoreSubmissionReturnedEmail({to,supervisorName,departmentName,reference,studyCentre,reason,portalType='project-work',portalUrl}) {
+  const isField=portalType==='field-experience';
+  const typeLabel=isField?'Field Experience Score Submission':'Undergraduate Project Work Submission';
+  const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${typeLabel} Returned for Correction</h2><p>Dear ${htmlEscape(supervisorName||'Supervisor / Examiner')},</p><p>${htmlEscape(departmentName)} has reviewed your submission and returned it for correction.</p><div style="margin:18px 0;padding:15px;background:#f5f8fb;border:1px solid #d9e2ec;border-radius:8px"><strong>Submission reference:</strong> ${htmlEscape(reference||'')}<br><strong>Study centre:</strong> ${htmlEscape(studyCentre||'')}</div><div style="margin:18px 0;padding:15px;background:#fff4e5;border-left:4px solid #cf7b00"><strong>Reason / correction required</strong><br>${htmlEscape(reason).replace(/\n/g,'<br>')}</div><p>Please correct the identified issue and submit the corrected ${isField?'Field Experience score':'Undergraduate Project Work'} records again through the submission portal. The corrected submission will enter <strong>Pending Verification</strong> for departmental review.</p><p><a href="${htmlEscape(portalUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:11px 16px;border-radius:7px;font-weight:bold">Open ${isField?'Field Experience':'Project Work'} Submission Portal</a></p><p>If you believe this notice was sent in error, please contact the department and quote the submission reference above.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+  return sendGmailHtmlEmail({to,subject:`${typeLabel} returned for correction - ${reference||''}`,html});
+}
+
 async function assignmentByToken(token) {
   const hash = assignmentTokenHash(token);
   const assignments = await readAssignments();
@@ -1627,8 +1634,8 @@ function adminRecordsMap(records, assignments=[]) {
       name:r.fullName||r.studentName||r.assessorName||'',secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
       title:r.title||r.studentTitle||r.assessorTitle||'',firstName:r.firstName||r.studentFirstName||r.assessorFirstName||'',lastName:r.lastName||r.studentLastName||r.assessorLastName||'',
       email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:r.studyCentre||'',projectStream:(r.portalType==='project-work'||!r.portalType)?projectStream(r):'',scoreRows:validScoreRows(r).length,scoreRowsIncluded:(r.portalType==='project-work'||!r.portalType)?approvedProjectScoreRows(r).length:validScoreRows(r).length,
-      projectReviewStatus:projectReviewStatus(r),projectReviewLabel:projectReviewLabel(projectReviewStatus(r)),projectReviewNote:r.reviewNote||'',projectReviewedAt:r.reviewedAt||null,projectReviewedBy:r.reviewedBy||'',projectWarnings:(r.portalType==='project-work'||!r.portalType)?projectSubmissionWarnings(r,records):[],
-      fieldReviewStatus:projectReviewStatus(r),fieldReviewLabel:projectReviewLabel(projectReviewStatus(r)),fieldReviewNote:r.reviewNote||'',fieldReviewedAt:r.reviewedAt||null,fieldReviewedBy:r.reviewedBy||'',fieldWarnings:r.portalType==='field-experience'?fieldExperienceSubmissionWarnings(r,records):[],
+      projectReviewStatus:projectReviewStatus(r),projectReviewLabel:projectReviewLabel(projectReviewStatus(r)),projectReviewNote:r.reviewNote||'',projectReviewedAt:r.reviewedAt||null,projectReviewedBy:r.reviewedBy||'',projectWarnings:(r.portalType==='project-work'||!r.portalType)?projectSubmissionWarnings(r,records):[],projectReturnEmailStatus:r.reviewReturnEmailStatus||'',projectReturnEmailSentAt:r.reviewReturnEmailSentAt||null,projectReturnEmailError:r.reviewReturnEmailError||'',projectReturnEmailRecipient:r.reviewReturnEmailRecipient||'',
+      fieldReviewStatus:projectReviewStatus(r),fieldReviewLabel:projectReviewLabel(projectReviewStatus(r)),fieldReviewNote:r.reviewNote||'',fieldReviewedAt:r.reviewedAt||null,fieldReviewedBy:r.reviewedBy||'',fieldWarnings:r.portalType==='field-experience'?fieldExperienceSubmissionWarnings(r,records):[],fieldReturnEmailStatus:r.reviewReturnEmailStatus||'',fieldReturnEmailSentAt:r.reviewReturnEmailSentAt||null,fieldReturnEmailError:r.reviewReturnEmailError||'',fieldReturnEmailRecipient:r.reviewReturnEmailRecipient||'',
       studentName:r.studentName||'',indexNumber:r.indexNumber||'',dissertationTopic:r.dissertationTopic||'',previousDissertationTopic:r.previousDissertationTopic||'',supervisorName:r.supervisorName||'',submissionType,
       processingStatus:dissertationProcessingStatus(r),returnReason:dissertationReturnReason(r),returnedAt:r.returnedAt||null,returnedBy:r.returnedBy||'',returnEmailStatus:r.returnEmailStatus||'',
       titleValidated:Boolean(r.titleValidation?.matched),lineageId:r.lineageId||r.id,previousSubmissionId:r.previousSubmissionId||null,
@@ -2177,12 +2184,10 @@ app.post('/api/admin/:department/project-work/:id/review', departmentAuth, requi
   const status=String(req.body?.status||'').trim().toLowerCase();
   if(!PROJECT_REVIEW_STATUSES.has(status)) return res.status(400).json({error:'Choose Pending, Approved, Rejected or Returned for Correction.'});
   const note=String(req.body?.note||'').trim().slice(0,1500);
+  if(status==='returned'&&!note) return res.status(400).json({error:'Enter the reason or correction required before returning this submission.'});
   const all=await readDb();
   const target=all.find(r=>r.id===req.params.id&&r.department===req.adminDepartment&&(r.portalType==='project-work'||!r.portalType));
   if(!target) return res.status(404).json({error:'Project work submission not found in this department.'});
-  // Each valid student row is checked by default. Administrators may uncheck rows in
-  // the review dialog to exclude them from approval/consolidation without altering the
-  // original uploaded score sheet. Persist only the excluded source-row indexes.
   if(Array.isArray(req.body?.excludedRowIndexes)){
     const validIndexes=new Set(validScoreRowsWithMeta(target).map(row=>row.sourceIndex));
     target.scoreReviewExcludedRows=[...new Set(req.body.excludedRowIndexes.map(Number).filter(i=>Number.isInteger(i)&&validIndexes.has(i)))].sort((a,b)=>a-b);
@@ -2193,15 +2198,44 @@ app.post('/api/admin/:department/project-work/:id/review', departmentAuth, requi
   target.reviewHistory=Array.isArray(target.reviewHistory)?target.reviewHistory:[];
   target.reviewHistory.push({status,note,reviewedAt:now,reviewedBy:reviewer});
   if(target.reviewHistory.length>50) target.reviewHistory=target.reviewHistory.slice(-50);
+  if(status==='returned'){
+    target.reviewReturnEmailStatus='pending';
+    target.reviewReturnEmailError='';
+  }
   await writeDb(all);
+  let emailSent=null,emailError='';
+  if(status==='returned'){
+    if(!isEmail(target.email)){
+      emailSent=false;emailError='The submission does not contain a valid supervisor/examiner email address.';
+      target.reviewReturnEmailStatus='failed';target.reviewReturnEmailError=emailError;
+      await writeDb(all);
+    }else{
+      try{
+        const mail=await sendScoreSubmissionReturnedEmail({to:target.email,supervisorName:target.fullName,departmentName:req.adminDepartmentName,reference:target.reference,studyCentre:target.studyCentre,reason:note,portalType:'project-work',portalUrl:`${baseUrlFor(req)}/project-work.html`});
+        emailSent=true;target.reviewReturnEmailStatus='sent';target.reviewReturnEmailSentAt=new Date().toISOString();target.reviewReturnEmailMessageId=mail.id||'';target.reviewReturnEmailRecipient=target.email;target.reviewReturnEmailError='';await writeDb(all);
+      }catch(e){emailSent=false;emailError=String(e.message||e).slice(0,500);target.reviewReturnEmailStatus='failed';target.reviewReturnEmailError=emailError;await writeDb(all);console.error('Project Work correction email failed:',e);}
+    }
+  }
   const departmentRecords=recordsForDepartment(all,req.adminDepartment);
-  res.json({ok:true,status,label:projectReviewLabel(status),reviewedAt:now,reviewedBy:reviewer,includedRows:approvedProjectScoreRows(target).length,totalRows:validScoreRows(target).length,warnings:projectSubmissionWarnings(target,departmentRecords)});
+  res.json({ok:true,status,label:projectReviewLabel(status),reviewedAt:now,reviewedBy:reviewer,includedRows:approvedProjectScoreRows(target).length,totalRows:validScoreRows(target).length,warnings:projectSubmissionWarnings(target,departmentRecords),emailSent,emailError});
+});
+
+app.post('/api/admin/:department/project-work/:id/resend-return-email', departmentAuth, requireAdminAccess('project-work','administrator'), async(req,res)=>{
+  const all=await readDb();const target=all.find(r=>r.id===req.params.id&&r.department===req.adminDepartment&&(r.portalType==='project-work'||!r.portalType));
+  if(!target)return res.status(404).json({error:'Project work submission not found in this department.'});
+  if(projectReviewStatus(target)!=='returned')return res.status(400).json({error:'Only a submission currently Returned for Correction can receive a correction email.'});
+  if(!String(target.reviewNote||'').trim())return res.status(400).json({error:'This returned submission has no recorded correction reason. Reset it to Pending and return it again with a reason.'});
+  const recipient=String(req.body?.recipientEmail||target.email||'').trim().toLowerCase();
+  if(!isEmail(recipient))return res.status(400).json({error:'Enter a valid supervisor/examiner email address for the correction notice.'});
+  try{const mail=await sendScoreSubmissionReturnedEmail({to:recipient,supervisorName:target.fullName,departmentName:req.adminDepartmentName,reference:target.reference,studyCentre:target.studyCentre,reason:target.reviewNote,portalType:'project-work',portalUrl:`${baseUrlFor(req)}/project-work.html`});target.reviewReturnEmailStatus='sent';target.reviewReturnEmailSentAt=new Date().toISOString();target.reviewReturnEmailMessageId=mail.id||'';target.reviewReturnEmailRecipient=recipient;target.reviewReturnEmailError='';await writeDb(all);res.json({ok:true,emailSent:true,sentAt:target.reviewReturnEmailSentAt,recipient});}
+  catch(e){target.reviewReturnEmailStatus='failed';target.reviewReturnEmailError=String(e.message||e).slice(0,500);await writeDb(all);console.error('Project Work correction resend failed:',e);res.status(502).json({error:`The correction email could not be sent: ${e.message||e}`});}
 });
 
 app.post('/api/admin/:department/field-experience/:id/review', departmentAuth, requireAdminAccess('field-experience','administrator'), async(req,res)=>{
   const status=String(req.body?.status||'').trim().toLowerCase();
   if(!PROJECT_REVIEW_STATUSES.has(status)) return res.status(400).json({error:'Choose Pending, Approved, Rejected or Returned for Correction.'});
   const note=String(req.body?.note||'').trim().slice(0,1500);
+  if(status==='returned'&&!note) return res.status(400).json({error:'Enter the reason or correction required before returning this submission.'});
   const all=await readDb();
   const target=all.find(r=>r.id===req.params.id&&r.department===req.adminDepartment&&r.portalType==='field-experience');
   if(!target) return res.status(404).json({error:'Field Experience score submission not found in this department.'});
@@ -2211,9 +2245,26 @@ app.post('/api/admin/:department/field-experience/:id/review', departmentAuth, r
   target.reviewHistory=Array.isArray(target.reviewHistory)?target.reviewHistory:[];
   target.reviewHistory.push({status,note,reviewedAt:now,reviewedBy:reviewer});
   if(target.reviewHistory.length>50) target.reviewHistory=target.reviewHistory.slice(-50);
+  if(status==='returned'){target.reviewReturnEmailStatus='pending';target.reviewReturnEmailError='';}
   await writeDb(all);
+  let emailSent=null,emailError='';
+  if(status==='returned'){
+    if(!isEmail(target.email)){emailSent=false;emailError='The submission does not contain a valid supervisor/examiner email address.';target.reviewReturnEmailStatus='failed';target.reviewReturnEmailError=emailError;await writeDb(all);}
+    else try{const mail=await sendScoreSubmissionReturnedEmail({to:target.email,supervisorName:target.fullName,departmentName:req.adminDepartmentName,reference:target.reference,studyCentre:target.studyCentre,reason:note,portalType:'field-experience',portalUrl:`${baseUrlFor(req)}/field-experience.html`});emailSent=true;target.reviewReturnEmailStatus='sent';target.reviewReturnEmailSentAt=new Date().toISOString();target.reviewReturnEmailMessageId=mail.id||'';target.reviewReturnEmailRecipient=target.email;target.reviewReturnEmailError='';await writeDb(all);}catch(e){emailSent=false;emailError=String(e.message||e).slice(0,500);target.reviewReturnEmailStatus='failed';target.reviewReturnEmailError=emailError;await writeDb(all);console.error('Field Experience correction email failed:',e);}
+  }
   const departmentRecords=recordsForDepartment(all,req.adminDepartment);
-  res.json({ok:true,status,label:projectReviewLabel(status),reviewedAt:now,reviewedBy:reviewer,warnings:fieldExperienceSubmissionWarnings(target,departmentRecords)});
+  res.json({ok:true,status,label:projectReviewLabel(status),reviewedAt:now,reviewedBy:reviewer,warnings:fieldExperienceSubmissionWarnings(target,departmentRecords),emailSent,emailError});
+});
+
+app.post('/api/admin/:department/field-experience/:id/resend-return-email', departmentAuth, requireAdminAccess('field-experience','administrator'), async(req,res)=>{
+  const all=await readDb();const target=all.find(r=>r.id===req.params.id&&r.department===req.adminDepartment&&r.portalType==='field-experience');
+  if(!target)return res.status(404).json({error:'Field Experience score submission not found in this department.'});
+  if(projectReviewStatus(target)!=='returned')return res.status(400).json({error:'Only a submission currently Returned for Correction can receive a correction email.'});
+  if(!String(target.reviewNote||'').trim())return res.status(400).json({error:'This returned submission has no recorded correction reason. Reset it to Pending and return it again with a reason.'});
+  const recipient=String(req.body?.recipientEmail||target.email||'').trim().toLowerCase();
+  if(!isEmail(recipient))return res.status(400).json({error:'Enter a valid supervisor/examiner email address for the correction notice.'});
+  try{const mail=await sendScoreSubmissionReturnedEmail({to:recipient,supervisorName:target.fullName,departmentName:req.adminDepartmentName,reference:target.reference,studyCentre:target.studyCentre,reason:target.reviewNote,portalType:'field-experience',portalUrl:`${baseUrlFor(req)}/field-experience.html`});target.reviewReturnEmailStatus='sent';target.reviewReturnEmailSentAt=new Date().toISOString();target.reviewReturnEmailMessageId=mail.id||'';target.reviewReturnEmailRecipient=recipient;target.reviewReturnEmailError='';await writeDb(all);res.json({ok:true,emailSent:true,sentAt:target.reviewReturnEmailSentAt,recipient});}
+  catch(e){target.reviewReturnEmailStatus='failed';target.reviewReturnEmailError=String(e.message||e).slice(0,500);await writeDb(all);console.error('Field Experience correction resend failed:',e);res.status(502).json({error:`The correction email could not be sent: ${e.message||e}`});}
 });
 
 app.post('/api/admin/:department/dissertations/:id/return-to-student', departmentAuth, requireAdminAccess('dissertation','officer'), async(req,res)=>{

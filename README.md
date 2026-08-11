@@ -182,8 +182,17 @@ No new npm dependency or Render environment variable is required for v16.
 No new environment variable or npm dependency is required for v17.
 
 
-## v19 inline score review
+## v20 inline score review
 
 Undergraduate Project Work review now displays all detected student score rows directly beneath the submitted files in the admin submission record. Each valid row has an Include checkbox, checked by default. Department administrators may uncheck individual rows before approval; unchecked rows remain in the original uploaded workbook but are excluded from approved consolidated and master score exports. Blank template rows and supervisor Signature/Date/Contact footer metadata remain excluded automatically.
 
 Fresh and Revised Dissertation registers retain Supervisor's Name as a dedicated column, with each student deduplicated by index number within the relevant submission stage.
+
+
+## v20 - Returned score submission email notices
+- Returning an Undergraduate Project Work submission for correction now requires a reason and emails that reason to the supervisor/examiner through the configured Gmail API.
+- Field Experience uses the same correction-email workflow.
+- Returned submissions show correction-email status in the review dialog and provide a Resend Correction Email action.
+- A failed email does not undo the Returned for Correction review status. The admin is shown the failure and can resend after correcting Gmail or recipient details.
+
+- Resend Correction Email allows an administrator to confirm or override the recipient email for an already-returned score submission without changing the original submission record.

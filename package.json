@@ -1,8 +1,8 @@
 {
   "name": "ucc-departmental-submission-portals",
-  "version": "19.0.0",
+  "version": "20.0.0",
   "private": true,
-  "description": "UCC departmental submission portals with inline row-level undergraduate score review, approval-only consolidation, staged dissertation workflows, separate Distance and Non-Residential project streams, anonymous student feedback, assessor/vetter controls, Field Experience, Gmail delivery and role-based administration",
+  "description": "UCC departmental submission portals with Gmail correction notices, resendable return-for-correction emails, inline row-level undergraduate score review, approval-only consolidation, staged dissertation workflows, separate Distance and Non-Residential project streams, anonymous student feedback, assessor/vetter controls, Field Experience, Gmail delivery and role-based administration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
