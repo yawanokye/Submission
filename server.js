@@ -953,6 +953,28 @@ function findHeader(matrix) {
 function cellText(v) { return v === undefined || v === null ? '' : String(v).trim(); }
 function numericSn(v) { return /^\d+(?:\.0+)?$/.test(String(v || '').trim()); }
 
+// Project/Field score templates may contain signature metadata underneath the student table.
+// These rows must never be treated as student results or included in consolidated/master exports.
+function normalizeScoreFooterText(value) {
+  return cellText(value)
+    .replace(/[.…·_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim().toUpperCase();
+}
+function isScoreFooterValues(values) {
+  const nonEmpty = (values || []).map(cellText).filter(Boolean);
+  if (!nonEmpty.length) return false;
+  const cleaned = nonEmpty.map(normalizeScoreFooterText);
+  if (cleaned.some(v => /^(SIGNATURE OF (THE )?(SUPERVISOR|EXAMINER)|SUPERVISOR SIGNATURE|EXAMINER SIGNATURE)\b/.test(v))) return true;
+  // In the approved Project Work template, Date and Contact appear as standalone footer rows
+  // immediately after the supervisor-signature line. Treat such single-value rows as metadata.
+  if (cleaned.length === 1 && /^(DATE|CONTACT)\b/.test(cleaned[0])) return true;
+  return false;
+}
+function isStoredScoreFooterRow(row) {
+  return isScoreFooterValues([row?.name, row?.registrationNo, row?.groupNo, row?.totalScore]);
+}
+
 function parseScoreWorkbook(filePath) {
   const workbook = XLSX.readFile(filePath, { cellDates: false });
   if (!workbook.SheetNames.length) throw new Error('The workbook contains no worksheet.');
@@ -970,6 +992,11 @@ function parseScoreWorkbook(filePath) {
 
     // Acceptance validation is header-only. These conditions are used only to avoid
     // treating blank template lines or signature/footer content as student score rows.
+    // Stop when the supervisor/examiner signature metadata section is reached.
+    // This excludes the Signature of Supervisor, Date and Contact lines from row counts
+    // and from every consolidated/master score export.
+    if (isScoreFooterValues([name, registrationNo, groupNo, totalScore])) break;
+
     // Ignore empty template rows, including rows that contain only a pre-filled S/N.
     // Header validation remains header-only.
     const hasStudentData = Boolean(name || registrationNo || groupNo || totalScore);
@@ -1416,7 +1443,7 @@ function projectSubmissionWarnings(record, records) {
   const approvedOthers=others.filter(r=>projectReviewStatus(r)==='approved');
   const approvedRegMap=new Map();
   for(const other of approvedOthers){
-    for(const row of validScoreRows(other)){
+    for(const row of approvedProjectScoreRows(other)){
       const key=normalizeIndexNumber(row.registrationNo);
       if(!key) continue;
       if(!approvedRegMap.has(key)) approvedRegMap.set(key,[]);
@@ -1482,16 +1509,30 @@ function fieldExperienceSubmissionWarnings(record, records) {
   return warnings;
 }
 
-function validScoreRows(record) {
-  return (record?.scoreSheet?.rows || []).filter(row => {
+function validScoreRowsWithMeta(record) {
+  const excluded=new Set((Array.isArray(record?.scoreReviewExcludedRows)?record.scoreReviewExcludedRows:[]).map(Number).filter(Number.isInteger));
+  const out=[];
+  (record?.scoreSheet?.rows || []).forEach((row,sourceIndex)=>{
+    // Backward-compatible cleanup: older submissions may already have stored the
+    // template footer lines as score rows. Filter them at review/export/count time so
+    // existing records are corrected without requiring users to resubmit score sheets.
+    if (isStoredScoreFooterRow(row)) return;
     const name=cellText(row?.name), registrationNo=cellText(row?.registrationNo), groupNo=cellText(row?.groupNo), totalScore=cellText(row?.totalScore);
-    return Boolean(name || registrationNo || groupNo || totalScore);
+    if(!Boolean(name || registrationNo || groupNo || totalScore)) return;
+    out.push({sourceIndex,originalSn:cellText(row?.originalSn),name,registrationNo,groupNo,totalScore,included:!excluded.has(sourceIndex)});
   });
+  return out;
+}
+function validScoreRows(record) {
+  return validScoreRowsWithMeta(record).map(({sourceIndex,included,...row})=>row);
+}
+function approvedProjectScoreRows(record) {
+  return validScoreRowsWithMeta(record).filter(row=>row.included).map(({sourceIndex,included,...row})=>row);
 }
 function projectScoreRowsForStream(records, stream='distance') {
   const out=[]; let sn=1;
   projectRecords(records).filter(record=>projectStream(record)===stream && projectReviewStatus(record)==='approved').slice().sort((a,b)=>String(a.submittedAt).localeCompare(String(b.submittedAt))).forEach(record => {
-    for (const row of validScoreRows(record)) out.push({'S/N':sn++,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
+    for (const row of approvedProjectScoreRows(record)) out.push({'S/N':sn++,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
   });
   return out;
 }
@@ -1509,8 +1550,8 @@ function allFieldExperienceScoreRows(records) {
 }
 function fieldExperienceScoreSheetAoA(records) { const rows=allFieldExperienceScoreRows(records); return [REQUIRED_HEADERS, ...rows.map(r=>REQUIRED_HEADERS.map(h=>r[h]))]; }
 function projectRegisterAoA(records, stream='distance') {
-  const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE','STUDENT STREAM','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
-  const body=projectRecords(records).filter(r=>projectStream(r)===stream).map((r,i)=>[i+1,r.reference,r.submittedAt,r.fullName,r.phone,r.email,r.studyCentre,stream==='non-residential'?'Non-Residential (Regular)':'Distance',r.groupCount,validScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']); return [h,...body];
+  const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE','STUDENT STREAM','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED','ROWS INCLUDED FOR CONSOLIDATION','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
+  const body=projectRecords(records).filter(r=>projectStream(r)===stream).map((r,i)=>[i+1,r.reference,r.submittedAt,r.fullName,r.phone,r.email,r.studyCentre,stream==='non-residential'?'Non-Residential (Regular)':'Distance',r.groupCount,validScoreRows(r).length,approvedProjectScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']); return [h,...body];
 }
 function fieldExperienceRegisterAoA(records) {
   const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
@@ -1541,15 +1582,15 @@ function workbookBuffer(kind,records) {
   if(kind==='scores') addSheet(wb,'Consolidated Distance Scores',scoreSheetAoA(records),[10,34,24,16,16]);
   if(kind==='non-residential-scores') addSheet(wb,'Consolidated Non-Residential',nonResidentialScoreSheetAoA(records),[10,34,24,16,16]);
   if(kind==='single-score') addSheet(wb,'Clean Scores',individualScoreSheetAoA(records[0]),[10,34,24,16,16]);
-  if(kind==='project-register') addSheet(wb,'Distance Project Register',projectRegisterAoA(records,'distance'),[8,22,24,32,18,30,22,22,24,20,24,24,28,38]);
-  if(kind==='non-residential-project-register') addSheet(wb,'Non-Residential Register',projectRegisterAoA(records,'non-residential'),[8,22,24,32,18,30,22,22,24,20,24,24,28,38]);
+  if(kind==='project-register') addSheet(wb,'Distance Project Register',projectRegisterAoA(records,'distance'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
+  if(kind==='non-residential-project-register') addSheet(wb,'Non-Residential Register',projectRegisterAoA(records,'non-residential'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
   if(kind==='project-master') {
     addSheet(wb,'Master Distance Project Scores',scoreSheetAoA(records),[10,34,24,16,16]);
-    addSheet(wb,'Distance Project Register',projectRegisterAoA(records,'distance'),[8,22,24,32,18,30,22,22,24,20,24,24,28,38]);
+    addSheet(wb,'Distance Project Register',projectRegisterAoA(records,'distance'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
   }
   if(kind==='non-residential-project-master') {
     addSheet(wb,'Master Non-Residential Scores',nonResidentialScoreSheetAoA(records),[10,34,24,16,16]);
-    addSheet(wb,'Non-Residential Register',projectRegisterAoA(records,'non-residential'),[8,22,24,32,18,30,22,22,24,20,24,24,28,38]);
+    addSheet(wb,'Non-Residential Register',projectRegisterAoA(records,'non-residential'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
   }
   if(kind==='field-scores') addSheet(wb,'Consolidated Field Experience',fieldExperienceScoreSheetAoA(records),[10,34,24,16,16]);
   if(kind==='field-register') addSheet(wb,'Field Experience Register',fieldExperienceRegisterAoA(records),[8,22,24,32,18,30,22,24,20,24,24,28,38]);
@@ -1585,7 +1626,7 @@ function adminRecordsMap(records, assignments=[]) {
       id:r.id,reference:r.reference,submittedAt:r.submittedAt,portalType:r.portalType||'project-work',
       name:r.fullName||r.studentName||r.assessorName||'',secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
       title:r.title||r.studentTitle||r.assessorTitle||'',firstName:r.firstName||r.studentFirstName||r.assessorFirstName||'',lastName:r.lastName||r.studentLastName||r.assessorLastName||'',
-      email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:r.studyCentre||'',projectStream:(r.portalType==='project-work'||!r.portalType)?projectStream(r):'',scoreRows:validScoreRows(r).length,
+      email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:r.studyCentre||'',projectStream:(r.portalType==='project-work'||!r.portalType)?projectStream(r):'',scoreRows:validScoreRows(r).length,scoreRowsIncluded:(r.portalType==='project-work'||!r.portalType)?approvedProjectScoreRows(r).length:validScoreRows(r).length,
       projectReviewStatus:projectReviewStatus(r),projectReviewLabel:projectReviewLabel(projectReviewStatus(r)),projectReviewNote:r.reviewNote||'',projectReviewedAt:r.reviewedAt||null,projectReviewedBy:r.reviewedBy||'',projectWarnings:(r.portalType==='project-work'||!r.portalType)?projectSubmissionWarnings(r,records):[],
       fieldReviewStatus:projectReviewStatus(r),fieldReviewLabel:projectReviewLabel(projectReviewStatus(r)),fieldReviewNote:r.reviewNote||'',fieldReviewedAt:r.reviewedAt||null,fieldReviewedBy:r.reviewedBy||'',fieldWarnings:r.portalType==='field-experience'?fieldExperienceSubmissionWarnings(r,records):[],
       studentName:r.studentName||'',indexNumber:r.indexNumber||'',dissertationTopic:r.dissertationTopic||'',previousDissertationTopic:r.previousDissertationTopic||'',supervisorName:r.supervisorName||'',submissionType,
@@ -2139,6 +2180,13 @@ app.post('/api/admin/:department/project-work/:id/review', departmentAuth, requi
   const all=await readDb();
   const target=all.find(r=>r.id===req.params.id&&r.department===req.adminDepartment&&(r.portalType==='project-work'||!r.portalType));
   if(!target) return res.status(404).json({error:'Project work submission not found in this department.'});
+  // Each valid student row is checked by default. Administrators may uncheck rows in
+  // the review dialog to exclude them from approval/consolidation without altering the
+  // original uploaded score sheet. Persist only the excluded source-row indexes.
+  if(Array.isArray(req.body?.excludedRowIndexes)){
+    const validIndexes=new Set(validScoreRowsWithMeta(target).map(row=>row.sourceIndex));
+    target.scoreReviewExcludedRows=[...new Set(req.body.excludedRowIndexes.map(Number).filter(i=>Number.isInteger(i)&&validIndexes.has(i)))].sort((a,b)=>a-b);
+  }
   const now=new Date().toISOString();
   const reviewer=req.adminIdentity?.name||req.adminIdentity?.username||'Department administrator';
   target.reviewStatus=status; target.reviewNote=note; target.reviewedAt=now; target.reviewedBy=reviewer;
@@ -2147,7 +2195,7 @@ app.post('/api/admin/:department/project-work/:id/review', departmentAuth, requi
   if(target.reviewHistory.length>50) target.reviewHistory=target.reviewHistory.slice(-50);
   await writeDb(all);
   const departmentRecords=recordsForDepartment(all,req.adminDepartment);
-  res.json({ok:true,status,label:projectReviewLabel(status),reviewedAt:now,reviewedBy:reviewer,warnings:projectSubmissionWarnings(target,departmentRecords)});
+  res.json({ok:true,status,label:projectReviewLabel(status),reviewedAt:now,reviewedBy:reviewer,includedRows:approvedProjectScoreRows(target).length,totalRows:validScoreRows(target).length,warnings:projectSubmissionWarnings(target,departmentRecords)});
 });
 
 app.post('/api/admin/:department/field-experience/:id/review', departmentAuth, requireAdminAccess('field-experience','administrator'), async(req,res)=>{
@@ -2206,6 +2254,9 @@ app.get('/api/admin/:department/submissions/:id', departmentAuth, async(req,res)
   const r=records.find(x=>x.id===req.params.id);
   if(!r)return res.status(404).json({error:'Submission not found in this department.'});
   if(!requireRecordAccess(req,res,r,'viewer'))return;
+  if((r.portalType||'project-work')==='project-work'){
+    return res.json({...r,reviewScoreRows:validScoreRowsWithMeta(r).map((row,i)=>({reviewNo:i+1,sourceIndex:row.sourceIndex,originalSn:row.originalSn,name:row.name,registrationNo:row.registrationNo,groupNo:row.groupNo,totalScore:row.totalScore,included:row.included}))});
+  }
   res.json(r);
 });
 app.get('/api/admin/:department/submissions/:id/works/:workIndex/files/:kind', departmentAuth, async(req,res)=>{

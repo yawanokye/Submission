@@ -1,3 +1,9 @@
+# v18 update: exclude Project Work signature/footer rows from score consolidation
+
+Undergraduate Project Work and other score-based exports now explicitly exclude the template footer metadata that appears below the student score table, including **Signature of Supervisor**, **Date**, and **Contact**. These lines are not counted as score rows and cannot appear in Consolidated or Master score sheets.
+
+The fix is backward-compatible. If an older submission already stored these footer lines as extracted rows, the current export/count logic filters them out automatically, so the supervisor does not need to resubmit the workbook. Empty template rows, including rows containing only a pre-filled S/N, continue to be ignored.
+
 # v15 update: Project Work verification gate + Field Experience scores
 
 Public Project Work and Field Experience score submissions remain open, but they do not automatically enter consolidated score outputs. Each submission starts as **Pending Verification**. A department administrator must explicitly approve the record before its student rows enter the relevant consolidated/master score workbook.
@@ -174,3 +180,10 @@ No new npm dependency or Render environment variable is required for v16.
 - Field Experience outputs remain unchanged and separate.
 
 No new environment variable or npm dependency is required for v17.
+
+
+## v19 inline score review
+
+Undergraduate Project Work review now displays all detected student score rows directly beneath the submitted files in the admin submission record. Each valid row has an Include checkbox, checked by default. Department administrators may uncheck individual rows before approval; unchecked rows remain in the original uploaded workbook but are excluded from approved consolidated and master score exports. Blank template rows and supervisor Signature/Date/Contact footer metadata remain excluded automatically.
+
+Fresh and Revised Dissertation registers retain Supervisor's Name as a dedicated column, with each student deduplicated by index number within the relevant submission stage.
