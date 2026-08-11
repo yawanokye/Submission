@@ -90,3 +90,9 @@ tr.review-row-returned td{background:#f3f8fd}tr.review-row-returned td:first-chi
 .score-review-table tr.score-row-excluded td:not(:first-child){opacity:.68}
 .score-review-table tr.score-row-excluded td:first-child{box-shadow:inset 4px 0 #c73b3b}
 @media(max-width:760px){.score-review-head{display:block}.score-review-head strong{margin-top:10px}.score-review-section{padding:12px}}
+
+/* v20: correction-email delivery status in score review dialog */
+.correction-email-status{margin-top:12px;padding:10px 12px;border-radius:8px;background:#f5f8fb;border:1px solid #d6e0ea;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.correction-email-sent{background:#edf8f1;border-color:#b8dfc5}
+.correction-email-failed{background:#fff1f1;border-color:#efbcbc}
+.correction-email-pending{background:#fff8e6;border-color:#ead58c}
