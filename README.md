@@ -1,158 +1,198 @@
-# V-Professor Supervisory Review 2.9.0
+# v18 update: exclude Project Work signature/footer rows from score consolidation
 
-V-Professor provides degree-calibrated supervisory review and external assessment for Bachelor’s, Non-Research Master’s, Research Master’s/MPhil, Professional Doctorate and PhD work.
+Undergraduate Project Work and other score-based exports now explicitly exclude the template footer metadata that appears below the student score table, including **Signature of Supervisor**, **Date**, and **Contact**. These lines are not counted as score rows and cannot appear in Consolidated or Master score sheets.
 
-## Current-submission isolation
+The fix is backward-compatible. If an older submission already stored these footer lines as extracted rows, the current export/count logic filters them out automatically, so the supervisor does not need to resubmit the workbook. Empty template rows, including rows containing only a pre-filled S/N, continue to be ignored.
 
-Every uploaded work is evidence for that review job only. A thesis, dissertation, chapter or benchmark used to test the system remains an example and is never converted into a reusable topic, institution, location, construct or correction rule.
+# v15 update: Project Work verification gate + Field Experience scores
 
-The app rebuilds the study context from the current submission, uses earlier chapters only when they belong to the same work, and applies generic academic, methodological, statistical, language and citation standards.
+Public Project Work and Field Experience score submissions remain open, but they do not automatically enter consolidated score outputs. Each submission starts as **Pending Verification**. A department administrator must explicitly approve the record before its student rows enter the relevant consolidated/master score workbook.
 
-## Final professional review controls
+Review states are colour coded: Amber = Pending, Green = Approved, Red = Rejected, Blue = Returned for Correction. Automated duplicate/high-volume warnings are advisory only.
 
-Version 2.9.0 includes the following release controls:
+A new public portal is available at `/field-experience.html`. It collects supervisor/examiner identity, study centre, number of students/candidates and an Excel score sheet. It uses the same header-only validation as the current Project Work workflow: `S/N | NAME | REGISTRATION NO. | GROUP NO. | TOTAL SCORE`. Empty rows are ignored. Project Work and Field Experience scores are consolidated separately.
 
-- complete theses are reviewed one chapter at a time, with an explicit supervisor-controlled Continue action between chapters;
-- each completed chapter report and annotated chapter remains available before the next chapter starts;
-- earlier completed chapters and the shared reference list are reused for cross-chapter alignment without reviewing future chapters prematurely;
-- a cumulative final thesis result is assembled after the last chapter, with cross-chapter findings, statistical warnings and numbering reconciled;
-- preliminary pages, the Table of Contents, navigation lists, acronyms, main chapters, references and appendices are separated before chapter detection;
-- visible comments use a human supervisory budget, while repeated and lower-priority instances are grouped in an internal issue ledger;
-- “effect” is accepted for appropriate regression-class, SEM, PLS-SEM, mediation and moderation estimates, while explicit causal claims remain design-sensitive;
+The department admin portal still has three top-level tabs. The first tab now contains separate **Undergraduate Project Work** and **Field Experience Score Submissions** subsections, each with its own approval decisions, register, consolidated scores and master scores.
 
-- native Word-comment and inline annotated DOCX files are generated, validated and persisted as one atomic delivery bundle before a review is released as complete;
-- current V-Professor comments are counted separately from comments already present in the uploaded source, so old comments can never make an empty new annotation export pass validation;
-- every final finding number must appear in both the native and inline annotated outputs, including findings whose quoted source fragments end near citation boundaries;
-- completed academic-review checkpoints are retained when document export fails, so recovery retries the annotation stage without repeating a paid provider pass;
-- older completed reviews can regenerate current annotated outputs at download time when the saved source DOCX remains available;
-- natural student-facing comments limited to focused supervisory prose rather than visible labels such as `Issue`, `Problem identified`, `Action required` or `Verification`;
-- substantive paragraph anchoring ahead of section-heading anchoring;
-- root-cause consolidation for overlapping construct, background, problem-gap and scope findings;
-- strict reconciliation between the canonical finding ledger, native Word comments and the appended correction register;
-- one Word comment box for related findings tied to the same exact paragraph, with every released finding number represented;
-- removal of empty source comments and status labelling where an earlier missing-section comment is visibly addressed;
-- checks for generic limitations that do not explain consequences for evidence or conclusions;
-- checks for unsupported absolute claims while preserving proportionate academic wording;
-- suppression of weak findings based only on concise chapter descriptions or unverified mandatory-section assumptions;
-- preservation of exact deterministic findings such as title-purpose drift, setting inconsistency, malformed citations and unresolved document instructions.
+Individual administrator permissions and developer-published resources now also support a separate `field-experience` section.
 
-## Provider selection
+Optional warning threshold:
 
-Use the same provider settings on the web service and worker.
-
-### OpenAI
-
-```env
-VPROF_PRIMARY_PROVIDER=openai
-VPROF_ENABLE_OPENAI=true
-VPROF_ENABLE_DEEPSEEK=false
-OPENAI_API_KEY=your-key
-OPENAI_FAST_MODEL=gpt-5.6-luna
-OPENAI_CLEANING_MODEL=gpt-5.6-luna
-OPENAI_CHAPTER_MODEL=gpt-5.6-luna
-OPENAI_SECTION_ANALYSIS_MODEL=gpt-5.6-luna
-OPENAI_EXPERT_MODEL=gpt-5.6-terra
-OPENAI_FINAL_AUDIT_MODEL=gpt-5.6-terra
-OPENAI_FINAL_SYNTHESIS_MODEL=gpt-5.6-terra
-OPENAI_PHD_FINAL_SYNTHESIS_MODEL=gpt-5.6-terra
-OPENAI_EXTERNAL_DOMAIN_MODEL=gpt-5.6-terra
-OPENAI_EXTERNAL_ADJUDICATOR_MODEL=gpt-5.6-terra
-OPENAI_CLEANING_REASONING_EFFORT=low
-OPENAI_SECTION_ANALYSIS_REASONING_EFFORT=medium
-OPENAI_CHAPTER_REASONING_EFFORT=medium
-OPENAI_EXPERT_REASONING_EFFORT=high
-OPENAI_FINAL_AUDIT_REASONING_EFFORT=xhigh
-OPENAI_NON_RESEARCH_MASTERS_AUDIT_REASONING_EFFORT=medium
-OPENAI_RESEARCH_MASTERS_AUDIT_REASONING_EFFORT=high
-OPENAI_PROFESSIONAL_DOCTORATE_AUDIT_REASONING_EFFORT=high
-OPENAI_PHD_AUDIT_REASONING_EFFORT=xhigh
-OPENAI_PHD_FINAL_SYNTHESIS_REASONING_EFFORT=xhigh
-OPENAI_EXTERNAL_DOMAIN_REASONING_EFFORT=high
-OPENAI_EXTERNAL_ADJUDICATOR_REASONING_EFFORT=xhigh
-OPENAI_BACKGROUND_MODE=true
-OPENAI_BACKGROUND_POLL_SECONDS=5
-OPENAI_BACKGROUND_TIMEOUT_SECONDS=3600
-OPENAI_PROMPT_CACHE_ENABLED=true
-VPROF_FALLBACK_PROVIDER=none
-VPROF_PROVIDER_FAILOVER=false
+```text
+PROJECT_HIGH_ROW_WARNING=100
 ```
 
-### DeepSeek Pro
+# v14 update: undergraduate project-work verification gate
 
-```env
-VPROF_PRIMARY_PROVIDER=deepseek
-VPROF_ENABLE_DEEPSEEK=true
-VPROF_ENABLE_OPENAI=false
-DEEPSEEK_API_KEY=your-key
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_REVIEW_MODEL=deepseek-v4-pro
-DEEPSEEK_ADVANCED_MODEL=deepseek-v4-pro
-DEEPSEEK_QUALITY_MODEL=deepseek-v4-pro
-DEEPSEEK_FAST_MODEL=deepseek-v4-flash
-DEEPSEEK_PRIMARY_THINKING_ENABLED=false
-DEEPSEEK_AUDIT_THINKING_ENABLED=true
-DEEPSEEK_TRUNCATION_RECOVERY=true
-DEEPSEEK_COVERAGE_UNITS_PER_REQUEST=1
-DEEPSEEK_COVERAGE_HIGH_RISK_UNITS_PER_REQUEST=1
-VPROF_FALLBACK_PROVIDER=none
-VPROF_PROVIDER_FAILOVER=false
+Public project-work submission remains open, but every new project-work submission is stored as **Pending Verification**. Existing project-work records without a review status are also treated as Pending. Pending, Rejected and Returned-for-Correction records do not feed Consolidated Project Scores or Master Project Scores. Only records explicitly marked **Approved** by a project-work Administrator are included.
+
+Project-work submission states are colour coded in the department admin portal:
+
+- Amber = Pending Verification
+- Green = Approved
+- Red = Rejected
+- Blue = Returned for Correction
+
+The administrator can open a project-work record, inspect the supervisor/examiner identity, submitted email, study centre, original score sheet, claim form, supervisor report, completed project-work files, extracted score-row count and submission date/time, then choose **Approve for Consolidation**, **Reject**, or **Return for Correction**. Review actions are recorded with timestamp, administrator identity and an optional note.
+
+Automated warnings are advisory and do not delete or automatically reject a submission. The current checks flag repeated supervisor/examiner submissions, repeated supervisor + study-centre combinations, registration numbers already present in other Approved score sheets, unusually high score-row counts, and expired/revoked secure-link metadata when such metadata exists. The high-row warning threshold defaults to 100 and may be changed with:
+
+```text
+PROJECT_HIGH_ROW_WARNING=100
 ```
 
-## Recommended review controls
+The Project Work Register includes review status and review audit fields. The score sheets inside Consolidated Project Scores and Master Project Scores include Approved submissions only.
 
-```env
-VPROF_NATIVE_COMMENT_STYLE=exact_anchor_grouped
-VPROF_EXISTING_COMMENT_POLICY=label
-VPROF_STRICT_NATIVE_RECONCILIATION=true
-VPROF_HUMAN_ROOT_CAUSE_CONSOLIDATION=true
-VPROF_LIMITATIONS_CONSEQUENCE_AUDIT=true
-VPROF_ABSOLUTE_CLAIM_AUDIT=true
+# v12 update: single secure assessor/vetter assignment workspace
+
+When a department assigns several dissertations to one assessor or vetter, the system sends one email containing one secure assignment link. That workspace handles downloads and per-work report submission. Each work can be submitted separately, progress is retained, and Early Bird status is calculated per work.
+
+# UCC Departmental Submission Portals v10
+
+Three public submission portals and protected departmental administration for:
+
+- Undergraduate Project Work
+- Dissertation Submission
+- Assessment Report Submission
+
+## v10 additions
+
+- Dissertation assignment email now includes the Assessor Submission Portal link, an 8-week report deadline, and a 4-week Early Bird completion date.
+- Department administrators can forward each assessment report and optional reviewed dissertation to the student using the email on the latest matching dissertation submission. The student receives a secure download link. Claim forms are not forwarded.
+- Student-feedback forwarding uses colour states: red = not forwarded/action needed, amber = sent but not downloaded, green = downloaded, grey = no matching dissertation email.
+- Dissertation portal now supports Fresh Submission and Revised Submission. Revised submissions require a revised dissertation plus one or more reviewers' response files. Title validation runs against the uploaded fresh/revised dissertation.
+- Consolidated undergraduate scores exclude empty template rows, including rows containing only a pre-filled S/N.
+- Developer portal can create individual administrator accounts, assign departments, submission sections and roles, and enable/disable/delete those accounts.
+- Developer portal can upload a CSV to replace the Project Work study-centre list. Put one study centre per row in the first column. A header such as `Study Centre` is optional.
+
+## Administrator roles
+
+- **Viewer**: view records and download files/exports in assigned sections.
+- **Officer**: Viewer permissions plus dissertation assignment/revocation/resend and forwarding assessment feedback to students.
+- **Administrator**: full access to assigned sections, including deletion.
+
+The original environment-variable account for each department remains a full department master administrator.
+
+## Render
+
+Build command:
+
+```text
+npm install
 ```
 
-## Deployment
+Start command:
 
-Web service:
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```text
+npm start
 ```
 
-Background worker:
+Keep the persistent disk mounted at the configured `STORAGE_DIR` so submissions, dynamic admin accounts, study centres, resources and assignment metadata survive redeployments.
 
-```bash
-python -m app.worker
+Existing Gmail variables remain required for assignment and feedback emails:
+
+```text
+GMAIL_CLIENT_ID=...
+GMAIL_CLIENT_SECRET=...
+GMAIL_REFRESH_TOKEN=...
+GMAIL_SENDER_EMAIL=department-email@ucc.edu.gh
+GMAIL_FROM_NAME=UCC Dissertation Portal
 ```
 
-Both services must use the same `DATABASE_URL`, provider selection and provider API key. The supplied configuration keeps database artifact storage as a compatibility fallback. When `S3_BUCKET` is configured, large payloads and result files move automatically to S3-compatible object storage while PostgreSQL retains job and checkpoint state.
+Optional:
 
-## Long-thesis architecture
-
-The production defaults are tuned for 120 to 200-page work:
-
-- two thesis jobs per worker;
-- three concurrent AI calls per thesis;
-- 24,000-character coverage requests with packet-level checkpoints;
-- Luna at low or medium effort for cleaning and high-volume coverage;
-- Terra at high effort for decisive methods, results and synthesis work;
-- Terra at `xhigh` for final PhD and external adjudication;
-- OpenAI background mode for `high`, `xhigh` and `max` requests;
-- indefinite browser reconnection through the stored review job ID;
-- a six-hour server-side academic-stage window with automatic checkpoint recovery.
-
-For S3-compatible storage, set `VPROF_ARTIFACT_STORAGE_BACKEND=auto` and supply `S3_BUCKET`, endpoint, region and credentials. Leave the bucket empty to continue using PostgreSQL BLOB storage during migration.
-
-For an export-stage failure from an earlier build, deploy 2.8.1 and open the existing result. The native and inline download buttons will regenerate the documents when the saved source DOCX remains available. Use **Recover** once when the job is paused or failed at document export. Submit a new job only when the original upload is no longer available.
-
-## Administrator recovery
-
-`ADMIN_PASSWORD` creates the first administrator but does not silently overwrite a password already stored in PostgreSQL. For a controlled one-time reset, set `VPROF_RESET_ADMIN_PASSWORD_ON_STARTUP=true`, redeploy the web service, sign in, set the flag back to `false`, and redeploy again.
-
-## Local validation
-
-```bash
-PYTHONPATH=. pytest -q
-python -m compileall -q app scripts
-node --check app/static/app.js
+```text
+ASSIGNMENT_EXPIRY_DAYS=14
+STUDENT_FEEDBACK_EXPIRY_DAYS=30
 ```
 
-See `DEPLOYMENT.md`, `.env.example` and `CHANGELOG.md`.
+Developer portal credentials:
+
+```text
+DEVELOPER_ADMIN_USER=developer
+DEVELOPER_ADMIN_PASSWORD=your-secure-password
+```
+
+Department master-account environment variables remain unchanged.
+
+## v11 workflow update
+
+- Department admin keeps Fresh Dissertation Submissions and Revised Dissertation Submissions in separate tables.
+- The public assessor portal accepts either Assessment Reports or Vetting Reports.
+- Department admin keeps Assessment Report Submissions and Vetting Report Submissions in separate tables.
+- Dissertation assignment now records an assignment type. Fresh dissertations can only be assigned for Assessment. Revised dissertations can be assigned for Vetting or Assessment.
+- Secure assignment emails link to `/assessor.html?assignment=<secure-token>`. The portal retrieves the assigned students from the server and locks student names, index numbers and programmes. Student email is linked server-side and is not exposed for editing.
+- A token-linked report submission stores the exact dissertation submission ID for each student, so forwarding feedback uses the email from the correct dissertation record instead of relying on typed names or index numbers.
+- Fresh dissertation submissions only accept Assessment feedback forwarding. Student feedback packages contain the report and optional reviewed dissertation only; claim forms are excluded.
+
+## v13: Individual administrator email invitation and password setup
+
+Individual administrator accounts created from the Developer Portal no longer require the developer to choose a permanent password. The developer enters the administrator's name, email address, optional username, assigned department(s), assigned section(s), and role.
+
+The system creates the account in a pending state and emails the administrator a one-time password setup link using the existing Gmail API configuration. The email includes the username and assigned access. The setup link expires after 24 hours by default and becomes invalid immediately after it is used.
+
+Optional environment setting:
+
+```text
+ADMIN_INVITATION_EXPIRY_HOURS=24
+```
+
+The developer dashboard shows whether an account is Ready, Awaiting setup, Invite expired, Email failed, or Disabled. The developer can resend an invitation. For an already activated account, the same action sends a one-time password reset link without revealing or replacing the current password until the user completes the reset.
+
+The existing Gmail variables are required for invitations:
+
+```text
+GMAIL_CLIENT_ID=...
+GMAIL_CLIENT_SECRET=...
+GMAIL_REFRESH_TOKEN=...
+GMAIL_SENDER_EMAIL=...
+GMAIL_FROM_NAME=...
+```
+
+## v16: Staged dissertation workflow, vetting controls and anonymous feedback
+
+Version 16 strengthens dissertation processing and reviewer confidentiality:
+
+- **Changed titles after review are supported.** Fresh, revised and final submissions validate the title against the dissertation uploaded at that stage. A revised title may therefore differ from the fresh-submission title when a reviewer has recommended a title change. The previous-stage title and lineage are retained for audit purposes.
+- **Assessor/vetter identity is never intentionally released through the student feedback route.** Department admins must prepare an anonymised student copy of the report, and optionally an anonymised reviewed dissertation, before forwarding. The original report, claim form and score sheet remain internal. The server also checks extractable document text for the reviewer name/email before accepting the student copy.
+- **Fresh dissertation assignments remain Assessment assignments** with a maximum of 3 assessors. Status colours remain red for 0, amber for 1 and green for 2 or 3.
+- **Revised dissertation assignments are Vetting assignments** with a maximum of 2 vetters. Revised records show Vetter(s), and the colour changes from red at 0 to green at 1 or 2.
+- The Revised Dissertation section has **Email Selected to Vetter**, which creates the same secure one-link workspace used for fresh Assessment assignments.
+- The public Dissertation portal now supports **Fresh Submission, Revised Submission and Final Dissertation**. Final submissions require the final dissertation, one or more reviewer-response files and a plagiarism/Turnitin report.
+- The department admin portal has separate **Fresh, Revised and Final Dissertation** subsections. Final records are retained as individual submissions and are not assigned for assessment/vetting.
+- Every Assessment/Vetting work submitted through a secure assignment now requires **Report + Claim Form + Score Sheet**. A reviewed dissertation remains optional.
+- Fresh and Revised Dissertation Registers are exported separately. Each register de-duplicates by index number within that stage and retains the latest submission for that student.
+- Department admins can **Return to Student Without Processing** at the Fresh, Revised or Final stage, with standard reasons for unpaid fees, unsatisfactory/invalid Turnitin report, incomplete/invalid reviewer response, or a custom reason. The student receives the reason by Gmail. Active assignment links containing a returned work are updated/revoked as appropriate.
+- Public submission pages include an **Admin Login** link. Department admins now have a form-based login and a **Logout** control. Existing Basic-auth access remains as a compatibility fallback.
+
+No new npm dependency or Render environment variable is required for v16.
+
+
+## v17: Separate Non-Residential regular-student project work
+
+- `Non-Residential` is now a fixed option in the **Undergraduate Project Work** Study Centre dropdown. It is intended for regular students and is not added to the Field Experience study-centre list.
+- Project-work submissions are classified as either **Distance** or **Non-Residential (Regular)**. Existing records whose Study Centre is `Non-Residential` are automatically recognised as regular-student records even if they were created before v17.
+- Department admins receive Project Work in two separate subsections: **Distance Undergraduate Project Work** and **Non-Residential Undergraduate Project Work**.
+- Both streams retain the Pending → Approved → Rejected / Returned review gate. Only Approved records enter consolidated outputs.
+- Existing project score exports now contain **Distance students only**.
+- New Non-Residential exports are available separately: **Consolidated Non-Residential Scores**, **Master Non-Residential Scores**, and **Non-Residential Project Work Register**.
+- Duplicate-registration and repeat-submission warnings are evaluated within the same project stream so a Non-Residential submission does not contaminate Distance verification.
+- Field Experience outputs remain unchanged and separate.
+
+No new environment variable or npm dependency is required for v17.
+
+
+## v20 inline score review
+
+Undergraduate Project Work review now displays all detected student score rows directly beneath the submitted files in the admin submission record. Each valid row has an Include checkbox, checked by default. Department administrators may uncheck individual rows before approval; unchecked rows remain in the original uploaded workbook but are excluded from approved consolidated and master score exports. Blank template rows and supervisor Signature/Date/Contact footer metadata remain excluded automatically.
+
+Fresh and Revised Dissertation registers retain Supervisor's Name as a dedicated column, with each student deduplicated by index number within the relevant submission stage.
+
+
+## v20 - Returned score submission email notices
+- Returning an Undergraduate Project Work submission for correction now requires a reason and emails that reason to the supervisor/examiner through the configured Gmail API.
+- Field Experience uses the same correction-email workflow.
+- Returned submissions show correction-email status in the review dialog and provide a Resend Correction Email action.
+- A failed email does not undo the Returned for Correction review status. The admin is shown the failure and can resend after correcting Gmail or recipient details.
+
+- Resend Correction Email allows an administrator to confirm or override the recipient email for an already-returned score submission without changing the original submission record.
