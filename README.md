@@ -1,401 +1,211 @@
-# UCC IRB Ethical Clearance Portal — V22
+# v21 update: multi-centre project work, claim-form ZIPs and Programme by Centre scores
 
-Safe Browsing remediation build. Adds explicit service identity disclosures, an About & Verification page, official UCC IRB reference/contact details, login/reviewer safety notices, and keeps the Google Search Console verification tag.
+Version 21 extends Undergraduate Project Work administration in four areas.
 
-Build: `2026-08-19-next-action-irb-v24`
+- **Multiple study centres per Project Work submission.** A supervisor/examiner may select more than one Distance study centre when supervised groups cut across centres. `Non-Residential` remains a separate regular-student stream and must be selected alone. Existing single-centre records remain compatible.
+- **Department-specific study-centre publishing.** The Developer Portal now requires the developer to identify which department(s) an uploaded CSV belongs to. The legacy centre list is treated as the Department of Business Programmes list. Uploading a new CSV replaces only the selected department(s). Project Work and Field Experience public forms load centres only after the user selects a department.
+- **Selected claim-form packages.** Department users may select Project Work submissions and download their Claim Forms in one ZIP. Officers and Administrators may also email the same ZIP to a department email address using the existing Gmail API. Files are renamed to the Supervisor/Examiner name, with `(2)`, `(3)` etc. added when names repeat. Large packages that are unsafe for Gmail are directed to ZIP download instead.
+- **Programme by Centre score ZIP.** In addition to the ordinary consolidated workbook, Distance and Non-Residential Project Work now have a downloadable `Programme by Centre ZIP`. The grouping key is the first three slash-separated parts of the Registration Number. For example, `BCF/CR/01/22/0002` is grouped under `BCF/CR/01`, where `BCF` is the programme and `CR/01` is the centre code. Each group is exported as its own XLSX file, such as `BCF_CR_01.xlsx`, inside one ZIP. Invalid/short registration numbers are retained in `UNCLASSIFIED.xlsx` rather than dropped.
 
-# UCC IRB Ethical Clearance Portal — Phase 2 V19
+All consolidated Project Work score outputs, Master Project Work score outputs, Programme-by-Centre score files and Field Experience consolidated score outputs are now sorted by **Registration No.** before S/N is assigned.
 
-Build ID: `2026-08-18-secure-review-csrf-v20`
+No new Render environment variable or npm dependency is required for v21. Existing Gmail settings are reused for emailing selected claim-form ZIPs.
 
-V19 improves the applicant and reviewer experience while keeping routing controls internal.
+# v18 update: exclude Project Work signature/footer rows from score consolidation
 
-## V19 changes
+Undergraduate Project Work and other score-based exports now explicitly exclude the template footer metadata that appears below the student score table, including **Signature of Supervisor**, **Date**, and **Contact**. These lines are not counted as score rows and cannot appear in Consolidated or Master score sheets.
 
-- Applicants can remove a wrongly attached document while the item is still editable. Submitted historical records remain locked, and replacement versions can be uploaded when a submitted item is already part of a review record.
-- Applicant-facing return states now say **Returned to Applicant by IRB Secretariat**, **Returned to Applicant by College Scientific Committee**, or **Returned to Applicant by IRB**.
-- Public/applicant screens no longer expose the old Access and Routing panel or the direct-routing label. The Other UCC option is displayed simply as **Other UCC Academic/Administrative Unit**. Internal officers still retain the operational routing controls required to process applications.
-- Expired authenticated sessions are redirected to the appropriate login page with an expiry notice. A user who was simply not signed in is sent to the appropriate login page without a false expiry message.
-- Core workflow prerequisites redirect the user to the required step instead of leaving the user on a raw error. The required section and missing checklist items are highlighted in red.
-- The public title is **UCC IRB Ethical Clearance Portal**.
-- The **UCC-IRB Research Ethics Reviewer Assessment Form** is built into review assignment. It is attached to reviewer invitation email where email delivery is configured, added to secure review packages, and available to authorised reviewers through protected download routes. It is not exposed as a public static resource.
-- The reviewer form supports fresh and revised review, conflict/confidentiality controls, structured scientific and ethical assessment, revision verification, overall recommendation, and applicant-facing privacy controls.
+The fix is backward-compatible. If an older submission already stored these footer lines as extracted rows, the current export/count logic filters them out automatically, so the supervisor does not need to resubmit the workbook. Empty template rows, including rows containing only a pre-filled S/N, continue to be ignored.
 
-## Deployment
+# v15 update: Project Work verification gate + Field Experience scores
 
-No new environment variable is required. Existing deployments may change `APP_NAME` to `UCC IRB Ethical Clearance Portal` for consistent service/email naming. Use `/healthz` to confirm the V19 build after deployment.
+Public Project Work and Field Experience score submissions remain open, but they do not automatically enter consolidated score outputs. Each submission starts as **Pending Verification**. A department administrator must explicitly approve the record before its student rows enter the relevant consolidated/master score workbook.
 
----
+Review states are colour coded: Amber = Pending, Green = Approved, Red = Rejected, Blue = Returned for Correction. Automated duplicate/high-volume warnings are advisory only.
 
-# V17 security compatibility update
+A new public portal is available at `/field-experience.html`. It collects supervisor/examiner identity, study centre, number of students/candidates and an Excel score sheet. It uses the same header-only validation as the current Project Work workflow: `S/N | NAME | REGISTRATION NO. | GROUP NO. | TOTAL SCORE`. Empty rows are ignored. Project Work and Field Experience scores are consolidated separately.
 
-Build ID: `2026-08-10-no-origin-block-v17`
+The department admin portal still has three top-level tabs. The first tab now contains separate **Undergraduate Project Work** and **Field Experience Score Submissions** subsections, each with its own approval decisions, register, consolidated scores and master scores.
 
-V17 removes Origin/Referer same-origin blocking across the portal because reverse proxies and institutional networks can cause false 403 responses. Applicant login and registration remain low-friction. Protected workflow POST forms continue to use session-bound CSRF tokens, role checks, rate limiting, secure sessions, password hashing and audit/security logging.
+Individual administrator permissions and developer-published resources now also support a separate `field-experience` section.
 
-# V15 Login/CSRF Reliability Patch
-
-- Renders CSRF tokens directly inside applicant, administrative and system-admin login forms.
-- Renders CSRF token directly in applicant registration form.
-- Makes same-origin checks proxy-aware for Render via X-Forwarded-Host.
-- Adds safe server-side diagnostics distinguishing CSRF rejection from portal-role mismatch without logging passwords or raw CSRF tokens.
-- Build ID: `2026-08-10-login-csrf-diagnostics-v15`.
-
-# UCC Ethical Clearance Portal — Phase 2 V12
-
-A working FastAPI/PostgreSQL-ready research ethics governance portal for the University of Cape Coast Institutional Review Board.
-
-## Governance routing implemented
-
-All applications are submitted centrally to the **IRB Secretariat**.
-
-Only these five Colleges route through a College Scientific Committee:
-
-1. College of Agriculture and Natural Sciences
-2. College of Distance Education
-3. College of Education Studies
-4. College of Humanities and Legal Studies
-5. College of Health and Allied Sciences
-
-Applications from UCC academic or administrative units outside these five Colleges use **Other UCC Academic/Administrative Unit (Direct IRB Secretariat)**. The applicant enters the exact Unit/Directorate/School/Centre in the application. After administrative screening, these applications remain with the IRB Secretariat and move directly to IRB review classification.
-
-For the five Scientific Committee Colleges, the workflow is:
-
-`Applicant → IRB Secretariat receipt/checklist → Secretariat marks complete → automatic forwarding to College Scientific Committee → College scientific review/revision cycle → College recommendation → IRB Secretariat → IRB ethical review → final IRB decision`
-
-For other UCC units, the workflow is:
-
-`Applicant → IRB Secretariat screening → direct IRB classification → IRB ethical review → final IRB decision`
-
-## Phase 2 features
-
-- UCC-branded templates using the supplied University of Cape Coast logo/header treatment
-- UCC navy, red and gold visual identity throughout the portal
-- Applicant self-registration and applicant login
-- Separate Administrative Portal login
-- System Administrator-controlled administrative accounts
-- Central application submission and administrative screening
-- Five fixed Scientific Committee College routes
-- Direct IRB Secretariat route for other UCC academic/administrative units
-- College metadata visibility while first submissions await Secretariat screening
-- Automatic College document activation and forwarding after Secretariat completeness
-- College scientific reviewer assignment
-- Reviewer conflict-of-interest declaration
-- Reviewer deadlines and workload indicators
-- College Scientific Committee decision and revision cycle
-- IRB classification: exempt, expedited or full board
-- IRB reviewer assignment and ethical review
-- IRB applicant revision cycle
-- Full Board meeting creation and agenda assignment
-- Authorised final IRB decision
-- Ethical clearance PDF generation
-- QR-based public clearance verification
-- Post-approval amendment, renewal/continuing review, adverse-event and closure requests
-- Versioned uploaded documents
-- Status history and audit logging
-- PostgreSQL-ready SQLAlchemy data model
-- Render-compatible `/healthz` deployment endpoint
-
-## Automatic routing migration
-
-This build automatically ensures the five authorised Scientific Committee Colleges and the direct IRB routing option exist when the application starts.
-
-Earlier development builds used the CHLS and CHAS labels in the opposite order. V6 detects that older mapping and preserves existing user/application affiliations while correcting the authoritative College codes and names.
-
-## Run locally
-
-```bash
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# Linux/macOS
-source .venv/bin/activate
-
-pip install -r requirements.txt
-python seed.py
-uvicorn app.main:app --reload
-```
-
-Open `http://127.0.0.1:8000`.
-
-## Demo accounts
-
-All demo accounts use password `Demo123!`.
-
-- Applicant: `applicant@ucc.edu.gh`
-- IRB Secretariat: `secretariat@ucc.edu.gh`
-- College Scientific Committee Secretary: `collegeadmin@ucc.edu.gh`
-- College Scientific Reviewer: `reviewer@ucc.edu.gh`
-- IRB Reviewer: `irbreviewer@ucc.edu.gh`
-- IRB Chairperson: `chair@ucc.edu.gh`
-- System Administrator: `admin@ucc.edu.gh`
-
-The demo College users are assigned to the **College of Distance Education**.
-
-## Render environment variables
-
-```env
-APP_NAME=UCC Ethical Clearance Portal
-SECRET_KEY=<strong-random-secret>
-DATABASE_URL=<Render PostgreSQL Internal Database URL>
-SESSION_HTTPS_ONLY=true
-STORAGE_DIR=/app/storage
-PUBLIC_BASE_URL=https://ucc-irb-portal.onrender.com
-REVIEW_DUE_DAYS=14
-CLEARANCE_VALIDITY_DAYS=365
-MAX_UPLOAD_MB=25
-BOOTSTRAP_ADMIN_EMAIL=<system administrator email>
-BOOTSTRAP_ADMIN_NAME=System Administrator
-BOOTSTRAP_ADMIN_PASSWORD=<strong initial password>
-```
-
-Use `/healthz` as the Render health check path. This build reports:
+Optional warning threshold:
 
 ```text
-build: 2026-08-10-review-revision-privacy-v12
+PROJECT_HIGH_ROW_WARNING=100
 ```
 
-Uploaded documents should use a persistent disk mounted at `/app/storage` during development/testing. For full institutional production, migrate research documents to private institutional or S3-compatible object storage with malware scanning, encryption and retention controls.
+# v14 update: undergraduate project-work verification gate
 
-## Important production hardening still required
+Public project-work submission remains open, but every new project-work submission is stored as **Pending Verification**. Existing project-work records without a review status are also treated as Pending. Pending, Rejected and Returned-for-Correction records do not feed Consolidated Project Scores or Master Project Scores. Only records explicitly marked **Approved** by a project-work Administrator are included.
 
-Before institutional production use, add UCC SSO, email activation and notifications, CSRF protection, 2FA for privileged users, malware scanning, formal Alembic migrations, private object storage, automated backups, security testing, and institutional privacy/data-retention configuration.
+Project-work submission states are colour coded in the department admin portal:
 
-## Phase 2 V7: Dedicated System Administrator Portal
+- Amber = Pending Verification
+- Green = Approved
+- Red = Rejected
+- Blue = Returned for Correction
 
-The System Administrator is now separated from the normal Administrative Portal.
+The administrator can open a project-work record, inspect the supervisor/examiner identity, submitted email, study centre, original score sheet, claim form, supervisor report, completed project-work files, extracted score-row count and submission date/time, then choose **Approve for Consolidation**, **Reject**, or **Return for Correction**. Review actions are recorded with timestamp, administrator identity and an optional note.
 
-- Applicant portal: `/login?portal=applicant`
-- Administrative portal: `/login?portal=administrative`
-- System Administrator portal: `/system-admin/login`
-- System Administrator dashboard: `/system-admin`
+Automated warnings are advisory and do not delete or automatically reject a submission. The current checks flag repeated supervisor/examiner submissions, repeated supervisor + study-centre combinations, registration numbers already present in other Approved score sheets, unusually high score-row counts, and expired/revoked secure-link metadata when such metadata exists. The high-row warning threshold defaults to 100 and may be changed with:
 
-The normal Administrative Portal accepts IRB Secretariat, College Scientific Committee Officer, College Scientific Reviewer, IRB Reviewer and IRB Chairperson accounts. A `superadmin` account is deliberately rejected there and must use the System Administrator Portal.
-
-For the first production System Administrator, configure these Render environment variables before deploying:
-
-```env
-BOOTSTRAP_ADMIN_EMAIL=your-admin-email@ucc.edu.gh
-BOOTSTRAP_ADMIN_NAME=System Administrator
-BOOTSTRAP_ADMIN_PASSWORD=<strong-initial-password>
+```text
+PROJECT_HIGH_ROW_WARNING=100
 ```
 
-The bootstrap settings are authoritative for the configured System Administrator account. On startup, if the email already exists under another role, the portal promotes it to `superadmin`, activates it, removes any College restriction, and synchronises its password with `BOOTSTRAP_ADMIN_PASSWORD`. After sign-in, the System Administrator can create other authorised administrative accounts from `/system-admin`. Applicants continue to create their own accounts from `/register`.
+The Project Work Register includes review status and review audit fields. The score sheets inside Consolidated Project Scores and Master Project Scores include Approved submissions only.
 
+# v12 update: single secure assessor/vetter assignment workspace
 
-## V8 bootstrap repair
+When a department assigns several dissertations to one assessor or vetter, the system sends one email containing one secure assignment link. That workspace handles downloads and per-work report submission. Each work can be submitted separately, progress is retained, and Early Bird status is calculated per work.
 
-Build: `2026-08-09-phase2-admin-bootstrap-v8`
+# UCC Departmental Submission Portals v10
 
-This release repairs existing databases where the email configured in `BOOTSTRAP_ADMIN_EMAIL` was already present as an applicant or another administrative role. The environment-defined bootstrap account is synchronised to the System Administrator role at application startup.
+Three public submission portals and protected departmental administration for:
 
+- Undergraduate Project Work
+- Dissertation Submission
+- Assessment Report Submission
 
-## Phase 2 V10 - applicant-first landing page and official resources
+## v10 additions
 
-The public portal has been reorganised so that **Start New Application** and **Applicant Login** are the dominant actions. Administrative and System Administrator access remains available in a quieter institutional-access section.
+- Dissertation assignment email now includes the Assessor Submission Portal link, an 8-week report deadline, and a 4-week Early Bird completion date.
+- Department administrators can forward each assessment report and optional reviewed dissertation to the student using the email on the latest matching dissertation submission. The student receives a secure download link. Claim forms are not forwarded.
+- Student-feedback forwarding uses colour states: red = not forwarded/action needed, amber = sent but not downloaded, green = downloaded, grey = no matching dissertation email.
+- Dissertation portal now supports Fresh Submission and Revised Submission. Revised submissions require a revised dissertation plus one or more reviewers' response files. Title validation runs against the uploaded fresh/revised dissertation.
+- Consolidated undergraduate scores exclude empty template rows, including rows containing only a pre-filled S/N.
+- Developer portal can create individual administrator accounts, assign departments, submission sections and roles, and enable/disable/delete those accounts.
+- Developer portal can upload a CSV to replace the Project Work study-centre list. Put one study centre per row in the first column. A header such as `Study Centre` is optional.
 
-Public applicant support now includes `/applicant-guide` with:
+## Administrator roles
 
-- How to apply online
-- Required application documents
-- Important pre-submission information
-- Application fee schedule
-- Official UCC-IRB forms and templates
-- Explanation of College Scientific Committee vs direct IRB Secretariat routing
+- **Viewer**: view records and download files/exports in assigned sections.
+- **Officer**: Viewer permissions plus dissertation assignment/revocation/resend and forwarding assessment feedback to students.
+- **Administrator**: full access to assigned sections, including deletion.
 
-Official PDFs are packaged under `app/static/resources/` and are therefore deployed with the application. The Applicant Dashboard, New Application page and application document-upload area all link back to the guide/resources.
+The original environment-variable account for each department remains a full department master administrator.
 
-### Included resources
+## Render
 
-- Composite Application Form
-- Application Instructions
-- Adult Informed Consent Form
-- Child Assent Form
-- Consent from Records Keepers
-- Abridged CV Template
-- Ethical Clearance Application Fee Schedule
+Build command:
 
-### Core application completeness validation
+```text
+npm install
+```
 
-Before initial submission the portal now checks for a protocol or Composite Form, application letter, similarity report and applicant CV. Student applications additionally require supervisor approval, Head of Unit support and supervisor CV. If the Composite Form is not uploaded, a completed IRB checklist is also required. Study-specific consent, assent, records-access and data-collection instruments remain conditional and are checked according to the study.
+Start command:
 
-Build ID: `2026-08-10-applicant-resources-v10`
+```text
+npm start
+```
 
-## Phase 2 V11 — Secretariat receiving, College scientific workflow, register and reviewer emailing
+Keep the persistent disk mounted at the configured `STORAGE_DIR` so submissions, dynamic admin accounts, study centres, resources and assignment metadata survive redeployments.
 
-Build ID: `2026-08-10-secretariat-college-workflow-v11`
+Existing Gmail variables remain required for assignment and feedback emails:
 
-This release changes the first-submission governance flow to:
+```text
+GMAIL_CLIENT_ID=...
+GMAIL_CLIENT_SECRET=...
+GMAIL_REFRESH_TOKEN=...
+GMAIL_SENDER_EMAIL=department-email@ucc.edu.gh
+GMAIL_FROM_NAME=CoDE Academic Submission Portal
+```
 
-`Applicant → IRB Secretariat receipt/checklist → Mark complete → automatic forwarding to relevant College Scientific Committee → College reviewer assignment/revision cycle → College scientific recommendation → IRB final ethical review and approval`
+Optional:
 
-For applicants from other UCC academic/administrative units outside the five Scientific Committee Colleges, the complete application remains with the IRB Secretariat and proceeds to the direct IRB pathway.
+```text
+ASSIGNMENT_EXPIRY_DAYS=14
+STUDENT_FEEDBACK_EXPIRY_DAYS=30
+```
 
-### New controls
+Developer portal credentials:
 
-- **Automatic forwarding after Secretariat completeness:** no second College access-permission step is required after an application is marked administratively complete.
-- **College monitoring of first submissions:** the relevant College can see metadata while the application is still awaiting initial Secretariat screening. It can click **Request IRB Secretariat Attention** if the submission appears unattended. Documents remain locked at this stage.
-- **Persisted Secretariat document checklist:** every submitted file must be opened/reviewed and checked. The portal also shows the core required-document list. The Secretariat cannot mark an application complete until the core requirements are present and every submitted document has been verified.
-- **Submission Register:** `/secretariat/register` lists all submitted work and can filter/sort by Scientific Committee College, other UCC unit, submission type, status, applicant/reference, and dates. CSV export is included.
-- **Fresh and revised separation:** College dashboards and assignment queues show fresh submissions separately from revised submissions. Document history also separates fresh, College-revision and IRB-revision files.
-- **Direct College revision route:** once the first submission has passed Secretariat screening, College revision communication is between the College Scientific Committee and the applicant. A revised submission is routed directly back to the relevant College, without returning to the Secretariat. It goes back to IRB only after the College scientifically recommends it.
-- **Reviewer email workflow adapted from the Academic Submission Portal:** the College selects one or several applications, enters the reviewer title/name/email/phone, and sends one secure link. A reviewer portal account is not required. Each assigned application remains a separate work item with its own conflict declaration, package download and review report submission.
-- **Applicant/reviewer email collision protection:** a person may have an applicant account using the same email later used for review. Reviewer contacts are stored separately and mapped to an internal non-login proxy, so the applicant account is not converted or overwritten.
-- **Legacy V10 state repair:** existing records in the old visible/access-request states are migrated into the V11 automatic-forwarding College queue at startup, and their documents are activated for the College.
+```text
+DEVELOPER_ADMIN_USER=developer
+DEVELOPER_ADMIN_PASSWORD=your-secure-password
+```
 
-### Existing Gmail environment variables
+Department master-account environment variables remain unchanged.
 
-The same Gmail OAuth settings continue to deliver reviewer assignments and College/applicant revision notifications:
+## v11 workflow update
 
-```env
+- Department admin keeps Fresh Dissertation Submissions and Revised Dissertation Submissions in separate tables.
+- The public assessor portal accepts either Assessment Reports or Vetting Reports.
+- Department admin keeps Assessment Report Submissions and Vetting Report Submissions in separate tables.
+- Dissertation assignment now records an assignment type. Fresh dissertations can only be assigned for Assessment. Revised dissertations can be assigned for Vetting or Assessment.
+- Secure assignment emails link to `/assessor.html?assignment=<secure-token>`. The portal retrieves the assigned students from the server and locks student names, index numbers and programmes. Student email is linked server-side and is not exposed for editing.
+- A token-linked report submission stores the exact dissertation submission ID for each student, so forwarding feedback uses the email from the correct dissertation record instead of relying on typed names or index numbers.
+- Fresh dissertation submissions only accept Assessment feedback forwarding. Student feedback packages contain the report and optional reviewed dissertation only; claim forms are excluded.
+
+## v13: Individual administrator email invitation and password setup
+
+Individual administrator accounts created from the Developer Portal no longer require the developer to choose a permanent password. The developer enters the administrator's name, email address, optional username, assigned department(s), assigned section(s), and role.
+
+The system creates the account in a pending state and emails the administrator a one-time password setup link using the existing Gmail API configuration. The email includes the username and assigned access. The setup link expires after 24 hours by default and becomes invalid immediately after it is used.
+
+Optional environment setting:
+
+```text
+ADMIN_INVITATION_EXPIRY_HOURS=24
+```
+
+The developer dashboard shows whether an account is Ready, Awaiting setup, Invite expired, Email failed, or Disabled. The developer can resend an invitation. For an already activated account, the same action sends a one-time password reset link without revealing or replacing the current password until the user completes the reset.
+
+The existing Gmail variables are required for invitations:
+
+```text
 GMAIL_CLIENT_ID=...
 GMAIL_CLIENT_SECRET=...
 GMAIL_REFRESH_TOKEN=...
 GMAIL_SENDER_EMAIL=...
-PUBLIC_BASE_URL=https://ucc-irb-portal.onrender.com
+GMAIL_FROM_NAME=...
 ```
 
-No additional environment variable is required for V11.
+## v16: Staged dissertation workflow, vetting controls and anonymous feedback
+
+Version 16 strengthens dissertation processing and reviewer confidentiality:
+
+- **Changed titles after review are supported.** Fresh, revised and final submissions validate the title against the dissertation uploaded at that stage. A revised title may therefore differ from the fresh-submission title when a reviewer has recommended a title change. The previous-stage title and lineage are retained for audit purposes.
+- **Assessor/vetter identity is never intentionally released through the student feedback route.** Department admins must prepare an anonymised student copy of the report, and optionally an anonymised reviewed dissertation, before forwarding. The original report, claim form and score sheet remain internal. The server also checks extractable document text for the reviewer name/email before accepting the student copy.
+- **Fresh dissertation assignments remain Assessment assignments** with a maximum of 3 assessors. Status colours remain red for 0, amber for 1 and green for 2 or 3.
+- **Revised dissertation assignments are Vetting assignments** with a maximum of 2 vetters. Revised records show Vetter(s), and the colour changes from red at 0 to green at 1 or 2.
+- The Revised Dissertation section has **Email Selected to Vetter**, which creates the same secure one-link workspace used for fresh Assessment assignments.
+- The public Dissertation portal now supports **Fresh Submission, Revised Submission and Final Dissertation**. Final submissions require the final dissertation, one or more reviewer-response files and a plagiarism/Turnitin report.
+- The department admin portal has separate **Fresh, Revised and Final Dissertation** subsections. Final records are retained as individual submissions and are not assigned for assessment/vetting.
+- Every Assessment/Vetting work submitted through a secure assignment now requires **Report + Claim Form + Score Sheet**. A reviewed dissertation remains optional.
+- Fresh and Revised Dissertation Registers are exported separately. Each register de-duplicates by index number within that stage and retains the latest submission for that student.
+- Department admins can **Return to Student Without Processing** at the Fresh, Revised or Final stage, with standard reasons for unpaid fees, unsatisfactory/invalid Turnitin report, incomplete/invalid reviewer response, or a custom reason. The student receives the reason by Gmail. Active assignment links containing a returned work are updated/revoked as appropriate.
+- Public submission pages include an **Admin Login** link. Department admins now have a form-based login and a **Logout** control. Existing Basic-auth access remains as a compatibility fallback.
+
+No new npm dependency or Render environment variable is required for v16.
 
 
-## Phase 2 V12 — selected review materials, applicant review reports and revision disposition
+## v17: Separate Non-Residential regular-student project work
 
-Build ID: `2026-08-10-review-revision-privacy-v12`
+- `Non-Residential` is now a fixed option in the **Undergraduate Project Work** Study Centre dropdown. It is intended for regular students and is not added to the Field Experience study-centre list.
+- Project-work submissions are classified as either **Distance** or **Non-Residential (Regular)**. Existing records whose Study Centre is `Non-Residential` are automatically recognised as regular-student records even if they were created before v17.
+- Department admins receive Project Work in two separate subsections: **Distance Undergraduate Project Work** and **Non-Residential Undergraduate Project Work**.
+- Both streams retain the Pending → Approved → Rejected / Returned review gate. Only Approved records enter consolidated outputs.
+- Existing project score exports now contain **Distance students only**.
+- New Non-Residential exports are available separately: **Consolidated Non-Residential Scores**, **Master Non-Residential Scores**, and **Non-Residential Project Work Register**.
+- Duplicate-registration and repeat-submission warnings are evaluated within the same project stream so a Non-Residential submission does not contaminate Distance verification.
+- Field Experience outputs remain unchanged and separate.
 
-This release strengthens the College Scientific Committee and applicant workflows.
-
-- College officers can tick the specific document types that should be checked by a reviewer. The latest available version of each selected type is bound to that reviewer assignment.
-- Selected review documents are added to the secure reviewer package and are also attached to the Gmail review invitation up to a conservative email-size limit. Files beyond the limit remain available in the secure workspace.
-- The reviewer workspace explicitly lists the items selected by the assigning office.
-- Applicants can download the completed main Scientific or IRB Review Report from their application record. The applicant download filename is generic and does not expose the reviewer name. Internal annotated/supporting reviewer files remain restricted.
-- Applicant-facing reviewer identity is hidden. Assignment cards use generic labels such as **Scientific reviewer**, and workflow history converts reviewer-specific assignment notes to **Assigned scientific reviewer** or **Assigned IRB ethical reviewer**.
-- The applicant upload area now includes a compact required-document checklist beside the upload controls. Successfully uploaded core items show a green tick. Revision rounds have their own response/revised-document checklist.
-- College dashboards keep fresh work and revised work separate. Revised-submission rows show the previous-round reviewer(s) as clickable names.
-- When a College revision returns, the College can choose **Yes, resubmit for review** and select one or more previous reviewers, or **No, administratively reviewed** and move directly to the College Committee decision stage.
-- Re-review sends only the latest College revision round to the selected previous reviewer(s), with those revised files attached to the email where size permits and available in the secure workspace.
-
-No additional Render environment variable is required for V12. Gmail attachment delivery uses the existing `GMAIL_*` settings.
+No new environment variable or npm dependency is required for v17.
 
 
-## V14 revision-queue and College dashboard fix
+## v20 inline score review
 
-- Revised submissions are now classified from the current College revision status plus persisted revision evidence.
-- Legacy/migrated revisions can also be inferred from document-stage metadata, so they cannot silently fall back into Fresh Submissions.
-- The College dashboard is action-oriented: IRB watch, fresh awaiting assignment, revised awaiting action, active reviews, and Committee decisions are separated.
-- Revised rows show previous-round reviewers and link directly to the re-review/administrative-review decision.
-- The review assignment queue lists revised submissions separately and supports assignment to a new reviewer while preserving the shortcut to previous reviewers.
-- Initial Secretariat screening retains the secure in-frame document viewer, per-document checklist/comments, and return-to-applicant workflow.
-- Security hardening from V13 remains enabled.
+Undergraduate Project Work review now displays all detected student score rows directly beneath the submitted files in the admin submission record. Each valid row has an Include checkbox, checked by default. Department administrators may uncheck individual rows before approval; unchecked rows remain in the original uploaded workbook but are excluded from approved consolidated and master score exports. Blank template rows and supervisor Signature/Date/Contact footer metadata remain excluded automatically.
+
+Fresh and Revised Dissertation registers retain Supervisor's Name as a dedicated column, with each student deduplicated by index number within the relevant submission stage.
 
 
-## V16 balanced applicant security
+## v20 - Returned score submission email notices
+- Returning an Undergraduate Project Work submission for correction now requires a reason and emails that reason to the supervisor/examiner through the configured Gmail API.
+- Field Experience uses the same correction-email workflow.
+- Returned submissions show correction-email status in the review dialog and provide a Resend Correction Email action.
+- A failed email does not undo the Returned for Correction review status. The admin is shown the failure and can resend after correcting Gmail or recipient details.
 
-Applicant authentication was adjusted to reduce false 403/429 responses on shared campus networks and mobile connections while preserving stronger controls for privileged portals. POST `/login` and `/register` use same-origin enforcement, SameSite session cookies, password verification and account-level failed-login lockout without requiring a CSRF form token. Applicant login lockout is account-based rather than shared-IP based. Administrative, reviewer, College, IRB and System Administrator workflows retain CSRF protection and the stronger controls from the security-hardening release.
-
-## V18 fixes
-
-- Reviewer files are now stored in normal private storage **and** copied into a protected database-backed fallback table. This prevents future review reports from disappearing after a redeploy or filesystem-mount problem.
-- Existing review-report files that are still present at startup are automatically backfilled into the database fallback.
-- Missing legacy reviewer files are shown clearly as unavailable, with a College/IRB action to reopen the assignment for reviewer re-upload.
-- College administrators and authorised users can open reviewer reports inline. PDF files open in-browser and DOCX reports are rendered into a secure HTML preview. Download remains available separately.
-- College Revised Submissions are detected from the actual uploaded College-revision package. A Response to College Review plus at least one revised work document is enough to surface the work even when a legacy status transition was missed.
-- A revision surfaced from upload evidence can be sent to a new reviewer or back to a previous reviewer. The workflow normalises the revision into the formal received state when the College takes action.
-- Review-material checkboxes and labels are left aligned consistently.
-
-### Important for older missing reports
-
-If a reviewer report disappeared before V18 because `/app/storage` was not persistent, V18 cannot recreate the lost bytes. The assignment page will show **Request report re-upload**. After reopening the assignment, use **Regenerate & Resend Secure Link** if the reviewer needs a new link. All newly uploaded reviewer files receive the database fallback automatically.
-
-
-## V20 secure reviewer form fix
-
-- Secure reviewer Conflict-of-Interest Declaration now carries a stateless HMAC security token bound to the emailed review link.
-- Secure reviewer report submission uses the same link-bound token, including multipart upload submissions.
-- Reviewers continue to authenticate with the secure emailed assignment link and do not need an applicant or administrative login.
-- A stale reviewer form-security check redirects back to the secure reviewer workspace rather than exposing a raw JSON 403 page.
-
-
-## V21 Google Search Console verification
-
-The public base template includes the Google site verification token supplied for `https://ucc-irb-portal.onrender.com/`. After deployment, verify the URL-prefix property in Google Search Console, then inspect **Security & Manual Actions → Security Issues** before submitting a Safe Browsing review.
-
-
-## V24 final IRB approval workflow
-- Splits IRB processing into Exempt Determination, Expedited Review, and Full Board Review.
-- Exempt classification now requires an authorised IRB determination instead of entering the generic final-approval route.
-- Existing V22 exempt cases in `awaiting_final_irb_decision` are migrated to `exempt_determination_pending`.
-- Internal IRB classification events are hidden from applicant-facing workflow history.
-- Expedited and Full Board approvals use a dedicated Final IRB Approval / Decision stage.
-- Final approval automatically generates a UCC IRB Ethics Approval Certificate with a unique verification token and QR code.
-- QR codes resolve to the public verification page. Certificate numbers can also be verified at `/verify`.
-- Confirmed exempt protocols generate a separately labelled QR-verifiable Exemption Determination, not an Ethics Approval Certificate.
-
-
-## V24 workflow usability correction
-
-- Adds a prominent **Next Required Action** card to staff-facing application records.
-- Adds a Secretariat queue for College scientific recommendations that are ready for IRB classification.
-- Allows the IRB Secretariat to record an authorised Exempt determination or final IRB decision on behalf of the selected approving authority, while preserving the logged-in officer in the audit trail.
-- Requires the approving authority to be identified as IRB Chairperson, IRB Board, or Authorised IRB Officer as applicable.
-- Full Board decisions must identify the IRB Board as approving authority.
-
-## V26 workflow update — College recommendation, conditional approval and Board ratification
-
-Build ID: `2026-08-19-college-admin-approval-ratification-v25`
-
-### College Scientific Committee pathway
-
-For the five UCC Colleges with Scientific Committees, Exempt/Expedited/Full Board classification is no longer the normal step after College recommendation. The sequence is:
-
-1. Applicant submits centrally to IRB Secretariat.
-2. Secretariat screens and forwards complete applications to the relevant College Scientific Committee.
-3. College completes scientific review/revisions and records its recommendation.
-4. Application returns to IRB Secretariat for **Administrative IRB Review**.
-5. Authorised IRB action may:
-   - Grant **Ethical Approval Pending Board Ratification** and issue a QR-verifiable certificate immediately.
-   - Refer the College recommendation directly to Full Board review.
-   - Return the recommendation to the College Scientific Committee for clarification.
-6. Conditional approvals are added to a later IRB Board meeting for formal ratification.
-7. The Board may ratify, ratify with conditions, defer, or revoke the conditional approval.
-
-### Direct IRB pathway
-
-Applications from UCC academic/administrative units outside the five College Scientific Committees retain the Exempt / Expedited / Full Board classification workflow.
-
-### IRB processing correction
-
-Authorised IRB officers can restore a College-pathway application to **Returned to IRB Secretariat for IRB Processing** when an erroneous IRB classification was entered after College recommendation. The old classifications remain in the confidential audit trail and are displayed internally as superseded.
-
-### Approved Works Register
-
-`/secretariat/approved-register` maintains a sortable/searchable register containing:
-
-- applicant name and application reference;
-- College/UCC unit;
-- research title;
-- College Scientific reviewer;
-- officer who reviewed and approved;
-- approval date and current approval/ratification status;
-- Board meeting/ratification outcome where applicable;
-- certificate number and verification link.
-
-CSV export is available from the register.
-
-
-### IRB Board Member access
-System Administrators can create an **IRB Board Member** account. Board members use the **Board Review Queue** to access applications requiring Board oversight, including the application documents, College Scientific Committee recommendation and reviewer reports. Meeting scheduling is handled outside the portal. Secretariat/Chair officers retain responsibility for recording the formal Board decision or ratification outcome.
-
-
-## V26 Board review simplification
-
-- IRB meeting scheduling is no longer part of the portal workflow.
-- Conditional approvals move directly to **Awaiting Board Ratification**.
-- Board members use the **Board Review Queue** to inspect applications, College recommendations and reviewer reports.
-- An authorised officer records the Board outcome when communicated, with an optional Board reference/minute number.
-- The Approved Works Register now records the person who gave the conditional/initial approval and, once available, the person who gave or confirmed final approval/ratification.
-- A separate **Final Approval Register** contains only completed final approvals and includes applicant, College/unit, research title, College reviewer, conditional approver, final approver, approval dates and certificate/QR verification links.
-
-
-## V27 durable certificate storage
-
-Certificate PDFs are now stored in PostgreSQL as a durable fallback. If Render loses the filesystem copy after a restart or deploy, the download endpoint first uses the database copy and, for older records that have neither copy, automatically regenerates the PDF from the approval record. Regeneration keeps the same certificate number and verification token but rebuilds the QR code using `PUBLIC_BASE_URL` (or Render's `RENDER_EXTERNAL_URL`). Production should set `PUBLIC_BASE_URL` explicitly to the public HTTPS portal URL.
+- Resend Correction Email allows an administrator to confirm or override the recipient email for an already-returned score submission without changing the original submission record.
