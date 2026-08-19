@@ -52,12 +52,14 @@ async function loadPortalResources(portal, sectionId='resourcesSection', listId=
   }
 }
 
-async function loadStudyCentres(selectId='studyCentre',extraCentres=[]){
+async function loadStudyCentres(selectId='studyCentre',extraCentres=[],department=''){
   const select=document.getElementById(selectId);if(!select)return;
+  if(!department){select.innerHTML=`<option value="" ${select.multiple?'disabled':''}>Select department first</option>`;return;}
   try{
-    const res=await fetch('/api/study-centres');let centres=await res.json();
-    if(!res.ok||!Array.isArray(centres))throw new Error('Could not load study centres.');
+    const res=await fetch(`/api/study-centres?department=${encodeURIComponent(department)}`);let centres=await res.json();
+    if(!res.ok||!Array.isArray(centres))throw new Error(centres?.error||'Could not load study centres.');
     centres=[...new Set([...centres,...(Array.isArray(extraCentres)?extraCentres:[])])];
-    select.innerHTML='<option value="">Select study centre</option>'+centres.map(c=>`<option value="${resourceEscape(c)}">${resourceEscape(c)}</option>`).join('');
-  }catch(e){console.error(e);select.innerHTML='<option value="">Study centres unavailable</option>';}
+    const prompt=select.multiple?'Select one or more study centres':'Select study centre';
+    select.innerHTML=`<option value="" ${select.multiple?'disabled':''}>${prompt}</option>`+centres.map(c=>`<option value="${resourceEscape(c)}">${resourceEscape(c)}</option>`).join('');
+  }catch(e){console.error(e);select.innerHTML='<option value="">Study centres unavailable for this department</option>';}
 }
