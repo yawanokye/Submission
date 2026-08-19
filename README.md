@@ -1,3 +1,11 @@
+# v22 update: checkbox selection for multiple Project Work study centres
+
+The Undergraduate Project Work public portal now presents department-published study centres as a **checkbox list** instead of a multi-select dropdown. Supervisors/Examiners can tick one or more Distance study centres directly, which is clearer when groups cut across centres and works consistently on desktop and mobile without Ctrl/Cmd multi-selection.
+
+The form displays a live count of selected centres. `Non-Residential` remains mutually exclusive: selecting it clears Distance-centre selections, and selecting a Distance centre clears `Non-Residential`. The server-side v21 multi-centre validation and department-specific centre rules remain unchanged.
+
+No new Render environment variable or npm dependency is required for v22.
+
 # v21 update: multi-centre project work, claim-form ZIPs and Programme by Centre scores
 
 Version 21 extends Undergraduate Project Work administration in four areas.
