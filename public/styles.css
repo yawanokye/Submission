@@ -46,3 +46,14 @@
 input.locked-field,select.locked-field,input:disabled.locked-field,select:disabled.locked-field{background:#eef3f7;color:#405364;border-color:#cbd6df;opacity:1;cursor:not-allowed}
 #assignmentBanner{margin:0 0 22px;background:#eaf6ef;border:1px solid #b9dfc9;color:#12683d}
 .top-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.login-link{font-weight:800}.login-card{max-width:620px;margin:38px auto}.page-intro.compact{margin-bottom:10px}.locked-field{background:#f2f5f7}
+
+/* v22: checkbox-based multi-centre selection for Undergraduate Project Work */
+.centre-checklist{border:1px solid #bfcbd5;border-radius:9px;background:#fff;max-height:260px;overflow:auto;padding:7px}
+.centre-check-option{display:flex!important;align-items:flex-start;gap:10px;margin:0!important;padding:9px 10px;border-radius:7px;font-weight:600!important;cursor:pointer;line-height:1.35}
+.centre-check-option:hover{background:#f3f7fa}
+.centre-check-option+ .centre-check-option{border-top:1px solid #edf1f4}
+.centre-check-option input[type=checkbox]{width:18px!important;height:18px!important;min-width:18px;margin:1px 0 0;padding:0;accent-color:var(--navy);cursor:pointer}
+.centre-check-option span{flex:1}
+.centre-placeholder{padding:12px;color:var(--muted);font-size:13px}
+.centre-placeholder.centre-error{color:var(--bad)}
+.centre-selection-count{margin-top:7px;color:var(--navy);font-size:12px;font-weight:750}
