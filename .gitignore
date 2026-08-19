@@ -1,8 +1,7 @@
-node_modules/
-storage/files/*
-!storage/files/.gitkeep
-storage/data/submissions.json
+.venv/
+__pycache__/
+*.pyc
 .env
-storage/resources/*
-!storage/resources/.gitkeep
-storage/data/resources.json
+ucc_irb.db
+storage/*
+!storage/.gitkeep
