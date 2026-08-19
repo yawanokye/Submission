@@ -110,6 +110,32 @@ async function streamZipArchive(res, files) {
   await write(end);
   res.end();
 }
+async function zipBufferFromFiles(files) {
+  const chunks=[]; const central=[]; let offset=0;
+  const {dosTime,dosDate}=dosDateTime();
+  const push=chunk=>{chunks.push(chunk);offset+=chunk.length;};
+  for(const file of files){
+    const data=await fsp.readFile(file.path);
+    const nameBuf=Buffer.from(file.name,'utf8');
+    let crc=crc32Update(0xFFFFFFFF,data);crc=(crc^0xFFFFFFFF)>>>0;
+    const localOffset=offset;
+    const h=Buffer.alloc(30);
+    h.writeUInt32LE(0x04034b50,0);h.writeUInt16LE(20,4);h.writeUInt16LE(0x0800,6);h.writeUInt16LE(0,8);
+    h.writeUInt16LE(dosTime,10);h.writeUInt16LE(dosDate,12);h.writeUInt32LE(crc,14);h.writeUInt32LE(data.length>>>0,18);h.writeUInt32LE(data.length>>>0,22);h.writeUInt16LE(nameBuf.length,26);h.writeUInt16LE(0,28);
+    push(h);push(nameBuf);push(data);
+    central.push({nameBuf,crc,size:data.length,localOffset});
+  }
+  const centralOffset=offset;
+  for(const entry of central){
+    const h=Buffer.alloc(46);
+    h.writeUInt32LE(0x02014b50,0);h.writeUInt16LE(20,4);h.writeUInt16LE(20,6);h.writeUInt16LE(0x0800,8);h.writeUInt16LE(0,10);
+    h.writeUInt16LE(dosTime,12);h.writeUInt16LE(dosDate,14);h.writeUInt32LE(entry.crc,16);h.writeUInt32LE(entry.size>>>0,20);h.writeUInt32LE(entry.size>>>0,24);h.writeUInt16LE(entry.nameBuf.length,28);h.writeUInt16LE(0,30);h.writeUInt16LE(0,32);h.writeUInt16LE(0,34);h.writeUInt16LE(0,36);h.writeUInt32LE(0,38);h.writeUInt32LE(entry.localOffset>>>0,42);
+    push(h);push(entry.nameBuf);
+  }
+  const centralSize=offset-centralOffset;
+  const end=Buffer.alloc(22);end.writeUInt32LE(0x06054b50,0);end.writeUInt16LE(0,4);end.writeUInt16LE(0,6);end.writeUInt16LE(central.length,8);end.writeUInt16LE(central.length,10);end.writeUInt32LE(centralSize>>>0,12);end.writeUInt32LE(centralOffset>>>0,16);end.writeUInt16LE(0,20);push(end);
+  return Buffer.concat(chunks);
+}
 const PORT = Number(process.env.PORT || 10000);
 const STORAGE_DIR = path.resolve(process.env.STORAGE_DIR || path.join(__dirname, 'storage'));
 const DATA_DIR = path.join(STORAGE_DIR, 'data');
@@ -481,28 +507,65 @@ function normalizeResourcePortals(value) {
   const raw = Array.isArray(value) ? value : String(value || '').split(',');
   return [...new Set(raw.map(v => String(v || '').trim()).filter(v => RESOURCE_PORTALS.has(v)))];
 }
-async function readStudyCentres() {
-  try {
-    const raw = await fsp.readFile(STUDY_CENTRES_FILE, 'utf8');
-    const parsed = JSON.parse(raw || '[]');
-    const centres = Array.isArray(parsed) ? parsed.map(cleanHumanText).filter(Boolean) : [];
-    return centres.length ? [...new Set(centres)] : DEFAULT_STUDY_CENTRES.slice();
-  } catch { return DEFAULT_STUDY_CENTRES.slice(); }
+function emptyStudyCentreCatalogue() {
+  return Object.fromEntries(Object.keys(DEPARTMENTS).map(slug => [slug, []]));
 }
-async function readProjectStudyCentres() {
-  const centres = await readStudyCentres();
+function normalizeStudyCentreCatalogue(parsed) {
+  const catalogue=emptyStudyCentreCatalogue();
+  // Backward compatibility: every v20-and-earlier study-centres.json file was a
+  // single list. The current list has been confirmed as Business-programme centres.
+  if(Array.isArray(parsed)){
+    catalogue.business=[...new Set(parsed.map(cleanHumanText).filter(Boolean))];
+    return catalogue;
+  }
+  const source=(parsed && typeof parsed==='object' && parsed.departments && typeof parsed.departments==='object') ? parsed.departments : parsed;
+  if(source && typeof source==='object'){
+    for(const slug of Object.keys(DEPARTMENTS)){
+      const values=Array.isArray(source[slug])?source[slug]:[];
+      catalogue[slug]=[...new Set(values.map(cleanHumanText).filter(Boolean))];
+    }
+  }
+  return catalogue;
+}
+async function readStudyCentreCatalogue() {
+  try {
+    const raw=await fsp.readFile(STUDY_CENTRES_FILE,'utf8');
+    const parsed=JSON.parse(raw||'{}');
+    const catalogue=normalizeStudyCentreCatalogue(parsed);
+    if(!Object.values(catalogue).some(list=>list.length)) catalogue.business=DEFAULT_STUDY_CENTRES.slice();
+    return catalogue;
+  } catch {
+    const catalogue=emptyStudyCentreCatalogue();
+    catalogue.business=DEFAULT_STUDY_CENTRES.slice();
+    return catalogue;
+  }
+}
+async function readStudyCentres(department='business') {
+  const catalogue=await readStudyCentreCatalogue();
+  return Array.isArray(catalogue[department]) ? catalogue[department] : [];
+}
+async function readProjectStudyCentres(department='business') {
+  const centres = await readStudyCentres(department);
   return centres.includes('Non-Residential') ? centres : [...centres, 'Non-Residential'];
 }
 let studyCentreWriteQueue = Promise.resolve();
-function writeStudyCentres(centres) {
+function writeStudyCentreCatalogue(catalogue) {
   studyCentreWriteQueue = studyCentreWriteQueue.catch(() => {}).then(async () => {
-    const cleaned=[...new Set((centres || []).map(cleanHumanText).filter(Boolean))];
+    const cleaned=normalizeStudyCentreCatalogue({departments:catalogue});
     const temp=STUDY_CENTRES_FILE+'.tmp';
-    await fsp.writeFile(temp, JSON.stringify(cleaned, null, 2), 'utf8');
+    await fsp.writeFile(temp, JSON.stringify({version:2,departments:cleaned}, null, 2), 'utf8');
     await fsp.rename(temp, STUDY_CENTRES_FILE);
     return cleaned;
   });
   return studyCentreWriteQueue;
+}
+async function writeStudyCentres(centres, departments=['business']) {
+  const selected=normalizeAdminDepartments(departments);
+  if(!selected.length) throw new Error('Select at least one department for the uploaded study-centre list.');
+  const cleaned=[...new Set((centres || []).map(cleanHumanText).filter(Boolean))];
+  const catalogue=await readStudyCentreCatalogue();
+  for(const slug of selected) catalogue[slug]=cleaned.slice();
+  return writeStudyCentreCatalogue(catalogue);
 }
 function parseStudyCentreCsv(filePath) {
   const wb=XLSX.readFile(filePath,{raw:false});
@@ -731,8 +794,11 @@ function encodeMailHeader(value) {
   return `=?UTF-8?B?${Buffer.from(text, 'utf8').toString('base64')}?=`;
 }
 function base64Url(value) {
-  return Buffer.from(value, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  const buffer=Buffer.isBuffer(value)?value:Buffer.from(value,'utf8');
+  return buffer.toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/g,'');
 }
+function wrapBase64(buffer){return Buffer.from(buffer).toString('base64').match(/.{1,76}/g)?.join('\r\n')||'';}
+
 async function getGmailAccessToken() {
   if (!gmailConfigured()) {
     throw new Error('Gmail API is not configured. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN and GMAIL_SENDER_EMAIL.');
@@ -754,21 +820,27 @@ async function getGmailAccessToken() {
   }
   return data.access_token;
 }
-async function sendGmailHtmlEmail({to, subject, html}) {
+async function sendGmailHtmlEmail({to, subject, html, attachments=[]}) {
   if (!gmailConfigured()) throw new Error('Gmail API is not configured. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN and GMAIL_SENDER_EMAIL.');
   if (!isEmail(to)) throw new Error('The recipient email address is invalid.');
   if (!isEmail(GMAIL_SENDER_EMAIL)) throw new Error('GMAIL_SENDER_EMAIL is not a valid email address.');
   const fromName = encodeMailHeader(GMAIL_FROM_NAME || 'UCC Dissertation Portal');
   const fromHeader = fromName ? `${fromName} <${cleanMailHeader(GMAIL_SENDER_EMAIL)}>` : cleanMailHeader(GMAIL_SENDER_EMAIL);
-  const rawMessage = [
-    `From: ${fromHeader}`,
-    `To: ${cleanMailHeader(to)}`,
-    `Subject: ${encodeMailHeader(subject)}`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/html; charset="UTF-8"',
-    'Content-Transfer-Encoding: 8bit',
-    '', html
-  ].join('\r\n');
+  const baseHeaders=[`From: ${fromHeader}`,`To: ${cleanMailHeader(to)}`,`Subject: ${encodeMailHeader(subject)}`,'MIME-Version: 1.0'];
+  let rawMessage;
+  if(Array.isArray(attachments)&&attachments.length){
+    const boundary=`ucc-portal-${crypto.randomBytes(12).toString('hex')}`;
+    const parts=[...baseHeaders,`Content-Type: multipart/mixed; boundary="${boundary}"`,'',`--${boundary}`,'Content-Type: text/html; charset="UTF-8"','Content-Transfer-Encoding: 8bit','',html];
+    for(const attachment of attachments){
+      const filename=safeBaseName(attachment.filename||'attachment.bin');
+      const content=Buffer.isBuffer(attachment.content)?attachment.content:Buffer.from(attachment.content||'');
+      parts.push(`--${boundary}`,`Content-Type: ${cleanMailHeader(attachment.contentType||'application/octet-stream')}; name="${filename}"`,`Content-Disposition: attachment; filename="${filename}"`,'Content-Transfer-Encoding: base64','',wrapBase64(content));
+    }
+    parts.push(`--${boundary}--`,'');
+    rawMessage=parts.join('\r\n');
+  }else{
+    rawMessage=[...baseHeaders,'Content-Type: text/html; charset="UTF-8"','Content-Transfer-Encoding: 8bit','',html].join('\r\n');
+  }
   const accessToken = await getGmailAccessToken();
   const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method:'POST', headers:{ Authorization:`Bearer ${accessToken}`, 'Content-Type':'application/json' },
@@ -1042,6 +1114,11 @@ function filesFor(req, key) { return (req.files && req.files[key]) || []; }
 async function removeUploaded(req) { await Promise.all(Object.values(req.files || {}).flat().map(f => fsp.unlink(f.path).catch(() => {}))); }
 function fileRecord(f) { return f ? { storedName: path.basename(f.path), originalName: f.originalname, mimeType: f.mimetype, size: f.size } : null; }
 function text(req, key) { return String(req.body[key] || '').trim(); }
+function textList(req,key) {
+  const raw=req.body?.[key];
+  const source=Array.isArray(raw)?raw:[raw];
+  return [...new Set(source.map(cleanHumanText).filter(Boolean))];
+}
 function requireText(req, fields) { return fields.find(k => !text(req, k)); }
 function submitterName(req, prefix='') {
   const title = text(req, `${prefix}Title`);
@@ -1066,10 +1143,13 @@ app.post('/api/project-work', upload.fields([
   try {
     const department = validateDepartment(req);
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
-    const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount','studyCentre']);
+    const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error: `Missing required field: ${missing}` }); }
-    const allowedCentres=await readProjectStudyCentres();
-    if(!allowedCentres.includes(text(req,'studyCentre'))){await removeUploaded(req);return res.status(400).json({error:'Please select a valid study centre from the current list.'});}
+    const selectedCentres=textList(req,'studyCentre');
+    if(!selectedCentres.length){await removeUploaded(req);return res.status(400).json({error:'Select at least one study centre.'});}
+    const allowedCentres=await readProjectStudyCentres(department);
+    if(selectedCentres.some(c=>!allowedCentres.includes(c))){await removeUploaded(req);return res.status(400).json({error:'One or more selected study centres are not published for this department.'});}
+    if(selectedCentres.includes('Non-Residential')&&selectedCentres.length>1){await removeUploaded(req);return res.status(400).json({error:'Non-Residential cannot be combined with Distance study centres in the same submission.'});}
     if (!filesFor(req,'claimForm').length || !filesFor(req,'reportFile').length || !filesFor(req,'completedWork').length || !filesFor(req,'scoresFile').length) {
       await removeUploaded(req); return res.status(400).json({ error: 'Claim form, report, score sheet and completed project work are required.' });
     }
@@ -1081,8 +1161,8 @@ app.post('/api/project-work', upload.fields([
       reference: makeReference('PWORK'), submittedAt: new Date().toISOString(),
       title:text(req,'title'), firstName:text(req,'firstName'), lastName:text(req,'lastName'),
       fullName:buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'lastName')),
-      phone: text(req,'phone'), email: text(req,'email'), groupCount: text(req,'groupCount'), studyCentre: text(req,'studyCentre'),
-      projectStream: text(req,'studyCentre') === 'Non-Residential' ? 'non-residential' : 'distance',
+      phone: text(req,'phone'), email: text(req,'email'), groupCount: text(req,'groupCount'), studyCentres:selectedCentres, studyCentre:selectedCentres.join(' | '),
+      projectStream: selectedCentres.length===1 && selectedCentres[0] === 'Non-Residential' ? 'non-residential' : 'distance',
       scoreSheet: { worksheet: scoreResult.sheetName, headerRow: scoreResult.headerRow, rowCount: scoreResult.rows.length, rows: scoreResult.rows },
       reviewStatus:'pending', reviewNote:'', reviewedAt:null, reviewedBy:'', reviewHistory:[],
       files: {
@@ -1104,8 +1184,8 @@ app.post('/api/field-experience', upload.fields([
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
     const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount','studyCentre']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error: `Missing required field: ${missing}` }); }
-    const allowedCentres=await readStudyCentres();
-    if(!allowedCentres.includes(text(req,'studyCentre'))){await removeUploaded(req);return res.status(400).json({error:'Please select a valid study centre from the current list.'});}
+    const allowedCentres=await readStudyCentres(department);
+    if(!allowedCentres.includes(text(req,'studyCentre'))){await removeUploaded(req);return res.status(400).json({error:'Please select a study centre published for this department.'});}
     if (!filesFor(req,'scoresFile').length) {
       await removeUploaded(req); return res.status(400).json({ error: 'The Field Experience score sheet is required.' });
     }
@@ -1398,10 +1478,20 @@ app.post('/api/assessor', upload.fields(assessorUploadFields), async (req, res) 
 
 function recordsForDepartment(records, department) { return records.filter(r => r.department === department); }
 function projectRecords(records) { return records.filter(r => r.portalType === 'project-work' || !r.portalType); }
+function projectStudyCentres(record) {
+  const direct=Array.isArray(record?.studyCentres)?record.studyCentres.map(cleanHumanText).filter(Boolean):[];
+  if(direct.length) return [...new Set(direct)];
+  const legacy=String(record?.studyCentre||'').split(/\s*\|\s*/).map(cleanHumanText).filter(Boolean);
+  return [...new Set(legacy)];
+}
+function studyCentreDisplay(record) {
+  return projectStudyCentres(record).join(', ') || String(record?.studyCentre||'').trim();
+}
 function projectStream(record) {
   const explicit=String(record?.projectStream||'').trim().toLowerCase();
   if(explicit==='non-residential') return 'non-residential';
-  return String(record?.studyCentre||'').trim().toLowerCase()==='non-residential' ? 'non-residential' : 'distance';
+  const centres=projectStudyCentres(record);
+  return centres.length===1 && centres[0].toLowerCase()==='non-residential' ? 'non-residential' : 'distance';
 }
 function distanceProjectRecords(records) { return projectRecords(records).filter(r => projectStream(r)==='distance'); }
 function nonResidentialProjectRecords(records) { return projectRecords(records).filter(r => projectStream(r)==='non-residential'); }
@@ -1444,9 +1534,9 @@ function projectSubmissionWarnings(record, records) {
     return emailMatch||samePersonName(supervisorName,r.fullName||r.name||'');
   });
   if(sameSupervisor.length) warnings.push({code:'repeat-supervisor',message:`Same supervisor/examiner has ${sameSupervisor.length} other ${stream==='non-residential'?'Non-Residential':'Distance'} project-work submission${sameSupervisor.length===1?'':'s'} in this department.`});
-  const centreKey=String(record.studyCentre||'').trim().toLowerCase();
-  const sameCombo=sameSupervisor.filter(r=>String(r.studyCentre||'').trim().toLowerCase()===centreKey);
-  if(centreKey&&sameCombo.length) warnings.push({code:'repeat-supervisor-centre',message:`Same supervisor/examiner and study-centre combination appears in ${sameCombo.length} other submission${sameCombo.length===1?'':'s'}.`});
+  const centreKeys=new Set(projectStudyCentres(record).map(c=>c.toLowerCase()));
+  const sameCombo=sameSupervisor.filter(r=>projectStudyCentres(r).some(c=>centreKeys.has(c.toLowerCase())));
+  if(centreKeys.size&&sameCombo.length) warnings.push({code:'repeat-supervisor-centre',message:`Same supervisor/examiner has ${sameCombo.length} other submission${sameCombo.length===1?'':'s'} sharing at least one selected study centre.`});
   const approvedOthers=others.filter(r=>projectReviewStatus(r)==='approved');
   const approvedRegMap=new Map();
   for(const other of approvedOthers){
@@ -1536,29 +1626,55 @@ function validScoreRows(record) {
 function approvedProjectScoreRows(record) {
   return validScoreRowsWithMeta(record).filter(row=>row.included).map(({sourceIndex,included,...row})=>row);
 }
+function registrationSortValue(value) {
+  return String(value||'').trim().toUpperCase();
+}
+function compareRegistrationValues(a,b) {
+  return registrationSortValue(a).localeCompare(registrationSortValue(b),undefined,{numeric:true,sensitivity:'base'});
+}
+function renumberScoreRows(rows) {
+  return rows.map((row,i)=>({...row,'S/N':i+1}));
+}
 function projectScoreRowsForStream(records, stream='distance') {
-  const out=[]; let sn=1;
-  projectRecords(records).filter(record=>projectStream(record)===stream && projectReviewStatus(record)==='approved').slice().sort((a,b)=>String(a.submittedAt).localeCompare(String(b.submittedAt))).forEach(record => {
-    for (const row of approvedProjectScoreRows(record)) out.push({'S/N':sn++,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
+  const out=[];
+  projectRecords(records).filter(record=>projectStream(record)===stream && projectReviewStatus(record)==='approved').forEach(record => {
+    for (const row of approvedProjectScoreRows(record)) out.push({'S/N':0,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
   });
-  return out;
+  out.sort((a,b)=>compareRegistrationValues(a['REGISTRATION NO.'],b['REGISTRATION NO.'])||String(a.NAME||'').localeCompare(String(b.NAME||'')));
+  return renumberScoreRows(out);
 }
 function allScoreRows(records) { return projectScoreRowsForStream(records,'distance'); }
 function allNonResidentialScoreRows(records) { return projectScoreRowsForStream(records,'non-residential'); }
-function scoreSheetAoA(records) { const rows=allScoreRows(records); return [REQUIRED_HEADERS, ...rows.map(r=>REQUIRED_HEADERS.map(h=>r[h]))]; }
-function nonResidentialScoreSheetAoA(records) { const rows=allNonResidentialScoreRows(records); return [REQUIRED_HEADERS, ...rows.map(r=>REQUIRED_HEADERS.map(h=>r[h]))]; }
+function scoreRowsAoA(rows) { return [REQUIRED_HEADERS, ...renumberScoreRows(rows).map(r=>REQUIRED_HEADERS.map(h=>r[h]))]; }
+function scoreSheetAoA(records) { return scoreRowsAoA(allScoreRows(records)); }
+function nonResidentialScoreSheetAoA(records) { return scoreRowsAoA(allNonResidentialScoreRows(records)); }
 function individualScoreSheetAoA(record) { const rows=validScoreRows(record); return [REQUIRED_HEADERS, ...rows.map((row,i)=>[i+1,row.name||'',row.registrationNo||'',row.groupNo||'',row.totalScore||''])]; }
+function registrationProgrammeCentre(registrationNo) {
+  const parts=String(registrationNo||'').split('/').map(v=>v.trim());
+  if(parts.length<3||!parts[0]||!parts[1]||!parts[2]) return {key:'UNCLASSIFIED',programme:'UNCLASSIFIED',centre:'UNCLASSIFIED'};
+  return {key:`${parts[0]}/${parts[1]}/${parts[2]}`,programme:parts[0],centre:`${parts[1]}/${parts[2]}`};
+}
+function projectProgrammeCentreGroups(records,stream='distance') {
+  const groups=new Map();
+  for(const row of projectScoreRowsForStream(records,stream)){
+    const info=registrationProgrammeCentre(row['REGISTRATION NO.']);
+    if(!groups.has(info.key)) groups.set(info.key,{...info,rows:[]});
+    groups.get(info.key).rows.push({...row});
+  }
+  return [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key,undefined,{numeric:true,sensitivity:'base'})).map(g=>({...g,rows:renumberScoreRows(g.rows.sort((a,b)=>compareRegistrationValues(a['REGISTRATION NO.'],b['REGISTRATION NO.'])))}));
+}
 function allFieldExperienceScoreRows(records) {
-  const out=[]; let sn=1;
-  fieldExperienceRecords(records).filter(record=>projectReviewStatus(record)==='approved').slice().sort((a,b)=>String(a.submittedAt).localeCompare(String(b.submittedAt))).forEach(record => {
-    for (const row of validScoreRows(record)) out.push({'S/N':sn++,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
+  const out=[];
+  fieldExperienceRecords(records).filter(record=>projectReviewStatus(record)==='approved').forEach(record => {
+    for (const row of validScoreRows(record)) out.push({'S/N':0,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
   });
-  return out;
+  out.sort((a,b)=>compareRegistrationValues(a['REGISTRATION NO.'],b['REGISTRATION NO.'])||String(a.NAME||'').localeCompare(String(b.NAME||'')));
+  return renumberScoreRows(out);
 }
 function fieldExperienceScoreSheetAoA(records) { const rows=allFieldExperienceScoreRows(records); return [REQUIRED_HEADERS, ...rows.map(r=>REQUIRED_HEADERS.map(h=>r[h]))]; }
 function projectRegisterAoA(records, stream='distance') {
-  const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE','STUDENT STREAM','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED','ROWS INCLUDED FOR CONSOLIDATION','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
-  const body=projectRecords(records).filter(r=>projectStream(r)===stream).map((r,i)=>[i+1,r.reference,r.submittedAt,r.fullName,r.phone,r.email,r.studyCentre,stream==='non-residential'?'Non-Residential (Regular)':'Distance',r.groupCount,validScoreRows(r).length,approvedProjectScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']); return [h,...body];
+  const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE(S)','STUDENT STREAM','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED','ROWS INCLUDED FOR CONSOLIDATION','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
+  const body=projectRecords(records).filter(r=>projectStream(r)===stream).map((r,i)=>[i+1,r.reference,r.submittedAt,r.fullName,r.phone,r.email,studyCentreDisplay(r),stream==='non-residential'?'Non-Residential (Regular)':'Distance',r.groupCount,validScoreRows(r).length,approvedProjectScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']); return [h,...body];
 }
 function fieldExperienceRegisterAoA(records) {
   const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
@@ -1616,6 +1732,42 @@ function sendWorkbook(res,kind,records,filename){
   res.send(buffer);
 }
 
+function scoreRowsWorkbookBuffer(rows,sheetName='Scores') {
+  const wb=XLSX.utils.book_new();
+  addSheet(wb,String(sheetName||'Scores').replace(/[\\/?*\[\]:]/g,'-').slice(0,31)||'Scores',scoreRowsAoA(rows),[10,34,24,16,16]);
+  return XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
+}
+function claimFilesForSelectedProject(records,ids,stream='distance') {
+  const allowed=new Set((ids||[]).map(String));
+  const selected=projectRecords(records).filter(r=>allowed.has(String(r.id))&&projectStream(r)===stream);
+  const counts=new Map();const files=[];
+  for(const record of selected){
+    const item=record.files?.claimForm;if(!item)continue;
+    const fp=path.join(FILES_DIR,path.basename(item.storedName));if(!fs.existsSync(fp))continue;
+    const stem=safeBaseName(record.fullName||'Supervisor Examiner').trim()||'Supervisor Examiner';
+    const n=(counts.get(stem.toLowerCase())||0)+1;counts.set(stem.toLowerCase(),n);
+    const ext=(path.extname(item.originalName||'')||path.extname(fp)||'.docx').toLowerCase();
+    const name=safeBaseName(`${stem}${n>1?` (${n})`:''}${ext}`);
+    files.push({path:fp,name,size:Number(item.size||fs.statSync(fp).size),record});
+  }
+  return files;
+}
+async function streamProgrammeCentreScoreZip(res,records,stream,downloadName) {
+  const groups=projectProgrammeCentreGroups(records,stream);
+  if(!groups.length){res.status(404).json({error:'No approved project-work score rows are available for Programme by Centre export.'});return;}
+  const tempDir=path.join(DATA_DIR,`programme-centre-${crypto.randomUUID()}`);await fsp.mkdir(tempDir,{recursive:true});
+  try{
+    const zipFiles=[];
+    for(const group of groups){
+      const stem=group.key==='UNCLASSIFIED'?'UNCLASSIFIED':group.key.replace(/\//g,'_');
+      const filename=safeBaseName(`${stem}.xlsx`);const fp=path.join(tempDir,filename);
+      await fsp.writeFile(fp,scoreRowsWorkbookBuffer(group.rows,group.key));zipFiles.push({path:fp,name:filename});
+    }
+    res.setHeader('Content-Type','application/zip');res.setHeader('Content-Disposition',`attachment; filename="${safeBaseName(downloadName)}"`);
+    await streamZipArchive(res,zipFiles);
+  }finally{await fsp.rm(tempDir,{recursive:true,force:true}).catch(()=>{});}
+}
+
 function feedbackAdminInfoForWork(work, records, department){
   const exact=work?.studentSubmissionId ? records.find(r=>r.id===work.studentSubmissionId && r.portalType==='dissertation' && r.department===department) : null;
   const student=exact || latestStudentDissertation(records,department,work?.indexNumber);
@@ -1633,7 +1785,7 @@ function adminRecordsMap(records, assignments=[]) {
       id:r.id,reference:r.reference,submittedAt:r.submittedAt,portalType:r.portalType||'project-work',
       name:r.fullName||r.studentName||r.assessorName||'',secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
       title:r.title||r.studentTitle||r.assessorTitle||'',firstName:r.firstName||r.studentFirstName||r.assessorFirstName||'',lastName:r.lastName||r.studentLastName||r.assessorLastName||'',
-      email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:r.studyCentre||'',projectStream:(r.portalType==='project-work'||!r.portalType)?projectStream(r):'',scoreRows:validScoreRows(r).length,scoreRowsIncluded:(r.portalType==='project-work'||!r.portalType)?approvedProjectScoreRows(r).length:validScoreRows(r).length,
+      email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:(r.portalType==='project-work'||!r.portalType)?studyCentreDisplay(r):(r.studyCentre||''),studyCentres:(r.portalType==='project-work'||!r.portalType)?projectStudyCentres(r):[],projectStream:(r.portalType==='project-work'||!r.portalType)?projectStream(r):'',scoreRows:validScoreRows(r).length,scoreRowsIncluded:(r.portalType==='project-work'||!r.portalType)?approvedProjectScoreRows(r).length:validScoreRows(r).length,
       projectReviewStatus:projectReviewStatus(r),projectReviewLabel:projectReviewLabel(projectReviewStatus(r)),projectReviewNote:r.reviewNote||'',projectReviewedAt:r.reviewedAt||null,projectReviewedBy:r.reviewedBy||'',projectWarnings:(r.portalType==='project-work'||!r.portalType)?projectSubmissionWarnings(r,records):[],projectReturnEmailStatus:r.reviewReturnEmailStatus||'',projectReturnEmailSentAt:r.reviewReturnEmailSentAt||null,projectReturnEmailError:r.reviewReturnEmailError||'',projectReturnEmailRecipient:r.reviewReturnEmailRecipient||'',
       fieldReviewStatus:projectReviewStatus(r),fieldReviewLabel:projectReviewLabel(projectReviewStatus(r)),fieldReviewNote:r.reviewNote||'',fieldReviewedAt:r.reviewedAt||null,fieldReviewedBy:r.reviewedBy||'',fieldWarnings:r.portalType==='field-experience'?fieldExperienceSubmissionWarnings(r,records):[],fieldReturnEmailStatus:r.reviewReturnEmailStatus||'',fieldReturnEmailSentAt:r.reviewReturnEmailSentAt||null,fieldReturnEmailError:r.reviewReturnEmailError||'',fieldReturnEmailRecipient:r.reviewReturnEmailRecipient||'',
       studentName:r.studentName||'',indexNumber:r.indexNumber||'',dissertationTopic:r.dissertationTopic||'',previousDissertationTopic:r.previousDissertationTopic||'',supervisorName:r.supervisorName||'',submissionType,
@@ -1885,17 +2037,30 @@ app.delete('/api/developer/resources/:id', developerAuth, async (req,res)=>{
 });
 
 // PUBLIC STUDY CENTRES + DEVELOPER ADMIN ACCOUNT / STUDY CENTRE MANAGEMENT
-app.get('/api/study-centres', async(_req,res)=>res.json(await readStudyCentres()));
-app.get('/api/developer/study-centres', developerAuth, async(_req,res)=>res.json(await readStudyCentres()));
+app.get('/api/study-centres', async(req,res)=>{
+  const department=String(req.query.department||'').trim();
+  if(!departmentFromSlug(department)) return res.status(400).json({error:'Select a valid department before loading study centres.'});
+  res.json(await readStudyCentres(department));
+});
+app.get('/api/developer/study-centres', developerAuth, async(_req,res)=>{
+  const departments=await readStudyCentreCatalogue();
+  const total=Object.values(departments).reduce((n,list)=>n+(Array.isArray(list)?list.length:0),0);
+  res.json({departments,total});
+});
 app.post('/api/developer/study-centres', developerAuth, upload.single('studyCentresCsv'), async(req,res)=>{
   try{
     if(!req.file) return res.status(400).json({error:'Select a CSV file containing study centres.'});
+    const departments=normalizeAdminDepartments(req.body?.departments);
+    if(!departments.length){await fsp.unlink(req.file.path).catch(()=>{});return res.status(400).json({error:'Select at least one department for this study-centre list.'});}
     if(path.extname(req.file.originalname||'').toLowerCase()!=='.csv'){await fsp.unlink(req.file.path).catch(()=>{});return res.status(400).json({error:'Upload a CSV file. Put one study centre per row in the first column.'});}
     const centres=parseStudyCentreCsv(req.file.path);await fsp.unlink(req.file.path).catch(()=>{});
-    const saved=await writeStudyCentres(centres);res.json({ok:true,count:saved.length,centres:saved});
+    const saved=await writeStudyCentres(centres,departments);res.json({ok:true,count:centres.length,departments,centres,catalogue:saved});
   }catch(e){if(req.file?.path)await fsp.unlink(req.file.path).catch(()=>{});res.status(400).json({error:e.message||'Could not update study centres.'});}
 });
-app.post('/api/developer/study-centres/reset', developerAuth, async(_req,res)=>{const centres=await writeStudyCentres(DEFAULT_STUDY_CENTRES);res.json({ok:true,count:centres.length,centres});});
+app.post('/api/developer/study-centres/reset', developerAuth, async(_req,res)=>{
+  const catalogue=await readStudyCentreCatalogue();catalogue.business=DEFAULT_STUDY_CENTRES.slice();
+  const saved=await writeStudyCentreCatalogue(catalogue);res.json({ok:true,count:saved.business.length,departments:['business'],centres:saved.business,catalogue:saved});
+});
 
 app.get('/api/developer/admin-users', developerAuth, async(_req,res)=>res.json((await readAdminUsers()).map(publicAdminUser)));
 app.post('/api/developer/admin-users', developerAuth, async(req,res)=>{
@@ -2211,7 +2376,7 @@ app.post('/api/admin/:department/project-work/:id/review', departmentAuth, requi
       await writeDb(all);
     }else{
       try{
-        const mail=await sendScoreSubmissionReturnedEmail({to:target.email,supervisorName:target.fullName,departmentName:req.adminDepartmentName,reference:target.reference,studyCentre:target.studyCentre,reason:note,portalType:'project-work',portalUrl:`${baseUrlFor(req)}/project-work.html`});
+        const mail=await sendScoreSubmissionReturnedEmail({to:target.email,supervisorName:target.fullName,departmentName:req.adminDepartmentName,reference:target.reference,studyCentre:studyCentreDisplay(target),reason:note,portalType:'project-work',portalUrl:`${baseUrlFor(req)}/project-work.html`});
         emailSent=true;target.reviewReturnEmailStatus='sent';target.reviewReturnEmailSentAt=new Date().toISOString();target.reviewReturnEmailMessageId=mail.id||'';target.reviewReturnEmailRecipient=target.email;target.reviewReturnEmailError='';await writeDb(all);
       }catch(e){emailSent=false;emailError=String(e.message||e).slice(0,500);target.reviewReturnEmailStatus='failed';target.reviewReturnEmailError=emailError;await writeDb(all);console.error('Project Work correction email failed:',e);}
     }
@@ -2227,7 +2392,7 @@ app.post('/api/admin/:department/project-work/:id/resend-return-email', departme
   if(!String(target.reviewNote||'').trim())return res.status(400).json({error:'This returned submission has no recorded correction reason. Reset it to Pending and return it again with a reason.'});
   const recipient=String(req.body?.recipientEmail||target.email||'').trim().toLowerCase();
   if(!isEmail(recipient))return res.status(400).json({error:'Enter a valid supervisor/examiner email address for the correction notice.'});
-  try{const mail=await sendScoreSubmissionReturnedEmail({to:recipient,supervisorName:target.fullName,departmentName:req.adminDepartmentName,reference:target.reference,studyCentre:target.studyCentre,reason:target.reviewNote,portalType:'project-work',portalUrl:`${baseUrlFor(req)}/project-work.html`});target.reviewReturnEmailStatus='sent';target.reviewReturnEmailSentAt=new Date().toISOString();target.reviewReturnEmailMessageId=mail.id||'';target.reviewReturnEmailRecipient=recipient;target.reviewReturnEmailError='';await writeDb(all);res.json({ok:true,emailSent:true,sentAt:target.reviewReturnEmailSentAt,recipient});}
+  try{const mail=await sendScoreSubmissionReturnedEmail({to:recipient,supervisorName:target.fullName,departmentName:req.adminDepartmentName,reference:target.reference,studyCentre:studyCentreDisplay(target),reason:target.reviewNote,portalType:'project-work',portalUrl:`${baseUrlFor(req)}/project-work.html`});target.reviewReturnEmailStatus='sent';target.reviewReturnEmailSentAt=new Date().toISOString();target.reviewReturnEmailMessageId=mail.id||'';target.reviewReturnEmailRecipient=recipient;target.reviewReturnEmailError='';await writeDb(all);res.json({ok:true,emailSent:true,sentAt:target.reviewReturnEmailSentAt,recipient});}
   catch(e){target.reviewReturnEmailStatus='failed';target.reviewReturnEmailError=String(e.message||e).slice(0,500);await writeDb(all);console.error('Project Work correction resend failed:',e);res.status(502).json({error:`The correction email could not be sent: ${e.message||e}`});}
 });
 
@@ -2408,6 +2573,37 @@ app.get('/api/admin/:department/export/non-residential-project-master.xlsx', dep
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   sendWorkbook(res,'non-residential-project-master',records,`${req.adminDepartment}-master-non-residential-project-scores.xlsx`);
 });
+app.get('/api/admin/:department/export/project-programme-centre.zip', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);
+  try{await streamProgrammeCentreScoreZip(res,records,'distance',`${req.adminDepartment}-distance-programme-by-centre-scores.zip`);}catch(e){console.error('Programme by Centre ZIP failed:',e);if(!res.headersSent)res.status(500).json({error:'Could not create the Programme by Centre ZIP.'});else res.end();}
+});
+app.get('/api/admin/:department/export/non-residential-project-programme-centre.zip', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);
+  try{await streamProgrammeCentreScoreZip(res,records,'non-residential',`${req.adminDepartment}-non-residential-programme-by-centre-scores.zip`);}catch(e){console.error('Non-Residential Programme by Centre ZIP failed:',e);if(!res.headersSent)res.status(500).json({error:'Could not create the Programme by Centre ZIP.'});else res.end();}
+});
+app.post('/api/admin/:department/project-claims/download-selected', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
+  const ids=Array.isArray(req.body?.ids)?req.body.ids.map(String):[];const stream=req.body?.stream==='non-residential'?'non-residential':'distance';
+  if(!ids.length)return res.status(400).json({error:'Select at least one Undergraduate Project Work submission.'});
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);const zipFiles=claimFilesForSelectedProject(records,ids,stream);
+  if(!zipFiles.length)return res.status(404).json({error:'No claim forms were found for the selected submissions.'});
+  res.setHeader('Content-Type','application/zip');res.setHeader('Content-Disposition',`attachment; filename="${req.adminDepartment}-${stream}-selected-claim-forms.zip"`);
+  try{await streamZipArchive(res,zipFiles);}catch(e){console.error('Project claim ZIP failed:',e);if(!res.headersSent)res.status(500).json({error:'Could not create the claim-form ZIP.'});else res.end();}
+});
+app.post('/api/admin/:department/project-claims/email-selected', departmentAuth, requireAdminAccess('project-work','officer'), async(req,res)=>{
+  const ids=Array.isArray(req.body?.ids)?req.body.ids.map(String):[];const stream=req.body?.stream==='non-residential'?'non-residential':'distance';const recipient=String(req.body?.recipientEmail||'').trim().toLowerCase();
+  if(!ids.length)return res.status(400).json({error:'Select at least one Undergraduate Project Work submission.'});
+  if(!isEmail(recipient))return res.status(400).json({error:'Enter a valid department email address.'});
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);const zipFiles=claimFilesForSelectedProject(records,ids,stream);
+  if(!zipFiles.length)return res.status(404).json({error:'No claim forms were found for the selected submissions.'});
+  const total=zipFiles.reduce((n,f)=>n+Number(f.size||0),0);if(total>18*1024*1024)return res.status(400).json({error:'The selected claim forms are too large to email safely as one Gmail attachment. Download the ZIP instead or send a smaller selection.'});
+  try{
+    const zip=await zipBufferFromFiles(zipFiles);const streamLabel=stream==='non-residential'?'Non-Residential':'Distance';
+    const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Undergraduate Project Work Claim Forms</h2><p>${htmlEscape(req.adminDepartmentName)}</p><p>Attached is a ZIP containing <strong>${zipFiles.length}</strong> selected ${htmlEscape(streamLabel)} Undergraduate Project Work claim form${zipFiles.length===1?'':'s'}.</p><p>Each claim form has been renamed using the Supervisor/Examiner name for easier departmental processing.</p><p>Regards,<br>${htmlEscape(GMAIL_FROM_NAME||'CoDE Academic Submission Portal')}<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+    const filename=`${req.adminDepartment}-${stream}-selected-claim-forms.zip`;
+    const mail=await sendGmailHtmlEmail({to:recipient,subject:`Undergraduate Project Work Claim Forms - ${req.adminDepartmentName}`,html,attachments:[{filename,contentType:'application/zip',content:zip}]});
+    res.json({ok:true,emailSent:true,recipient,count:zipFiles.length,messageId:mail.id||''});
+  }catch(e){console.error('Email selected claim forms failed:',e);res.status(502).json({error:`Could not email the claim forms: ${e.message||e}`});}
+});
 
 // FIELD EXPERIENCE score exports. Only Approved Field Experience submissions are consolidated.
 app.get('/api/admin/:department/export/field-experience-scores.xlsx', departmentAuth, requireAdminAccess('field-experience','viewer'), async(req,res)=>{
@@ -2477,7 +2673,7 @@ app.get('/api/admin/:department/summary',departmentAuth,async(req,res)=>{
   });
 });
 
-app.get('/health',async(_req,res)=>{const admins=await readAdminUsers();res.json({ok:true,departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:admins.length,pendingAdminInvitations:admins.filter(a=>!a.passwordHash&&a.invitationTokenHash).length,studyCentres:(await readStudyCentres()).length,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'});});
+app.get('/health',async(_req,res)=>{const admins=await readAdminUsers(),centreCatalogue=await readStudyCentreCatalogue();const centreCount=Object.values(centreCatalogue).reduce((n,list)=>n+(Array.isArray(list)?list.length:0),0);res.json({ok:true,departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:admins.length,pendingAdminInvitations:admins.filter(a=>!a.passwordHash&&a.invitationTokenHash).length,studyCentres:centreCount,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'});});
 app.get('/vendor/xlsx.full.min.js', (_req,res)=>res.sendFile(path.join(__dirname,'node_modules','xlsx','dist','xlsx.full.min.js')));
 app.use(express.static(path.join(__dirname,'public'),{extensions:['html']}));
 app.use((err,req,res,_next)=>{

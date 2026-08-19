@@ -1,3 +1,16 @@
+# v21 update: multi-centre project work, claim-form ZIPs and Programme by Centre scores
+
+Version 21 extends Undergraduate Project Work administration in four areas.
+
+- **Multiple study centres per Project Work submission.** A supervisor/examiner may select more than one Distance study centre when supervised groups cut across centres. `Non-Residential` remains a separate regular-student stream and must be selected alone. Existing single-centre records remain compatible.
+- **Department-specific study-centre publishing.** The Developer Portal now requires the developer to identify which department(s) an uploaded CSV belongs to. The legacy centre list is treated as the Department of Business Programmes list. Uploading a new CSV replaces only the selected department(s). Project Work and Field Experience public forms load centres only after the user selects a department.
+- **Selected claim-form packages.** Department users may select Project Work submissions and download their Claim Forms in one ZIP. Officers and Administrators may also email the same ZIP to a department email address using the existing Gmail API. Files are renamed to the Supervisor/Examiner name, with `(2)`, `(3)` etc. added when names repeat. Large packages that are unsafe for Gmail are directed to ZIP download instead.
+- **Programme by Centre score ZIP.** In addition to the ordinary consolidated workbook, Distance and Non-Residential Project Work now have a downloadable `Programme by Centre ZIP`. The grouping key is the first three slash-separated parts of the Registration Number. For example, `BCF/CR/01/22/0002` is grouped under `BCF/CR/01`, where `BCF` is the programme and `CR/01` is the centre code. Each group is exported as its own XLSX file, such as `BCF_CR_01.xlsx`, inside one ZIP. Invalid/short registration numbers are retained in `UNCLASSIFIED.xlsx` rather than dropped.
+
+All consolidated Project Work score outputs, Master Project Work score outputs, Programme-by-Centre score files and Field Experience consolidated score outputs are now sorted by **Registration No.** before S/N is assigned.
+
+No new Render environment variable or npm dependency is required for v21. Existing Gmail settings are reused for emailing selected claim-form ZIPs.
+
 # v18 update: exclude Project Work signature/footer rows from score consolidation
 
 Undergraduate Project Work and other score-based exports now explicitly exclude the template footer metadata that appears below the student score table, including **Signature of Supervisor**, **Date**, and **Contact**. These lines are not counted as score rows and cannot appear in Consolidated or Master score sheets.
@@ -96,7 +109,7 @@ GMAIL_CLIENT_ID=...
 GMAIL_CLIENT_SECRET=...
 GMAIL_REFRESH_TOKEN=...
 GMAIL_SENDER_EMAIL=department-email@ucc.edu.gh
-GMAIL_FROM_NAME=UCC Dissertation Portal
+GMAIL_FROM_NAME=CoDE Academic Submission Portal
 ```
 
 Optional:
