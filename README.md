@@ -217,3 +217,9 @@ Fresh and Revised Dissertation registers retain Supervisor's Name as a dedicated
 - A failed email does not undo the Returned for Correction review status. The admin is shown the failure and can resend after correcting Gmail or recipient details.
 
 - Resend Correction Email allows an administrator to confirm or override the recipient email for an already-returned score submission without changing the original submission record.
+
+## v23: Field Experience and Teaching Practice
+
+The public Field Experience portal is now **Field Experience and Teaching Practice**. Each submission selects exactly one of six assessment categories: Field Experience I & II, Field Experience III & IV, Field Experience V, Micro-Teaching, Macro-Teaching, or Reflection. The portal validates the Excel score sheet against the selected category and can read the matching worksheet from the supplied six-sheet template workbook.
+
+Department administration groups these submissions into the same six categories. Consolidated and master Field/Teaching workbooks use separate worksheets for each category so that the different score structures are never mixed. Older Field Experience records remain accessible as Previous / Unclassified records. This v23 change is confined to the Field Experience section. Undergraduate Project Work, Dissertation Submission and Assessment/Vetting workflows remain unchanged.

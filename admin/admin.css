@@ -96,3 +96,12 @@ tr.review-row-returned td{background:#f3f8fd}tr.review-row-returned td:first-chi
 .correction-email-sent{background:#edf8f1;border-color:#b8dfc5}
 .correction-email-failed{background:#fff1f1;border-color:#efbcbc}
 .correction-email-pending{background:#fff8e6;border-color:#ead58c}
+
+/* v23: Field Experience and Teaching Practice assessment grouping */
+.field-assessment-groups{display:grid;gap:18px;margin-top:18px}
+.field-assessment-card{border:1px solid #d8e2ea;border-radius:12px;background:#fff;overflow:hidden}
+.field-assessment-head{display:flex;justify-content:space-between;gap:14px;align-items:center;padding:14px 16px;background:#f7fafc;border-bottom:1px solid #dfe7ed}
+.field-assessment-head h4{margin:0;color:var(--navy);font-size:16px}
+.field-assessment-head p{margin:4px 0 0;color:#687a89;font-size:12px}
+.field-assessment-card .table-scroll{border:0;border-radius:0}
+.field-assessment-card .empty{margin:0;border-radius:0;border:0;border-top:1px solid #e3e9ee;background:#fbfcfd}

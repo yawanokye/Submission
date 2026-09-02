@@ -1,5 +1,5 @@
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
-const portalLabels={'project-work':'Undergraduate Project Work','field-experience':'Field Experience Scores','dissertation':'Dissertation','assessor':'Assessment/Vetting Reports'};
+const portalLabels={'project-work':'Undergraduate Project Work','field-experience':'Field Experience and Teaching Practice','dissertation':'Dissertation','assessor':'Assessment/Vetting Reports'};
 const deptLabels={'education':'Education','business':'Business','arts-social-sciences':'Arts & Social Sciences','science-mathematics':'Science & Mathematics'};
 const roleLabels={viewer:'Viewer',officer:'Officer',administrator:'Administrator'};
 const fmt=d=>d?new Date(d).toLocaleString():'Built-in';

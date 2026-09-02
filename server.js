@@ -197,10 +197,19 @@ const BUILTIN_RESOURCES = [
     id: 'builtin-project-score-sheet',
     title: 'Project Work Score Sheet Sample',
     description: 'Use this sample score sheet for undergraduate project work. The submission validator checks only the five required headings.',
-    portals: ['project-work','field-experience'],
+    portals: ['project-work'],
     originalName: 'SCORE SHEET_PROJECT WORK sample.xlsx',
     builtIn: true,
     sourcePath: path.join(__dirname, 'public', 'resources', 'project-work', 'score-sheet-project-work-sample.xlsx')
+  },
+  {
+    id: 'builtin-field-teaching-score-sheets',
+    title: 'Field Experience and Teaching Practice Score Sheets',
+    description: 'Approved Excel templates for Field Experience I & II, Field Experience III & IV, Field Experience V, Micro-Teaching, Macro-Teaching and Reflection. Submit one assessment type at a time.',
+    portals: ['field-experience'],
+    originalName: 'UCC_Field_Experience_Score_Sheets.xlsx',
+    builtIn: true,
+    sourcePath: path.join(__dirname, 'public', 'resources', 'field-experience', 'UCC_Field_Experience_Score_Sheets.xlsx')
   },
   {
     id: 'builtin-project-supervisor-report',
@@ -224,6 +233,58 @@ const BUILTIN_RESOURCES = [
 
 const REQUIRED_HEADERS = ['S/N', 'NAME', 'REGISTRATION NO.', 'GROUP NO.', 'TOTAL SCORE'];
 const MAX_HEADER_SCAN_ROWS = 40;
+
+const FIELD_ASSESSMENTS = Object.freeze({
+  'field-experience-1-2': {
+    label: 'Field Experience I & II',
+    sheetName: 'FE I & II',
+    identityAliases: ['FIELD EXPERIENCE I & II','FIELD EXPERIENCE I AND II','FIELD EXP I & II','FE I & II'],
+    scoreHeaders: ['F. EXP I','F. EXP II'],
+    scoreAliases: [
+      ['F. EXP I','F EXP I','FIELD EXPERIENCE I','FE I'],
+      ['F. EXP II','F EXP II','FIELD EXPERIENCE II','FE II']
+    ]
+  },
+  'field-experience-3-4': {
+    label: 'Field Experience III & IV',
+    sheetName: 'FE III & IV',
+    identityAliases: ['FIELD EXPERIENCE III & IV','FIELD EXPERIENCE III AND IV','FIELD EXP III & IV','FE III & IV'],
+    scoreHeaders: ['F. EXP III','F. EXP IV'],
+    scoreAliases: [
+      ['F. EXP III','F EXP III','FIELD EXPERIENCE III','FE III'],
+      ['F. EXP IV','F EXP IV','FIELD EXPERIENCE IV','FE IV']
+    ]
+  },
+  'field-experience-5': {
+    label: 'Field Experience V',
+    sheetName: 'FE V',
+    identityAliases: ['FIELD EXPERIENCE V','FIELD EXP V','FE V'],
+    scoreHeaders: ['F. EXP V'],
+    scoreAliases: [['F. EXP V','F EXP V','FIELD EXPERIENCE V','FE V','SCORE']]
+  },
+  'micro-teaching': {
+    label: 'Micro-Teaching',
+    sheetName: 'Micro-Teaching',
+    identityAliases: ['MICRO-TEACHING','MICRO TEACHING'],
+    scoreHeaders: ['SCORE'],
+    scoreAliases: [['MICRO-TEACHING','MICRO TEACHING','SCORE']]
+  },
+  'macro-teaching': {
+    label: 'Macro-Teaching',
+    sheetName: 'Macro-Teaching',
+    identityAliases: ['MACRO-TEACHING','MACRO TEACHING'],
+    scoreHeaders: ['SCORE'],
+    scoreAliases: [['MACRO-TEACHING','MACRO TEACHING','SCORE']]
+  },
+  'reflection': {
+    label: 'Reflection',
+    sheetName: 'Reflection',
+    identityAliases: ['REFLECTION'],
+    scoreHeaders: ['SCORE'],
+    scoreAliases: [['REFLECTION','SCORE']]
+  }
+});
+const FIELD_ASSESSMENT_KEYS = Object.keys(FIELD_ASSESSMENTS);
 
 for (const dir of [STORAGE_DIR, DATA_DIR, FILES_DIR, RESOURCES_DIR]) fs.mkdirSync(dir, { recursive: true });
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]', 'utf8');
@@ -346,7 +407,7 @@ function adminLoginLinks(departments, baseUrl) {
 }
 async function sendAdminPasswordSetupEmail({to,name,username,role,departments,sections,setupUrl,expiresAt,baseUrl,isReset=false}) {
   const deptNames=(departments || []).map(slug=>departmentFromSlug(slug)?.name || slug);
-  const sectionNames=(sections || []).map(section=>section==='project-work'?'Undergraduate Project Work':section==='field-experience'?'Field Experience Scores':section==='dissertation'?'Dissertation Submission':'Assessment/Vetting Reports');
+  const sectionNames=(sections || []).map(section=>section==='project-work'?'Undergraduate Project Work':section==='field-experience'?'Field Experience and Teaching Practice':section==='dissertation'?'Dissertation Submission':'Assessment/Vetting Reports');
   const expiryText=new Date(expiresAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'})+' UTC';
   const portalRows=adminLoginLinks(departments,baseUrl).map(x=>`<li><a href="${htmlEscape(x.url)}">${htmlEscape(x.name)} Administration Portal</a></li>`).join('');
   const subject=isReset?'UCC Submission Portal password reset':'Your UCC Submission Portal administrator account';
@@ -886,8 +947,8 @@ async function sendDissertationReturnedEmail({to,studentName,departmentName,subm
 
 async function sendScoreSubmissionReturnedEmail({to,supervisorName,departmentName,reference,studyCentre,reason,portalType='project-work',portalUrl}) {
   const isField=portalType==='field-experience';
-  const typeLabel=isField?'Field Experience Score Submission':'Undergraduate Project Work Submission';
-  const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${typeLabel} Returned for Correction</h2><p>Dear ${htmlEscape(supervisorName||'Supervisor / Examiner')},</p><p>${htmlEscape(departmentName)} has reviewed your submission and returned it for correction.</p><div style="margin:18px 0;padding:15px;background:#f5f8fb;border:1px solid #d9e2ec;border-radius:8px"><strong>Submission reference:</strong> ${htmlEscape(reference||'')}<br><strong>Study centre:</strong> ${htmlEscape(studyCentre||'')}</div><div style="margin:18px 0;padding:15px;background:#fff4e5;border-left:4px solid #cf7b00"><strong>Reason / correction required</strong><br>${htmlEscape(reason).replace(/\n/g,'<br>')}</div><p>Please correct the identified issue and submit the corrected ${isField?'Field Experience score':'Undergraduate Project Work'} records again through the submission portal. The corrected submission will enter <strong>Pending Verification</strong> for departmental review.</p><p><a href="${htmlEscape(portalUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:11px 16px;border-radius:7px;font-weight:bold">Open ${isField?'Field Experience':'Project Work'} Submission Portal</a></p><p>If you believe this notice was sent in error, please contact the department and quote the submission reference above.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+  const typeLabel=isField?'Field Experience and Teaching Practice Score Submission':'Undergraduate Project Work Submission';
+  const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${typeLabel} Returned for Correction</h2><p>Dear ${htmlEscape(supervisorName||'Mentor / Supervisor / Examiner')},</p><p>${htmlEscape(departmentName)} has reviewed your submission and returned it for correction.</p><div style="margin:18px 0;padding:15px;background:#f5f8fb;border:1px solid #d9e2ec;border-radius:8px"><strong>Submission reference:</strong> ${htmlEscape(reference||'')}<br><strong>Study centre:</strong> ${htmlEscape(studyCentre||'')}</div><div style="margin:18px 0;padding:15px;background:#fff4e5;border-left:4px solid #cf7b00"><strong>Reason / correction required</strong><br>${htmlEscape(reason).replace(/\n/g,'<br>')}</div><p>Please correct the identified issue and submit the corrected ${isField?'Field Experience and Teaching Practice score':'Undergraduate Project Work'} records again through the submission portal. The corrected submission will enter <strong>Pending Verification</strong> for departmental review.</p><p><a href="${htmlEscape(portalUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:11px 16px;border-radius:7px;font-weight:bold">Open ${isField?'Field Experience and Teaching Practice':'Project Work'} Submission Portal</a></p><p>If you believe this notice was sent in error, please contact the department and quote the submission reference above.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
   return sendGmailHtmlEmail({to,subject:`${typeLabel} returned for correction - ${reference||''}`,html});
 }
 
@@ -1085,6 +1146,150 @@ function parseScoreWorkbook(filePath) {
   return { sheetName: workbook.SheetNames[0], headerRow: header.rowIndex + 1, rows };
 }
 
+
+function fieldAssessmentSpec(key) {
+  return FIELD_ASSESSMENTS[String(key||'').trim()] || null;
+}
+function fieldAssessmentLabel(record) {
+  const spec=fieldAssessmentSpec(record?.assessmentType);
+  return spec?.label || record?.assessmentLabel || 'Previous / Unclassified Field Experience';
+}
+function normalizedAliasSet(values) {
+  return new Set((values||[]).map(normalizeHeader));
+}
+const FIELD_COMMON_HEADER_ALIASES = Object.freeze({
+  sn: normalizedAliasSet(['S/N','SN','S NO','S. NO.']),
+  registration: normalizedAliasSet(['REGISTRATION','REGISTRATION NO.','REGISTRATION NO','REGISTRATION NUMBER','REG NO.','REG NO']),
+  name: normalizedAliasSet(['NAME OF STUDENT','NAME OF STUDENTS','STUDENT NAME','STUDENTS','STUDENT','NAME'])
+});
+function findAliasIndex(normalizedRow, aliases, used=new Set()) {
+  for(let i=0;i<normalizedRow.length;i++){
+    if(used.has(i)) continue;
+    if(aliases.has(normalizedRow[i])) return i;
+  }
+  return -1;
+}
+function fieldAssessmentIdentityMatches(matrix, sheetName, spec) {
+  const haystack=[
+    normalizeHeader(sheetName),
+    ...(matrix||[]).slice(0,12).flat().map(normalizeHeader).filter(Boolean)
+  ];
+  const aliases=normalizedAliasSet(spec?.identityAliases||[spec?.label||'']);
+  return haystack.some(value=>aliases.has(value));
+}
+function findFieldAssessmentHeader(matrix, spec) {
+  const scoreAliasSets=(spec?.scoreAliases||[]).map(normalizedAliasSet);
+  const limit=Math.min(matrix.length,MAX_HEADER_SCAN_ROWS);
+  for(let r=0;r<limit;r++){
+    const normalized=(matrix[r]||[]).map(normalizeHeader);
+    const used=new Set();
+    const sn=findAliasIndex(normalized,FIELD_COMMON_HEADER_ALIASES.sn,used); if(sn<0)continue; used.add(sn);
+    const registration=findAliasIndex(normalized,FIELD_COMMON_HEADER_ALIASES.registration,used); if(registration<0)continue; used.add(registration);
+    const name=findAliasIndex(normalized,FIELD_COMMON_HEADER_ALIASES.name,used); if(name<0)continue; used.add(name);
+    const scoreIndexes=[];
+    let ok=true;
+    for(const aliases of scoreAliasSets){
+      const idx=findAliasIndex(normalized,aliases,used);
+      if(idx<0){ok=false;break;}
+      used.add(idx);scoreIndexes.push(idx);
+    }
+    if(ok) return {rowIndex:r,indexes:{sn,registration,name,scores:scoreIndexes}};
+  }
+  return null;
+}
+function parseFieldExperienceWorkbook(filePath, assessmentType) {
+  const spec=fieldAssessmentSpec(assessmentType);
+  if(!spec) throw new Error('Please select a valid Field Experience or Teaching Practice assessment type.');
+  const workbook=XLSX.readFile(filePath,{cellDates:false});
+  if(!workbook.SheetNames.length) throw new Error('The workbook contains no worksheet.');
+  let selected=null;
+  for(const sheetName of workbook.SheetNames){
+    const sheet=workbook.Sheets[sheetName];
+    const matrix=XLSX.utils.sheet_to_json(sheet,{header:1,defval:'',raw:false});
+    const header=findFieldAssessmentHeader(matrix,spec);
+    const usesGenericScore=(spec.scoreAliases||[]).some(group=>(group||[]).map(normalizeHeader).includes(normalizeHeader('SCORE')));
+    if(header && (!usesGenericScore || fieldAssessmentIdentityMatches(matrix,sheetName,spec))){selected={sheetName,matrix,header};break;}
+  }
+  if(!selected){
+    throw new Error(`The selected workbook does not contain the required ${spec.label} columns. Expected S/N, Registration, Name of Student and ${spec.scoreHeaders.join(' | ')}.`);
+  }
+  const rows=[];
+  for(let r=selected.header.rowIndex+1;r<selected.matrix.length;r++){
+    const source=selected.matrix[r]||[];
+    const originalSn=cellText(source[selected.header.indexes.sn]);
+    const registrationNo=cellText(source[selected.header.indexes.registration]);
+    const name=cellText(source[selected.header.indexes.name]);
+    const scoreValues=selected.header.indexes.scores.map(idx=>cellText(source[idx]));
+    if(isScoreFooterValues([name,registrationNo,...scoreValues])) break;
+    if(!Boolean(name||registrationNo||scoreValues.some(Boolean))) continue;
+    rows.push({originalSn,registrationNo,name,scoreValues});
+  }
+  return {
+    assessmentType,
+    assessmentLabel:spec.label,
+    sheetName:selected.sheetName,
+    headerRow:selected.header.rowIndex+1,
+    scoreHeaders:[...spec.scoreHeaders],
+    rows
+  };
+}
+function fieldValidScoreRows(record) {
+  const spec=fieldAssessmentSpec(record?.assessmentType);
+  if(!spec){
+    // Backward compatibility for Field Experience submissions made before the
+    // dedicated Field Experience and Teaching Practice templates were introduced.
+    return validScoreRows(record).map(row=>({
+      originalSn:row.originalSn||'',
+      registrationNo:row.registrationNo||'',
+      name:row.name||'',
+      scoreHeaders:['TOTAL SCORE'],
+      scoreValues:[row.totalScore||'']
+    }));
+  }
+  const headers=Array.isArray(record?.scoreSheet?.scoreHeaders)&&record.scoreSheet.scoreHeaders.length
+    ? record.scoreSheet.scoreHeaders.map(cellText)
+    : [...spec.scoreHeaders];
+  const out=[];
+  (record?.scoreSheet?.rows||[]).forEach(row=>{
+    const name=cellText(row?.name),registrationNo=cellText(row?.registrationNo);
+    const scoreValues=Array.isArray(row?.scoreValues)?row.scoreValues.map(cellText):[];
+    if(isScoreFooterValues([name,registrationNo,...scoreValues])) return;
+    if(!Boolean(name||registrationNo||scoreValues.some(Boolean))) return;
+    out.push({originalSn:cellText(row?.originalSn),registrationNo,name,scoreHeaders:headers,scoreValues});
+  });
+  return out;
+}
+function fieldAssessmentAoA(records, assessmentType) {
+  const spec=fieldAssessmentSpec(assessmentType);
+  if(!spec) return [['S/N','REGISTRATION','NAME OF STUDENT','SCORE']];
+  const rows=[];
+  fieldExperienceRecords(records)
+    .filter(record=>record.assessmentType===assessmentType&&projectReviewStatus(record)==='approved')
+    .forEach(record=>{
+      for(const row of fieldValidScoreRows(record)) rows.push(row);
+    });
+  rows.sort((a,b)=>compareRegistrationValues(a.registrationNo,b.registrationNo)||String(a.name||'').localeCompare(String(b.name||'')));
+  const headers=['S/N','REGISTRATION','NAME OF STUDENT',...spec.scoreHeaders];
+  return [headers,...rows.map((row,i)=>[i+1,row.registrationNo||'',row.name||'',...spec.scoreHeaders.map((_,idx)=>row.scoreValues?.[idx]||'')])];
+}
+function individualFieldScoreSheetAoA(record) {
+  const spec=fieldAssessmentSpec(record?.assessmentType);
+  if(!spec) return individualScoreSheetAoA(record);
+  const rows=fieldValidScoreRows(record);
+  const headers=['S/N','REGISTRATION','NAME OF STUDENT',...spec.scoreHeaders];
+  return [headers,...rows.map((row,i)=>[i+1,row.registrationNo||'',row.name||'',...spec.scoreHeaders.map((_,idx)=>row.scoreValues?.[idx]||'')])];
+}
+function fieldLegacyScoreSheetAoA(records) {
+  const rows=[];
+  fieldExperienceRecords(records)
+    .filter(record=>!fieldAssessmentSpec(record.assessmentType)&&projectReviewStatus(record)==='approved')
+    .forEach(record=>{
+      for(const row of validScoreRows(record)) rows.push({'S/N':0,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
+    });
+  rows.sort((a,b)=>compareRegistrationValues(a['REGISTRATION NO.'],b['REGISTRATION NO.'])||String(a.NAME||'').localeCompare(String(b.NAME||'')));
+  return [REQUIRED_HEADERS,...renumberScoreRows(rows).map(r=>REQUIRED_HEADERS.map(h=>r[h]))];
+}
+
 function makeReference(prefix) {
   const d = new Date();
   const date = [d.getUTCFullYear(), String(d.getUTCMonth()+1).padStart(2,'0'), String(d.getUTCDate()).padStart(2,'0')].join('');
@@ -1175,36 +1380,60 @@ app.post('/api/project-work', upload.fields([
   } catch (e) { console.error(e); await removeUploaded(req).catch(()=>{}); res.status(500).json({ error:'The project work submission could not be saved.' }); }
 });
 
-// 1B. FIELD EXPERIENCE SCORES
+// 1B. FIELD EXPERIENCE AND TEACHING PRACTICE SCORES
 app.post('/api/field-experience', upload.fields([
   { name: 'scoresFile', maxCount: 1 }
 ]), async (req, res) => {
   try {
     const department = validateDepartment(req);
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
-    const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount','studyCentre']);
+    const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount','studyCentre','assessmentType']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error: `Missing required field: ${missing}` }); }
+    const assessmentType=text(req,'assessmentType');
+    const assessmentSpec=fieldAssessmentSpec(assessmentType);
+    if(!assessmentSpec){await removeUploaded(req);return res.status(400).json({error:'Please select a valid Field Experience or Teaching Practice assessment type.'});}
     const allowedCentres=await readStudyCentres(department);
     if(!allowedCentres.includes(text(req,'studyCentre'))){await removeUploaded(req);return res.status(400).json({error:'Please select a study centre published for this department.'});}
     if (!filesFor(req,'scoresFile').length) {
-      await removeUploaded(req); return res.status(400).json({ error: 'The Field Experience score sheet is required.' });
+      await removeUploaded(req); return res.status(400).json({ error: `The ${assessmentSpec.label} score sheet is required.` });
     }
     let scoreResult;
-    try { scoreResult = parseScoreWorkbook(filesFor(req,'scoresFile')[0].path); }
+    try { scoreResult = parseFieldExperienceWorkbook(filesFor(req,'scoresFile')[0].path,assessmentType); }
     catch (e) { await removeUploaded(req); return res.status(400).json({ error: e.message }); }
     const record = {
       id: crypto.randomUUID(), portalType: 'field-experience', department, departmentName: DEPARTMENTS[department].name,
       reference: makeReference('FIELD'), submittedAt: new Date().toISOString(),
+      assessmentType, assessmentLabel:assessmentSpec.label,
       title:text(req,'title'), firstName:text(req,'firstName'), lastName:text(req,'lastName'),
       fullName:buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'lastName')),
       phone: text(req,'phone'), email: text(req,'email'), groupCount: text(req,'groupCount'), studyCentre: text(req,'studyCentre'),
-      scoreSheet: { worksheet: scoreResult.sheetName, headerRow: scoreResult.headerRow, rowCount: scoreResult.rows.length, rows: scoreResult.rows },
+      scoreSheet: {
+        worksheet: scoreResult.sheetName,
+        headerRow: scoreResult.headerRow,
+        rowCount: scoreResult.rows.length,
+        scoreHeaders: scoreResult.scoreHeaders,
+        rows: scoreResult.rows
+      },
       reviewStatus:'pending', reviewNote:'', reviewedAt:null, reviewedBy:'', reviewHistory:[],
       files: { scoresFile: fileRecord(filesFor(req,'scoresFile')[0]) }
     };
     await saveRecord(record);
-    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, scoreRowsIncluded:scoreResult.rows.length, reviewStatus:'pending', reviewStatusLabel:'Pending Verification' });
-  } catch (e) { console.error(e); await removeUploaded(req).catch(()=>{}); res.status(500).json({ error:'The Field Experience score submission could not be saved.' }); }
+    res.status(201).json({
+      ok:true,
+      reference:record.reference,
+      submittedAt:record.submittedAt,
+      departmentName:record.departmentName,
+      assessmentType,
+      assessmentLabel:assessmentSpec.label,
+      scoreRowsIncluded:scoreResult.rows.length,
+      reviewStatus:'pending',
+      reviewStatusLabel:'Pending Verification'
+    });
+  } catch (e) {
+    console.error(e);
+    await removeUploaded(req).catch(()=>{});
+    res.status(500).json({ error:'The Field Experience and Teaching Practice score submission could not be saved.' });
+  }
 });
 
 // 2. STUDENT DISSERTATION
@@ -1575,14 +1804,15 @@ function fieldExperienceSubmissionWarnings(record, records) {
     const emailMatch=isEmail(supervisorEmail)&&isEmail(otherEmail)&&supervisorEmail===otherEmail;
     return emailMatch||samePersonName(supervisorName,r.fullName||r.name||'');
   });
-  if(sameSupervisor.length) warnings.push({code:'repeat-supervisor',message:`Same supervisor/examiner has ${sameSupervisor.length} other Field Experience score submission${sameSupervisor.length===1?'':'s'} in this department.`});
+  if(sameSupervisor.length) warnings.push({code:'repeat-supervisor',message:`Same mentor/supervisor/examiner has ${sameSupervisor.length} other Field Experience or Teaching Practice submission${sameSupervisor.length===1?'':'s'} in this department.`});
   const centreKey=String(record.studyCentre||'').trim().toLowerCase();
-  const sameCombo=sameSupervisor.filter(r=>String(r.studyCentre||'').trim().toLowerCase()===centreKey);
-  if(centreKey&&sameCombo.length) warnings.push({code:'repeat-supervisor-centre',message:`Same supervisor/examiner and study-centre combination appears in ${sameCombo.length} other Field Experience submission${sameCombo.length===1?'':'s'}.`});
-  const approvedOthers=others.filter(r=>projectReviewStatus(r)==='approved');
+  const sameAssessment=sameSupervisor.filter(r=>String(r.assessmentType||'')===String(record.assessmentType||''));
+  const sameCombo=sameAssessment.filter(r=>String(r.studyCentre||'').trim().toLowerCase()===centreKey);
+  if(centreKey&&sameCombo.length) warnings.push({code:'repeat-supervisor-centre',message:`Same mentor/supervisor/examiner, assessment type and study-centre combination appears in ${sameCombo.length} other submission${sameCombo.length===1?'':'s'}.`});
+  const approvedOthers=others.filter(r=>projectReviewStatus(r)==='approved'&&String(r.assessmentType||'')===String(record.assessmentType||''));
   const approvedRegMap=new Map();
   for(const other of approvedOthers){
-    for(const row of validScoreRows(other)){
+    for(const row of fieldValidScoreRows(other)){
       const key=normalizeIndexNumber(row.registrationNo);
       if(!key) continue;
       if(!approvedRegMap.has(key)) approvedRegMap.set(key,[]);
@@ -1590,16 +1820,16 @@ function fieldExperienceSubmissionWarnings(record, records) {
     }
   }
   const duplicateRegs=[];
-  for(const row of validScoreRows(record)){
+  for(const row of fieldValidScoreRows(record)){
     const key=normalizeIndexNumber(row.registrationNo);
     if(key&&approvedRegMap.has(key)) duplicateRegs.push({registrationNo:row.registrationNo,references:approvedRegMap.get(key)});
   }
   if(duplicateRegs.length){
     const unique=[...new Map(duplicateRegs.map(x=>[normalizeIndexNumber(x.registrationNo),x])).values()];
     const sample=unique.slice(0,5).map(x=>x.registrationNo).join(', ');
-    warnings.push({code:'duplicate-approved-registration',message:`${unique.length} registration number${unique.length===1?'':'s'} already appear in other approved Field Experience score sheet${unique.length===1?'':'s'}${sample?`: ${sample}${unique.length>5?'…':''}`:''}.`});
+    warnings.push({code:'duplicate-approved-registration',message:`${unique.length} registration number${unique.length===1?'':'s'} already appear in another approved ${fieldAssessmentLabel(record)} score sheet${unique.length===1?'':'s'}${sample?`: ${sample}${unique.length>5?'…':''}`:''}.`});
   }
-  const rowCount=validScoreRows(record).length;
+  const rowCount=fieldValidScoreRows(record).length;
   if(rowCount>PROJECT_HIGH_ROW_WARNING) warnings.push({code:'high-row-count',message:`This submission contains ${rowCount} score rows, above the current review-warning threshold of ${PROJECT_HIGH_ROW_WARNING}.`});
   const accessWarning=projectAccessWarning(record);
   if(accessWarning) warnings.push(accessWarning);
@@ -1666,19 +1896,22 @@ function projectProgrammeCentreGroups(records,stream='distance') {
 function allFieldExperienceScoreRows(records) {
   const out=[];
   fieldExperienceRecords(records).filter(record=>projectReviewStatus(record)==='approved').forEach(record => {
-    for (const row of validScoreRows(record)) out.push({'S/N':0,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
+    for(const row of fieldValidScoreRows(record)) out.push({assessmentType:record.assessmentType||'legacy',registrationNo:row.registrationNo||'',name:row.name||'',scoreValues:row.scoreValues||[]});
   });
-  out.sort((a,b)=>compareRegistrationValues(a['REGISTRATION NO.'],b['REGISTRATION NO.'])||String(a.NAME||'').localeCompare(String(b.NAME||'')));
-  return renumberScoreRows(out);
+  out.sort((a,b)=>String(a.assessmentType||'').localeCompare(String(b.assessmentType||''))||compareRegistrationValues(a.registrationNo,b.registrationNo)||String(a.name||'').localeCompare(String(b.name||'')));
+  return out;
 }
-function fieldExperienceScoreSheetAoA(records) { const rows=allFieldExperienceScoreRows(records); return [REQUIRED_HEADERS, ...rows.map(r=>REQUIRED_HEADERS.map(h=>r[h]))]; }
 function projectRegisterAoA(records, stream='distance') {
   const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE(S)','STUDENT STREAM','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED','ROWS INCLUDED FOR CONSOLIDATION','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
   const body=projectRecords(records).filter(r=>projectStream(r)===stream).map((r,i)=>[i+1,r.reference,r.submittedAt,r.fullName,r.phone,r.email,studyCentreDisplay(r),stream==='non-residential'?'Non-Residential (Regular)':'Distance',r.groupCount,validScoreRows(r).length,approvedProjectScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']); return [h,...body];
 }
 function fieldExperienceRegisterAoA(records) {
-  const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
-  const body=fieldExperienceRecords(records).map((r,i)=>[i+1,r.reference,r.submittedAt,r.fullName,r.phone,r.email,r.studyCentre,r.groupCount,validScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']); return [h,...body];
+  const h=['S/N','REFERENCE','SUBMITTED AT','ASSESSMENT TYPE','MENTOR / SUPERVISOR / EXAMINER','PHONE','EMAIL','STUDY CENTRE','NO. OF STUDENTS / CANDIDATES','SCORE ROWS EXTRACTED','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
+  const body=fieldExperienceRecords(records)
+    .slice()
+    .sort((a,b)=>String(fieldAssessmentLabel(a)).localeCompare(String(fieldAssessmentLabel(b)))||String(a.submittedAt||'').localeCompare(String(b.submittedAt||'')))
+    .map((r,i)=>[i+1,r.reference,r.submittedAt,fieldAssessmentLabel(r),r.fullName,r.phone,r.email,r.studyCentre,r.groupCount,fieldValidScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']);
+  return [h,...body];
 }
 function dedupDissertationStage(records, submissionType) {
   const map=new Map();
@@ -1700,11 +1933,27 @@ function addSheet(wb,name,aoa,widths) {
   if(ws['!ref']) ws['!autofilter']={ref:ws['!ref']};
   XLSX.utils.book_append_sheet(wb,ws,name);
 }
+function addFieldAssessmentSheets(wb,records,prefix='') {
+  for(const key of FIELD_ASSESSMENT_KEYS){
+    const spec=FIELD_ASSESSMENTS[key];
+    const name=(prefix?`${prefix} ${spec.sheetName}`:spec.sheetName).slice(0,31);
+    const widths=[8,24,34,...spec.scoreHeaders.map(()=>14)];
+    addSheet(wb,name,fieldAssessmentAoA(records,key),widths);
+  }
+  const legacy=fieldExperienceRecords(records).filter(r=>!fieldAssessmentSpec(r.assessmentType)&&projectReviewStatus(r)==='approved');
+  if(legacy.length) addSheet(wb,(prefix?'Legacy Scores':'Legacy').slice(0,31),fieldLegacyScoreSheetAoA(records),[10,34,24,16,16]);
+}
 function workbookBuffer(kind,records) {
   const wb=XLSX.utils.book_new();
   if(kind==='scores') addSheet(wb,'Consolidated Distance Scores',scoreSheetAoA(records),[10,34,24,16,16]);
   if(kind==='non-residential-scores') addSheet(wb,'Consolidated Non-Residential',nonResidentialScoreSheetAoA(records),[10,34,24,16,16]);
-  if(kind==='single-score') addSheet(wb,'Clean Scores',individualScoreSheetAoA(records[0]),[10,34,24,16,16]);
+  if(kind==='single-score') {
+    const record=records[0];
+    if(record?.portalType==='field-experience'){
+      const spec=fieldAssessmentSpec(record.assessmentType);
+      addSheet(wb,(spec?.sheetName||'Clean Scores').slice(0,31),individualFieldScoreSheetAoA(record),spec?[8,24,34,...spec.scoreHeaders.map(()=>14)]:[10,34,24,16,16]);
+    } else addSheet(wb,'Clean Scores',individualScoreSheetAoA(record),[10,34,24,16,16]);
+  }
   if(kind==='project-register') addSheet(wb,'Distance Project Register',projectRegisterAoA(records,'distance'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
   if(kind==='non-residential-project-register') addSheet(wb,'Non-Residential Register',projectRegisterAoA(records,'non-residential'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
   if(kind==='project-master') {
@@ -1715,11 +1964,11 @@ function workbookBuffer(kind,records) {
     addSheet(wb,'Master Non-Residential Scores',nonResidentialScoreSheetAoA(records),[10,34,24,16,16]);
     addSheet(wb,'Non-Residential Register',projectRegisterAoA(records,'non-residential'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
   }
-  if(kind==='field-scores') addSheet(wb,'Consolidated Field Experience',fieldExperienceScoreSheetAoA(records),[10,34,24,16,16]);
-  if(kind==='field-register') addSheet(wb,'Field Experience Register',fieldExperienceRegisterAoA(records),[8,22,24,32,18,30,22,24,20,24,24,28,38]);
+  if(kind==='field-scores') addFieldAssessmentSheets(wb,records,'');
+  if(kind==='field-register') addSheet(wb,'Field Teaching Register',fieldExperienceRegisterAoA(records),[8,22,24,28,34,18,30,22,24,20,24,24,28,38]);
   if(kind==='field-master') {
-    addSheet(wb,'Master Field Experience Scores',fieldExperienceScoreSheetAoA(records),[10,34,24,16,16]);
-    addSheet(wb,'Field Experience Register',fieldExperienceRegisterAoA(records),[8,22,24,32,18,30,22,24,20,24,24,28,38]);
+    addFieldAssessmentSheets(wb,records,'Master');
+    addSheet(wb,'Field Teaching Register',fieldExperienceRegisterAoA(records),[8,22,24,28,34,18,30,22,24,20,24,24,28,38]);
   }
   if(kind==='fresh-dissertation-register') addSheet(wb,'Fresh Dissertation Register',dissertationRegisterAoA(records,'fresh'),[8,34,24,58,32,34]);
   if(kind==='revised-dissertation-register') addSheet(wb,'Revised Dissertation Register',dissertationRegisterAoA(records,'revised'),[8,34,24,58,32,34]);
@@ -1785,7 +2034,7 @@ function adminRecordsMap(records, assignments=[]) {
       id:r.id,reference:r.reference,submittedAt:r.submittedAt,portalType:r.portalType||'project-work',
       name:r.fullName||r.studentName||r.assessorName||'',secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
       title:r.title||r.studentTitle||r.assessorTitle||'',firstName:r.firstName||r.studentFirstName||r.assessorFirstName||'',lastName:r.lastName||r.studentLastName||r.assessorLastName||'',
-      email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:(r.portalType==='project-work'||!r.portalType)?studyCentreDisplay(r):(r.studyCentre||''),studyCentres:(r.portalType==='project-work'||!r.portalType)?projectStudyCentres(r):[],projectStream:(r.portalType==='project-work'||!r.portalType)?projectStream(r):'',scoreRows:validScoreRows(r).length,scoreRowsIncluded:(r.portalType==='project-work'||!r.portalType)?approvedProjectScoreRows(r).length:validScoreRows(r).length,
+      email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:(r.portalType==='project-work'||!r.portalType)?studyCentreDisplay(r):(r.studyCentre||''),studyCentres:(r.portalType==='project-work'||!r.portalType)?projectStudyCentres(r):[],projectStream:(r.portalType==='project-work'||!r.portalType)?projectStream(r):'',assessmentType:r.portalType==='field-experience'?(r.assessmentType||'legacy'):'',assessmentLabel:r.portalType==='field-experience'?fieldAssessmentLabel(r):'',scoreRows:r.portalType==='field-experience'?fieldValidScoreRows(r).length:validScoreRows(r).length,scoreRowsIncluded:(r.portalType==='project-work'||!r.portalType)?approvedProjectScoreRows(r).length:(r.portalType==='field-experience'?fieldValidScoreRows(r).length:validScoreRows(r).length),
       projectReviewStatus:projectReviewStatus(r),projectReviewLabel:projectReviewLabel(projectReviewStatus(r)),projectReviewNote:r.reviewNote||'',projectReviewedAt:r.reviewedAt||null,projectReviewedBy:r.reviewedBy||'',projectWarnings:(r.portalType==='project-work'||!r.portalType)?projectSubmissionWarnings(r,records):[],projectReturnEmailStatus:r.reviewReturnEmailStatus||'',projectReturnEmailSentAt:r.reviewReturnEmailSentAt||null,projectReturnEmailError:r.reviewReturnEmailError||'',projectReturnEmailRecipient:r.reviewReturnEmailRecipient||'',
       fieldReviewStatus:projectReviewStatus(r),fieldReviewLabel:projectReviewLabel(projectReviewStatus(r)),fieldReviewNote:r.reviewNote||'',fieldReviewedAt:r.reviewedAt||null,fieldReviewedBy:r.reviewedBy||'',fieldWarnings:r.portalType==='field-experience'?fieldExperienceSubmissionWarnings(r,records):[],fieldReturnEmailStatus:r.reviewReturnEmailStatus||'',fieldReturnEmailSentAt:r.reviewReturnEmailSentAt||null,fieldReturnEmailError:r.reviewReturnEmailError||'',fieldReturnEmailRecipient:r.reviewReturnEmailRecipient||'',
       studentName:r.studentName||'',indexNumber:r.indexNumber||'',dissertationTopic:r.dissertationTopic||'',previousDissertationTopic:r.previousDissertationTopic||'',supervisorName:r.supervisorName||'',submissionType,
@@ -2403,7 +2652,7 @@ app.post('/api/admin/:department/field-experience/:id/review', departmentAuth, r
   if(status==='returned'&&!note) return res.status(400).json({error:'Enter the reason or correction required before returning this submission.'});
   const all=await readDb();
   const target=all.find(r=>r.id===req.params.id&&r.department===req.adminDepartment&&r.portalType==='field-experience');
-  if(!target) return res.status(404).json({error:'Field Experience score submission not found in this department.'});
+  if(!target) return res.status(404).json({error:'Field Experience and Teaching Practice score submission not found in this department.'});
   const now=new Date().toISOString();
   const reviewer=req.adminIdentity?.name||req.adminIdentity?.username||'Department administrator';
   target.reviewStatus=status; target.reviewNote=note; target.reviewedAt=now; target.reviewedBy=reviewer;
@@ -2415,7 +2664,7 @@ app.post('/api/admin/:department/field-experience/:id/review', departmentAuth, r
   let emailSent=null,emailError='';
   if(status==='returned'){
     if(!isEmail(target.email)){emailSent=false;emailError='The submission does not contain a valid supervisor/examiner email address.';target.reviewReturnEmailStatus='failed';target.reviewReturnEmailError=emailError;await writeDb(all);}
-    else try{const mail=await sendScoreSubmissionReturnedEmail({to:target.email,supervisorName:target.fullName,departmentName:req.adminDepartmentName,reference:target.reference,studyCentre:target.studyCentre,reason:note,portalType:'field-experience',portalUrl:`${baseUrlFor(req)}/field-experience.html`});emailSent=true;target.reviewReturnEmailStatus='sent';target.reviewReturnEmailSentAt=new Date().toISOString();target.reviewReturnEmailMessageId=mail.id||'';target.reviewReturnEmailRecipient=target.email;target.reviewReturnEmailError='';await writeDb(all);}catch(e){emailSent=false;emailError=String(e.message||e).slice(0,500);target.reviewReturnEmailStatus='failed';target.reviewReturnEmailError=emailError;await writeDb(all);console.error('Field Experience correction email failed:',e);}
+    else try{const mail=await sendScoreSubmissionReturnedEmail({to:target.email,supervisorName:target.fullName,departmentName:req.adminDepartmentName,reference:target.reference,studyCentre:target.studyCentre,reason:note,portalType:'field-experience',portalUrl:`${baseUrlFor(req)}/field-experience.html`});emailSent=true;target.reviewReturnEmailStatus='sent';target.reviewReturnEmailSentAt=new Date().toISOString();target.reviewReturnEmailMessageId=mail.id||'';target.reviewReturnEmailRecipient=target.email;target.reviewReturnEmailError='';await writeDb(all);}catch(e){emailSent=false;emailError=String(e.message||e).slice(0,500);target.reviewReturnEmailStatus='failed';target.reviewReturnEmailError=emailError;await writeDb(all);console.error('Field Experience and Teaching Practice correction email failed:',e);}
   }
   const departmentRecords=recordsForDepartment(all,req.adminDepartment);
   res.json({ok:true,status,label:projectReviewLabel(status),reviewedAt:now,reviewedBy:reviewer,warnings:fieldExperienceSubmissionWarnings(target,departmentRecords),emailSent,emailError});
@@ -2423,13 +2672,13 @@ app.post('/api/admin/:department/field-experience/:id/review', departmentAuth, r
 
 app.post('/api/admin/:department/field-experience/:id/resend-return-email', departmentAuth, requireAdminAccess('field-experience','administrator'), async(req,res)=>{
   const all=await readDb();const target=all.find(r=>r.id===req.params.id&&r.department===req.adminDepartment&&r.portalType==='field-experience');
-  if(!target)return res.status(404).json({error:'Field Experience score submission not found in this department.'});
+  if(!target)return res.status(404).json({error:'Field Experience and Teaching Practice score submission not found in this department.'});
   if(projectReviewStatus(target)!=='returned')return res.status(400).json({error:'Only a submission currently Returned for Correction can receive a correction email.'});
   if(!String(target.reviewNote||'').trim())return res.status(400).json({error:'This returned submission has no recorded correction reason. Reset it to Pending and return it again with a reason.'});
   const recipient=String(req.body?.recipientEmail||target.email||'').trim().toLowerCase();
   if(!isEmail(recipient))return res.status(400).json({error:'Enter a valid supervisor/examiner email address for the correction notice.'});
   try{const mail=await sendScoreSubmissionReturnedEmail({to:recipient,supervisorName:target.fullName,departmentName:req.adminDepartmentName,reference:target.reference,studyCentre:target.studyCentre,reason:target.reviewNote,portalType:'field-experience',portalUrl:`${baseUrlFor(req)}/field-experience.html`});target.reviewReturnEmailStatus='sent';target.reviewReturnEmailSentAt=new Date().toISOString();target.reviewReturnEmailMessageId=mail.id||'';target.reviewReturnEmailRecipient=recipient;target.reviewReturnEmailError='';await writeDb(all);res.json({ok:true,emailSent:true,sentAt:target.reviewReturnEmailSentAt,recipient});}
-  catch(e){target.reviewReturnEmailStatus='failed';target.reviewReturnEmailError=String(e.message||e).slice(0,500);await writeDb(all);console.error('Field Experience correction resend failed:',e);res.status(502).json({error:`The correction email could not be sent: ${e.message||e}`});}
+  catch(e){target.reviewReturnEmailStatus='failed';target.reviewReturnEmailError=String(e.message||e).slice(0,500);await writeDb(all);console.error('Field Experience and Teaching Practice correction resend failed:',e);res.status(502).json({error:`The correction email could not be sent: ${e.message||e}`});}
 });
 
 app.post('/api/admin/:department/dissertations/:id/return-to-student', departmentAuth, requireAdminAccess('dissertation','officer'), async(req,res)=>{
@@ -2472,6 +2721,9 @@ app.get('/api/admin/:department/submissions/:id', departmentAuth, async(req,res)
   if(!requireRecordAccess(req,res,r,'viewer'))return;
   if((r.portalType||'project-work')==='project-work'){
     return res.json({...r,reviewScoreRows:validScoreRowsWithMeta(r).map((row,i)=>({reviewNo:i+1,sourceIndex:row.sourceIndex,originalSn:row.originalSn,name:row.name,registrationNo:row.registrationNo,groupNo:row.groupNo,totalScore:row.totalScore,included:row.included}))});
+  }
+  if(r.portalType==='field-experience'){
+    return res.json({...r,assessmentLabel:fieldAssessmentLabel(r),reviewFieldScoreRows:fieldValidScoreRows(r).map((row,i)=>({reviewNo:i+1,originalSn:row.originalSn,registrationNo:row.registrationNo,name:row.name,scoreHeaders:row.scoreHeaders,scoreValues:row.scoreValues}))});
   }
   res.json(r);
 });
@@ -2605,18 +2857,18 @@ app.post('/api/admin/:department/project-claims/email-selected', departmentAuth,
   }catch(e){console.error('Email selected claim forms failed:',e);res.status(502).json({error:`Could not email the claim forms: ${e.message||e}`});}
 });
 
-// FIELD EXPERIENCE score exports. Only Approved Field Experience submissions are consolidated.
+// FIELD EXPERIENCE AND TEACHING PRACTICE exports. Approved submissions are kept in separate worksheets by assessment type.
 app.get('/api/admin/:department/export/field-experience-scores.xlsx', departmentAuth, requireAdminAccess('field-experience','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
-  sendWorkbook(res,'field-scores',records,`${req.adminDepartment}-consolidated-field-experience-scores.xlsx`);
+  sendWorkbook(res,'field-scores',records,`${req.adminDepartment}-consolidated-field-experience-and-teaching-practice-scores.xlsx`);
 });
 app.get('/api/admin/:department/export/field-experience-register.xlsx', departmentAuth, requireAdminAccess('field-experience','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
-  sendWorkbook(res,'field-register',records,`${req.adminDepartment}-field-experience-register.xlsx`);
+  sendWorkbook(res,'field-register',records,`${req.adminDepartment}-field-experience-and-teaching-practice-register.xlsx`);
 });
 app.get('/api/admin/:department/export/field-experience-master.xlsx', departmentAuth, requireAdminAccess('field-experience','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
-  sendWorkbook(res,'field-master',records,`${req.adminDepartment}-master-field-experience-scores.xlsx`);
+  sendWorkbook(res,'field-master',records,`${req.adminDepartment}-master-field-experience-and-teaching-practice-scores.xlsx`);
 });
 
 // DISSERTATION register and selected-document ZIP. No dissertation content is consolidated.
