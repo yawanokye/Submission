@@ -105,3 +105,9 @@ tr.review-row-returned td{background:#f3f8fd}tr.review-row-returned td:first-chi
 .field-assessment-head p{margin:4px 0 0;color:#687a89;font-size:12px}
 .field-assessment-card .table-scroll{border:0;border-radius:0}
 .field-assessment-card .empty{margin:0;border-radius:0;border:0;border-top:1px solid #e3e9ee;background:#fbfcfd}
+
+/* v24: individual Field Experience and Teaching Practice report controls */
+.field-report-actions{display:grid;gap:10px;padding:0 16px 14px}
+.field-report-set{border:1px solid #d7e0e8;border-radius:10px;background:#f8fafc;padding:10px 12px}
+.field-report-set>strong{display:block;margin-bottom:8px;color:#0a2d52}
+.field-report-set .export-actions{justify-content:flex-start}

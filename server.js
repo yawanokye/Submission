@@ -145,6 +145,8 @@ const ASSIGNMENTS_FILE = path.join(DATA_DIR, 'dissertation-assignments.json');
 const RESOURCES_FILE = path.join(DATA_DIR, 'resources.json');
 const ADMIN_USERS_FILE = path.join(DATA_DIR, 'admin-users.json');
 const STUDY_CENTRES_FILE = path.join(DATA_DIR, 'study-centres.json');
+const STUDY_CENTRE_DIRECTORY_FILE = path.join(DATA_DIR, 'study-centre-directory.json');
+const DEFAULT_STUDY_CENTRE_DIRECTORY_PATH = path.join(__dirname, 'defaults', 'study-centre-directory.json');
 const RESOURCES_DIR = path.join(STORAGE_DIR, 'resources');
 const GMAIL_CLIENT_ID = String(process.env.GMAIL_CLIENT_ID || '').trim();
 const GMAIL_CLIENT_SECRET = String(process.env.GMAIL_CLIENT_SECRET || '').trim();
@@ -203,13 +205,58 @@ const BUILTIN_RESOURCES = [
     sourcePath: path.join(__dirname, 'public', 'resources', 'project-work', 'score-sheet-project-work-sample.xlsx')
   },
   {
-    id: 'builtin-field-teaching-score-sheets',
-    title: 'Field Experience and Teaching Practice Score Sheets',
-    description: 'Approved Excel templates for Field Experience I & II, Field Experience III & IV, Field Experience V, Micro-Teaching, Macro-Teaching and Reflection. Submit one assessment type at a time.',
+    id: 'builtin-field-experience-1-2-score-sheet',
+    title: 'Field Experience I & II Score Sheet',
+    description: 'Approved Excel template for submitting Field Experience I and Field Experience II scores together.',
     portals: ['field-experience'],
-    originalName: 'UCC_Field_Experience_Score_Sheets.xlsx',
+    originalName: 'UCC_Field_Experience_I_II_Score_Sheet.xlsx',
     builtIn: true,
-    sourcePath: path.join(__dirname, 'public', 'resources', 'field-experience', 'UCC_Field_Experience_Score_Sheets.xlsx')
+    sourcePath: path.join(__dirname, 'public', 'resources', 'field-experience', 'UCC_Field_Experience_I_II_Score_Sheet.xlsx')
+  },
+  {
+    id: 'builtin-field-experience-3-4-score-sheet',
+    title: 'Field Experience III & IV Score Sheet',
+    description: 'Approved Excel template for submitting Field Experience III and Field Experience IV scores together.',
+    portals: ['field-experience'],
+    originalName: 'UCC_Field_Experience_III_IV_Score_Sheet.xlsx',
+    builtIn: true,
+    sourcePath: path.join(__dirname, 'public', 'resources', 'field-experience', 'UCC_Field_Experience_III_IV_Score_Sheet.xlsx')
+  },
+  {
+    id: 'builtin-field-experience-5-score-sheet',
+    title: 'Field Experience V Score Sheet',
+    description: 'Approved Excel template for Field Experience V score submission.',
+    portals: ['field-experience'],
+    originalName: 'UCC_Field_Experience_V_Score_Sheet.xlsx',
+    builtIn: true,
+    sourcePath: path.join(__dirname, 'public', 'resources', 'field-experience', 'UCC_Field_Experience_V_Score_Sheet.xlsx')
+  },
+  {
+    id: 'builtin-micro-teaching-score-sheet',
+    title: 'Micro-Teaching Score Sheet',
+    description: 'Approved Excel template for Micro-Teaching score submission.',
+    portals: ['field-experience'],
+    originalName: 'UCC_Micro_Teaching_Score_Sheet.xlsx',
+    builtIn: true,
+    sourcePath: path.join(__dirname, 'public', 'resources', 'field-experience', 'UCC_Micro_Teaching_Score_Sheet.xlsx')
+  },
+  {
+    id: 'builtin-macro-teaching-score-sheet',
+    title: 'Macro-Teaching Score Sheet',
+    description: 'Approved Excel template for Macro-Teaching score submission.',
+    portals: ['field-experience'],
+    originalName: 'UCC_Macro_Teaching_Score_Sheet.xlsx',
+    builtIn: true,
+    sourcePath: path.join(__dirname, 'public', 'resources', 'field-experience', 'UCC_Macro_Teaching_Score_Sheet.xlsx')
+  },
+  {
+    id: 'builtin-reflection-score-sheet',
+    title: 'Reflection Score Sheet',
+    description: 'Approved Excel template for Reflection score submission.',
+    portals: ['field-experience'],
+    originalName: 'UCC_Reflection_Score_Sheet.xlsx',
+    builtIn: true,
+    sourcePath: path.join(__dirname, 'public', 'resources', 'field-experience', 'UCC_Reflection_Score_Sheet.xlsx')
   },
   {
     id: 'builtin-project-supervisor-report',
@@ -285,6 +332,17 @@ const FIELD_ASSESSMENTS = Object.freeze({
   }
 });
 const FIELD_ASSESSMENT_KEYS = Object.keys(FIELD_ASSESSMENTS);
+const FIELD_SCORE_REPORTS = Object.freeze({
+  'field-experience-1': { label:'Field Experience I', assessmentType:'field-experience-1-2', scoreIndex:0, scoreHeader:'F. EXP I', sheetName:'Field Experience I' },
+  'field-experience-2': { label:'Field Experience II', assessmentType:'field-experience-1-2', scoreIndex:1, scoreHeader:'F. EXP II', sheetName:'Field Experience II' },
+  'field-experience-3': { label:'Field Experience III', assessmentType:'field-experience-3-4', scoreIndex:0, scoreHeader:'F. EXP III', sheetName:'Field Experience III' },
+  'field-experience-4': { label:'Field Experience IV', assessmentType:'field-experience-3-4', scoreIndex:1, scoreHeader:'F. EXP IV', sheetName:'Field Experience IV' },
+  'field-experience-5': { label:'Field Experience V', assessmentType:'field-experience-5', scoreIndex:0, scoreHeader:'F. EXP V', sheetName:'Field Experience V' },
+  'micro-teaching': { label:'Micro-Teaching', assessmentType:'micro-teaching', scoreIndex:0, scoreHeader:'SCORE', sheetName:'Micro-Teaching' },
+  'macro-teaching': { label:'Macro-Teaching', assessmentType:'macro-teaching', scoreIndex:0, scoreHeader:'SCORE', sheetName:'Macro-Teaching' },
+  'reflection': { label:'Reflection', assessmentType:'reflection', scoreIndex:0, scoreHeader:'SCORE', sheetName:'Reflection' }
+});
+const FIELD_SCORE_REPORT_KEYS = Object.keys(FIELD_SCORE_REPORTS);
 
 for (const dir of [STORAGE_DIR, DATA_DIR, FILES_DIR, RESOURCES_DIR]) fs.mkdirSync(dir, { recursive: true });
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]', 'utf8');
@@ -292,6 +350,10 @@ if (!fs.existsSync(ASSIGNMENTS_FILE)) fs.writeFileSync(ASSIGNMENTS_FILE, '[]', '
 if (!fs.existsSync(RESOURCES_FILE)) fs.writeFileSync(RESOURCES_FILE, '[]', 'utf8');
 if (!fs.existsSync(ADMIN_USERS_FILE)) fs.writeFileSync(ADMIN_USERS_FILE, '[]', 'utf8');
 if (!fs.existsSync(STUDY_CENTRES_FILE)) fs.writeFileSync(STUDY_CENTRES_FILE, JSON.stringify(DEFAULT_STUDY_CENTRES, null, 2), 'utf8');
+if (!fs.existsSync(STUDY_CENTRE_DIRECTORY_FILE)) {
+  if (fs.existsSync(DEFAULT_STUDY_CENTRE_DIRECTORY_PATH)) fs.copyFileSync(DEFAULT_STUDY_CENTRE_DIRECTORY_PATH, STUDY_CENTRE_DIRECTORY_FILE);
+  else fs.writeFileSync(STUDY_CENTRE_DIRECTORY_FILE, JSON.stringify({version:1,centres:[]}, null, 2), 'utf8');
+}
 
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
@@ -643,6 +705,82 @@ function parseStudyCentreCsv(filePath) {
   const unique=[...new Set(values)];
   if(!unique.length) throw new Error('No study centres were found in the first column of the CSV file.');
   return unique;
+}
+
+function normalizeCentreCode(value) {
+  return cleanHumanText(value).toUpperCase().replace(/\s+/g,'');
+}
+function normalizeStudyCentreDirectory(raw) {
+  const source=Array.isArray(raw)?raw:(Array.isArray(raw?.centres)?raw.centres:[]);
+  const seen=new Set();const out=[];
+  for(const item of source){
+    const code=normalizeCentreCode(item?.code);const name=cleanHumanText(item?.name||item?.centerName||item?.centreName);
+    if(!code||!name||seen.has(code)) continue;
+    seen.add(code);
+    const idText=cleanHumanText(item?.id);
+    out.push({id:idText&&/^\d+$/.test(idText)?Number(idText):(idText||''),code,name});
+  }
+  return out.sort((a,b)=>a.code.localeCompare(b.code,undefined,{numeric:true,sensitivity:'base'}));
+}
+function readStudyCentreDirectorySync() {
+  try{return normalizeStudyCentreDirectory(JSON.parse(fs.readFileSync(STUDY_CENTRE_DIRECTORY_FILE,'utf8')||'{}'));}
+  catch{
+    try{return normalizeStudyCentreDirectory(JSON.parse(fs.readFileSync(DEFAULT_STUDY_CENTRE_DIRECTORY_PATH,'utf8')||'{}'));}catch{return [];}
+  }
+}
+async function readStudyCentreDirectory(){ return readStudyCentreDirectorySync(); }
+let studyCentreDirectoryWriteQueue=Promise.resolve();
+function writeStudyCentreDirectory(entries){
+  studyCentreDirectoryWriteQueue=studyCentreDirectoryWriteQueue.catch(()=>{}).then(async()=>{
+    const cleaned=normalizeStudyCentreDirectory(entries);
+    if(!cleaned.length) throw new Error('The study-centre directory cannot be empty.');
+    const temp=STUDY_CENTRE_DIRECTORY_FILE+'.tmp';
+    await fsp.writeFile(temp,JSON.stringify({version:1,updatedAt:new Date().toISOString(),centres:cleaned},null,2),'utf8');
+    await fsp.rename(temp,STUDY_CENTRE_DIRECTORY_FILE);
+    return cleaned;
+  });
+  return studyCentreDirectoryWriteQueue;
+}
+function centreDirectoryHeaderKey(value){return cleanHumanText(value).toUpperCase().replace(/[^A-Z0-9]/g,'');}
+function parseStudyCentreDirectoryFile(filePath){
+  const book=XLSX.readFile(filePath,{raw:false});
+  if(!book.SheetNames.length) throw new Error('The uploaded study-centre directory contains no worksheet.');
+  const matrix=XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]],{header:1,defval:'',raw:false});
+  let headerIndex=-1,codeCol=-1,nameCol=-1,idCol=-1;
+  for(let r=0;r<Math.min(matrix.length,30);r++){
+    const keys=(matrix[r]||[]).map(centreDirectoryHeaderKey);
+    const c=keys.findIndex(k=>['CODE','CENTRECODE','CENTERCODE','STUDYCENTRECODE','STUDYCENTERCODE'].includes(k));
+    const n=keys.findIndex(k=>['CENTERNAME','CENTRENAME','CENTER','CENTRE','STUDYCENTERNAME','STUDYCENTRENAME'].includes(k));
+    if(c>=0&&n>=0){headerIndex=r;codeCol=c;nameCol=n;idCol=keys.findIndex(k=>['ID','CENTREID','CENTERID'].includes(k));break;}
+  }
+  if(headerIndex<0) throw new Error('Could not find CODE and CENTER_NAME/CENTRE_NAME columns in the uploaded file.');
+  const entries=[];const seen=new Set();
+  for(let r=headerIndex+1;r<matrix.length;r++){
+    const row=matrix[r]||[];const code=normalizeCentreCode(row[codeCol]);const name=cleanHumanText(row[nameCol]);
+    if(!code&&!name) continue;
+    if(!code||!name) throw new Error(`Row ${r+1} must contain both centre CODE and centre NAME.`);
+    if(seen.has(code)) throw new Error(`Duplicate study-centre code detected: ${code}.`);
+    seen.add(code);const idText=idCol>=0?cleanHumanText(row[idCol]):'';
+    entries.push({id:idText&&/^\d+$/.test(idText)?Number(idText):(idText||''),code,name});
+  }
+  if(!entries.length) throw new Error('No study-centre code records were found in the uploaded file.');
+  return normalizeStudyCentreDirectory(entries);
+}
+function registrationCentreCode(registrationNo){
+  const parts=String(registrationNo||'').split('/').map(v=>v.trim());
+  return parts.length>=3&&parts[1]&&parts[2]?normalizeCentreCode(`${parts[1]}/${parts[2]}`):'';
+}
+function studyCentreDirectoryMapSync(){return new Map(readStudyCentreDirectorySync().map(item=>[item.code,item]));}
+function studyCentreInfoFromRegistration(registrationNo,directoryMap=studyCentreDirectoryMapSync()){
+  const code=registrationCentreCode(registrationNo);
+  if(!code) return {code:'UNCLASSIFIED',name:'UNCLASSIFIED STUDY CENTRE'};
+  const found=directoryMap.get(code);
+  return found?{code:found.code,name:found.name}:{code,name:`UNKNOWN STUDY CENTRE (${code})`};
+}
+function centreDirectoryAoA(entries){return [['S/N','ID','CODE','CENTER_NAME'],...normalizeStudyCentreDirectory(entries).map((c,i)=>[i+1,c.id||'',c.code,c.name])];}
+function centreDirectoryWorkbookBuffer(entries){
+  const book=XLSX.utils.book_new();addSheet(book,'Study Centre Directory',centreDirectoryAoA(entries),[8,10,14,58]);
+  return XLSX.write(book,{type:'buffer',bookType:'xlsx'});
 }
 
 function publicResource(resource) {
@@ -1261,16 +1399,16 @@ function fieldValidScoreRows(record) {
 }
 function fieldAssessmentAoA(records, assessmentType) {
   const spec=fieldAssessmentSpec(assessmentType);
-  if(!spec) return [['S/N','REGISTRATION','NAME OF STUDENT','SCORE']];
-  const rows=[];
+  if(!spec) return [['S/N','STUDY CENTRE','REGISTRATION','NAME OF STUDENT','SCORE']];
+  const rows=[];const directory=studyCentreDirectoryMapSync();
   fieldExperienceRecords(records)
     .filter(record=>record.assessmentType===assessmentType&&projectReviewStatus(record)==='approved')
     .forEach(record=>{
-      for(const row of fieldValidScoreRows(record)) rows.push(row);
+      for(const row of fieldValidScoreRows(record)) rows.push({...row,studyCentre:studyCentreInfoFromRegistration(row.registrationNo,directory).name});
     });
   rows.sort((a,b)=>compareRegistrationValues(a.registrationNo,b.registrationNo)||String(a.name||'').localeCompare(String(b.name||'')));
-  const headers=['S/N','REGISTRATION','NAME OF STUDENT',...spec.scoreHeaders];
-  return [headers,...rows.map((row,i)=>[i+1,row.registrationNo||'',row.name||'',...spec.scoreHeaders.map((_,idx)=>row.scoreValues?.[idx]||'')])];
+  const headers=['S/N','STUDY CENTRE','REGISTRATION','NAME OF STUDENT',...spec.scoreHeaders];
+  return [headers,...rows.map((row,i)=>[i+1,row.studyCentre||'',row.registrationNo||'',row.name||'',...spec.scoreHeaders.map((_,idx)=>row.scoreValues?.[idx]||'')])];
 }
 function individualFieldScoreSheetAoA(record) {
   const spec=fieldAssessmentSpec(record?.assessmentType);
@@ -1280,14 +1418,14 @@ function individualFieldScoreSheetAoA(record) {
   return [headers,...rows.map((row,i)=>[i+1,row.registrationNo||'',row.name||'',...spec.scoreHeaders.map((_,idx)=>row.scoreValues?.[idx]||'')])];
 }
 function fieldLegacyScoreSheetAoA(records) {
-  const rows=[];
+  const rows=[];const directory=studyCentreDirectoryMapSync();
   fieldExperienceRecords(records)
     .filter(record=>!fieldAssessmentSpec(record.assessmentType)&&projectReviewStatus(record)==='approved')
     .forEach(record=>{
-      for(const row of validScoreRows(record)) rows.push({'S/N':0,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
+      for(const row of validScoreRows(record)) {const centre=studyCentreInfoFromRegistration(row.registrationNo,directory);rows.push({'S/N':0,'STUDY CENTRE':centre.name,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});}
     });
   rows.sort((a,b)=>compareRegistrationValues(a['REGISTRATION NO.'],b['REGISTRATION NO.'])||String(a.NAME||'').localeCompare(String(b.NAME||'')));
-  return [REQUIRED_HEADERS,...renumberScoreRows(rows).map(r=>REQUIRED_HEADERS.map(h=>r[h]))];
+  return [PROJECT_EXPORT_HEADERS,...renumberScoreRows(rows).map(r=>PROJECT_EXPORT_HEADERS.map(h=>r[h]))];
 }
 
 function makeReference(prefix) {
@@ -1387,13 +1525,16 @@ app.post('/api/field-experience', upload.fields([
   try {
     const department = validateDepartment(req);
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
-    const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount','studyCentre','assessmentType']);
+    const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount','assessmentType']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error: `Missing required field: ${missing}` }); }
     const assessmentType=text(req,'assessmentType');
     const assessmentSpec=fieldAssessmentSpec(assessmentType);
     if(!assessmentSpec){await removeUploaded(req);return res.status(400).json({error:'Please select a valid Field Experience or Teaching Practice assessment type.'});}
+    const selectedCentres=textList(req,'studyCentre');
+    if(!selectedCentres.length){await removeUploaded(req);return res.status(400).json({error:'Please select at least one study centre.'});}
     const allowedCentres=await readStudyCentres(department);
-    if(!allowedCentres.includes(text(req,'studyCentre'))){await removeUploaded(req);return res.status(400).json({error:'Please select a study centre published for this department.'});}
+    const invalidCentres=selectedCentres.filter(c=>!allowedCentres.includes(c));
+    if(invalidCentres.length){await removeUploaded(req);return res.status(400).json({error:`The following study centre selection is not published for this department: ${invalidCentres.join(', ')}.`});}
     if (!filesFor(req,'scoresFile').length) {
       await removeUploaded(req); return res.status(400).json({ error: `The ${assessmentSpec.label} score sheet is required.` });
     }
@@ -1406,7 +1547,7 @@ app.post('/api/field-experience', upload.fields([
       assessmentType, assessmentLabel:assessmentSpec.label,
       title:text(req,'title'), firstName:text(req,'firstName'), lastName:text(req,'lastName'),
       fullName:buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'lastName')),
-      phone: text(req,'phone'), email: text(req,'email'), groupCount: text(req,'groupCount'), studyCentre: text(req,'studyCentre'),
+      phone: text(req,'phone'), email: text(req,'email'), groupCount: text(req,'groupCount'), studyCentres:selectedCentres, studyCentre:selectedCentres.join(' | '),
       scoreSheet: {
         worksheet: scoreResult.sheetName,
         headerRow: scoreResult.headerRow,
@@ -1426,6 +1567,7 @@ app.post('/api/field-experience', upload.fields([
       assessmentType,
       assessmentLabel:assessmentSpec.label,
       scoreRowsIncluded:scoreResult.rows.length,
+      studyCentres:selectedCentres,
       reviewStatus:'pending',
       reviewStatusLabel:'Pending Verification'
     });
@@ -1805,10 +1947,10 @@ function fieldExperienceSubmissionWarnings(record, records) {
     return emailMatch||samePersonName(supervisorName,r.fullName||r.name||'');
   });
   if(sameSupervisor.length) warnings.push({code:'repeat-supervisor',message:`Same mentor/supervisor/examiner has ${sameSupervisor.length} other Field Experience or Teaching Practice submission${sameSupervisor.length===1?'':'s'} in this department.`});
-  const centreKey=String(record.studyCentre||'').trim().toLowerCase();
+  const centreKeys=new Set(projectStudyCentres(record).map(c=>c.toLowerCase()));
   const sameAssessment=sameSupervisor.filter(r=>String(r.assessmentType||'')===String(record.assessmentType||''));
-  const sameCombo=sameAssessment.filter(r=>String(r.studyCentre||'').trim().toLowerCase()===centreKey);
-  if(centreKey&&sameCombo.length) warnings.push({code:'repeat-supervisor-centre',message:`Same mentor/supervisor/examiner, assessment type and study-centre combination appears in ${sameCombo.length} other submission${sameCombo.length===1?'':'s'}.`});
+  const sameCombo=sameAssessment.filter(r=>projectStudyCentres(r).some(c=>centreKeys.has(c.toLowerCase())));
+  if(centreKeys.size&&sameCombo.length) warnings.push({code:'repeat-supervisor-centre',message:`Same mentor/supervisor/examiner and assessment type appear in ${sameCombo.length} other submission${sameCombo.length===1?'':'s'} sharing at least one selected study centre.`});
   const approvedOthers=others.filter(r=>projectReviewStatus(r)==='approved'&&String(r.assessmentType||'')===String(record.assessmentType||''));
   const approvedRegMap=new Map();
   for(const other of approvedOthers){
@@ -1865,33 +2007,38 @@ function compareRegistrationValues(a,b) {
 function renumberScoreRows(rows) {
   return rows.map((row,i)=>({...row,'S/N':i+1}));
 }
+const PROJECT_EXPORT_HEADERS=['S/N','STUDY CENTRE','NAME','REGISTRATION NO.','GROUP NO.','TOTAL SCORE'];
 function projectScoreRowsForStream(records, stream='distance') {
-  const out=[];
+  const out=[];const directory=studyCentreDirectoryMapSync();
   projectRecords(records).filter(record=>projectStream(record)===stream && projectReviewStatus(record)==='approved').forEach(record => {
-    for (const row of approvedProjectScoreRows(record)) out.push({'S/N':0,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
+    for (const row of approvedProjectScoreRows(record)) {
+      const centre=studyCentreInfoFromRegistration(row.registrationNo,directory);
+      out.push({'S/N':0,'STUDY CENTRE':centre.name,'CENTRE CODE':centre.code,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
+    }
   });
   out.sort((a,b)=>compareRegistrationValues(a['REGISTRATION NO.'],b['REGISTRATION NO.'])||String(a.NAME||'').localeCompare(String(b.NAME||'')));
   return renumberScoreRows(out);
 }
 function allScoreRows(records) { return projectScoreRowsForStream(records,'distance'); }
 function allNonResidentialScoreRows(records) { return projectScoreRowsForStream(records,'non-residential'); }
-function scoreRowsAoA(rows) { return [REQUIRED_HEADERS, ...renumberScoreRows(rows).map(r=>REQUIRED_HEADERS.map(h=>r[h]))]; }
+function scoreRowsAoA(rows) { return [PROJECT_EXPORT_HEADERS, ...renumberScoreRows(rows).map(r=>PROJECT_EXPORT_HEADERS.map(h=>r[h]))]; }
 function scoreSheetAoA(records) { return scoreRowsAoA(allScoreRows(records)); }
 function nonResidentialScoreSheetAoA(records) { return scoreRowsAoA(allNonResidentialScoreRows(records)); }
 function individualScoreSheetAoA(record) { const rows=validScoreRows(record); return [REQUIRED_HEADERS, ...rows.map((row,i)=>[i+1,row.name||'',row.registrationNo||'',row.groupNo||'',row.totalScore||''])]; }
 function registrationProgrammeCentre(registrationNo) {
   const parts=String(registrationNo||'').split('/').map(v=>v.trim());
   if(parts.length<3||!parts[0]||!parts[1]||!parts[2]) return {key:'UNCLASSIFIED',programme:'UNCLASSIFIED',centre:'UNCLASSIFIED'};
-  return {key:`${parts[0]}/${parts[1]}/${parts[2]}`,programme:parts[0],centre:`${parts[1]}/${parts[2]}`};
+  return {key:`${parts[0]}/${parts[1]}/${parts[2]}`,programme:parts[0],centre:normalizeCentreCode(`${parts[1]}/${parts[2]}`)};
 }
-function projectProgrammeCentreGroups(records,stream='distance') {
-  const groups=new Map();
+function projectCentreGroups(records,stream='distance') {
+  const groups=new Map();const directory=studyCentreDirectoryMapSync();
   for(const row of projectScoreRowsForStream(records,stream)){
-    const info=registrationProgrammeCentre(row['REGISTRATION NO.']);
-    if(!groups.has(info.key)) groups.set(info.key,{...info,rows:[]});
-    groups.get(info.key).rows.push({...row});
+    const code=row['CENTRE CODE']||registrationCentreCode(row['REGISTRATION NO.'])||'UNCLASSIFIED';
+    const centre=code==='UNCLASSIFIED'?{code,name:'UNCLASSIFIED STUDY CENTRE'}:(directory.get(code)||{code,name:`UNKNOWN STUDY CENTRE (${code})`});
+    if(!groups.has(code)) groups.set(code,{key:code,centreCode:code,centreName:centre.name,rows:[]});
+    groups.get(code).rows.push({...row,'STUDY CENTRE':centre.name,'CENTRE CODE':code});
   }
-  return [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key,undefined,{numeric:true,sensitivity:'base'})).map(g=>({...g,rows:renumberScoreRows(g.rows.sort((a,b)=>compareRegistrationValues(a['REGISTRATION NO.'],b['REGISTRATION NO.'])))}));
+  return [...groups.values()].sort((a,b)=>String(a.centreName).localeCompare(String(b.centreName),undefined,{numeric:true,sensitivity:'base'})).map(g=>({...g,rows:renumberScoreRows(g.rows.sort((a,b)=>compareRegistrationValues(a['REGISTRATION NO.'],b['REGISTRATION NO.'])||String(a.NAME||'').localeCompare(String(b.NAME||''))))}));
 }
 function allFieldExperienceScoreRows(records) {
   const out=[];
@@ -1901,16 +2048,92 @@ function allFieldExperienceScoreRows(records) {
   out.sort((a,b)=>String(a.assessmentType||'').localeCompare(String(b.assessmentType||''))||compareRegistrationValues(a.registrationNo,b.registrationNo)||String(a.name||'').localeCompare(String(b.name||'')));
   return out;
 }
+function fieldScoreReportSpec(key) { return FIELD_SCORE_REPORTS[String(key||'').trim()] || null; }
+function fieldScoreReportRows(records, reportKey) {
+  const report=fieldScoreReportSpec(reportKey); if(!report) return [];
+  const out=[];const directory=studyCentreDirectoryMapSync();
+  fieldExperienceRecords(records)
+    .filter(record=>record.assessmentType===report.assessmentType&&projectReviewStatus(record)==='approved')
+    .forEach(record=>{
+      for(const row of fieldValidScoreRows(record)) {const centre=studyCentreInfoFromRegistration(row.registrationNo,directory);out.push({registrationNo:row.registrationNo||'',name:row.name||'',score:row.scoreValues?.[report.scoreIndex]||'',centreCode:centre.code,studyCentre:centre.name});}
+    });
+  out.sort((a,b)=>compareRegistrationValues(a.registrationNo,b.registrationNo)||String(a.name||'').localeCompare(String(b.name||'')));
+  return out;
+}
+function fieldScoreReportAoA(records, reportKey) {
+  const report=fieldScoreReportSpec(reportKey); if(!report) return [['S/N','STUDY CENTRE','REGISTRATION','NAME OF STUDENT','SCORE']];
+  return [['S/N','STUDY CENTRE','REGISTRATION','NAME OF STUDENT',report.scoreHeader],...fieldScoreReportRows(records,reportKey).map((row,i)=>[i+1,row.studyCentre,row.registrationNo,row.name,row.score])];
+}
+function fieldScoreReportRegisterAoA(records, reportKey) {
+  const report=fieldScoreReportSpec(reportKey); if(!report) return [['S/N','REFERENCE']];
+  const h=['S/N','REFERENCE','SUBMITTED AT','REPORT','SOURCE SCORE SHEET','MENTOR / SUPERVISOR / EXAMINER','PHONE','EMAIL','STUDY CENTRE(S)','NO. OF STUDENTS / CANDIDATES','SCORE ROWS EXTRACTED','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
+  const body=fieldExperienceRecords(records)
+    .filter(r=>r.assessmentType===report.assessmentType)
+    .slice().sort((a,b)=>String(a.submittedAt||'').localeCompare(String(b.submittedAt||'')))
+    .map((r,i)=>[i+1,r.reference,r.submittedAt,report.label,fieldAssessmentLabel(r),r.fullName,r.phone,r.email,studyCentreDisplay(r),r.groupCount,fieldValidScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']);
+  return [h,...body];
+}
+function fieldScoreReportCentreGroups(records,reportKey) {
+  const groups=new Map();
+  for(const row of fieldScoreReportRows(records,reportKey)){
+    const key=row.centreCode||'UNCLASSIFIED';
+    if(!groups.has(key))groups.set(key,{key,centreCode:key,centreName:row.studyCentre||'UNCLASSIFIED STUDY CENTRE',rows:[]});
+    groups.get(key).rows.push({...row});
+  }
+  return [...groups.values()].sort((a,b)=>String(a.centreName).localeCompare(String(b.centreName),undefined,{numeric:true,sensitivity:'base'})).map(g=>({...g,rows:g.rows.sort((a,b)=>compareRegistrationValues(a.registrationNo,b.registrationNo)||String(a.name||'').localeCompare(String(b.name||'')))}));
+}
+function fieldScoreReportWorkbookBuffer(records,reportKey,kind='scores') {
+  const report=fieldScoreReportSpec(reportKey); if(!report) throw new Error('Unknown Field Experience report.');
+  const wb=XLSX.utils.book_new();
+  addSheet(wb,report.sheetName.slice(0,31),fieldScoreReportAoA(records,reportKey),[8,48,24,34,16]);
+  if(kind==='master') addSheet(wb,`${report.sheetName} Register`.slice(0,31),fieldScoreReportRegisterAoA(records,reportKey),[8,22,24,24,28,34,18,30,28,24,20,24,24,28,38]);
+  if(kind==='register'){
+    const only=XLSX.utils.book_new(); addSheet(only,`${report.sheetName} Register`.slice(0,31),fieldScoreReportRegisterAoA(records,reportKey),[8,22,24,24,28,34,18,30,28,24,20,24,24,28,38]); return XLSX.write(only,{type:'buffer',bookType:'xlsx'});
+  }
+  return XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
+}
+function fieldReportRowsWorkbookBuffer(reportKey,rows,sheetName='Scores') {
+  const report=fieldScoreReportSpec(reportKey); if(!report) throw new Error('Unknown Field Experience report.');
+  const wb=XLSX.utils.book_new();
+  const aoa=[['S/N','STUDY CENTRE','REGISTRATION','NAME OF STUDENT',report.scoreHeader],...rows.map((row,i)=>[i+1,row.studyCentre||'',row.registrationNo||'',row.name||'',row.score||''])];
+  addSheet(wb,String(sheetName||report.sheetName).replace(/[\/?*\[\]:]/g,'-').slice(0,31)||'Scores',aoa,[8,48,24,34,16]);
+  return XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
+}
+function uniqueCentreZipName(group,used){
+  const base=safeBaseName(group.centreName||'UNCLASSIFIED STUDY CENTRE').replace(/\.xlsx$/i,'').trim()||'UNCLASSIFIED STUDY CENTRE';
+  let name=`${base}.xlsx`;let n=1;
+  while(used.has(name.toLowerCase())){
+    const code=safeBaseName(group.centreCode||'CENTRE').replace(/\//g,'-');
+    name=`${base} (${code}${n>1?` ${n}`:''}).xlsx`;n++;
+  }
+  used.add(name.toLowerCase());return name;
+}
+async function streamFieldCentreByCentreScoreZip(res,records,reportKey,downloadName) {
+  const report=fieldScoreReportSpec(reportKey); if(!report){res.status(404).json({error:'Unknown Field Experience report.'});return;}
+  const groups=fieldScoreReportCentreGroups(records,reportKey);
+  if(!groups.length){res.status(404).json({error:`No approved ${report.label} score rows are available for Centre by Centre export.`});return;}
+  const tempDir=path.join(DATA_DIR,`field-centre-by-centre-${crypto.randomUUID()}`);await fsp.mkdir(tempDir,{recursive:true});
+  try{
+    const zipFiles=[];const used=new Set();
+    for(const group of groups){
+      const filename=uniqueCentreZipName(group,used);const fp=path.join(tempDir,filename);
+      await fsp.writeFile(fp,fieldReportRowsWorkbookBuffer(reportKey,group.rows,group.centreCode));zipFiles.push({path:fp,name:filename});
+    }
+    res.setHeader('Content-Type','application/zip');res.setHeader('Content-Disposition',`attachment; filename="${safeBaseName(downloadName)}"`);
+    await streamZipArchive(res,zipFiles);
+  }finally{await fsp.rm(tempDir,{recursive:true,force:true}).catch(()=>{});}
+}
+
 function projectRegisterAoA(records, stream='distance') {
   const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE(S)','STUDENT STREAM','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED','ROWS INCLUDED FOR CONSOLIDATION','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
   const body=projectRecords(records).filter(r=>projectStream(r)===stream).map((r,i)=>[i+1,r.reference,r.submittedAt,r.fullName,r.phone,r.email,studyCentreDisplay(r),stream==='non-residential'?'Non-Residential (Regular)':'Distance',r.groupCount,validScoreRows(r).length,approvedProjectScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']); return [h,...body];
 }
 function fieldExperienceRegisterAoA(records) {
-  const h=['S/N','REFERENCE','SUBMITTED AT','ASSESSMENT TYPE','MENTOR / SUPERVISOR / EXAMINER','PHONE','EMAIL','STUDY CENTRE','NO. OF STUDENTS / CANDIDATES','SCORE ROWS EXTRACTED','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
+  const h=['S/N','REFERENCE','SUBMITTED AT','ASSESSMENT TYPE','MENTOR / SUPERVISOR / EXAMINER','PHONE','EMAIL','STUDY CENTRE(S)','NO. OF STUDENTS / CANDIDATES','SCORE ROWS EXTRACTED','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
   const body=fieldExperienceRecords(records)
     .slice()
     .sort((a,b)=>String(fieldAssessmentLabel(a)).localeCompare(String(fieldAssessmentLabel(b)))||String(a.submittedAt||'').localeCompare(String(b.submittedAt||'')))
-    .map((r,i)=>[i+1,r.reference,r.submittedAt,fieldAssessmentLabel(r),r.fullName,r.phone,r.email,r.studyCentre,r.groupCount,fieldValidScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']);
+    .map((r,i)=>[i+1,r.reference,r.submittedAt,fieldAssessmentLabel(r),r.fullName,r.phone,r.email,studyCentreDisplay(r),r.groupCount,fieldValidScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']);
   return [h,...body];
 }
 function dedupDissertationStage(records, submissionType) {
@@ -1937,16 +2160,16 @@ function addFieldAssessmentSheets(wb,records,prefix='') {
   for(const key of FIELD_ASSESSMENT_KEYS){
     const spec=FIELD_ASSESSMENTS[key];
     const name=(prefix?`${prefix} ${spec.sheetName}`:spec.sheetName).slice(0,31);
-    const widths=[8,24,34,...spec.scoreHeaders.map(()=>14)];
+    const widths=[8,48,24,34,...spec.scoreHeaders.map(()=>14)];
     addSheet(wb,name,fieldAssessmentAoA(records,key),widths);
   }
   const legacy=fieldExperienceRecords(records).filter(r=>!fieldAssessmentSpec(r.assessmentType)&&projectReviewStatus(r)==='approved');
-  if(legacy.length) addSheet(wb,(prefix?'Legacy Scores':'Legacy').slice(0,31),fieldLegacyScoreSheetAoA(records),[10,34,24,16,16]);
+  if(legacy.length) addSheet(wb,(prefix?'Legacy Scores':'Legacy').slice(0,31),fieldLegacyScoreSheetAoA(records),[10,48,34,24,16,16]);
 }
 function workbookBuffer(kind,records) {
   const wb=XLSX.utils.book_new();
-  if(kind==='scores') addSheet(wb,'Consolidated Distance Scores',scoreSheetAoA(records),[10,34,24,16,16]);
-  if(kind==='non-residential-scores') addSheet(wb,'Consolidated Non-Residential',nonResidentialScoreSheetAoA(records),[10,34,24,16,16]);
+  if(kind==='scores') addSheet(wb,'Consolidated Distance Scores',scoreSheetAoA(records),[10,48,34,24,16,16]);
+  if(kind==='non-residential-scores') addSheet(wb,'Consolidated Non-Residential',nonResidentialScoreSheetAoA(records),[10,48,34,24,16,16]);
   if(kind==='single-score') {
     const record=records[0];
     if(record?.portalType==='field-experience'){
@@ -1957,11 +2180,11 @@ function workbookBuffer(kind,records) {
   if(kind==='project-register') addSheet(wb,'Distance Project Register',projectRegisterAoA(records,'distance'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
   if(kind==='non-residential-project-register') addSheet(wb,'Non-Residential Register',projectRegisterAoA(records,'non-residential'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
   if(kind==='project-master') {
-    addSheet(wb,'Master Distance Project Scores',scoreSheetAoA(records),[10,34,24,16,16]);
+    addSheet(wb,'Master Distance Project Scores',scoreSheetAoA(records),[10,48,34,24,16,16]);
     addSheet(wb,'Distance Project Register',projectRegisterAoA(records,'distance'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
   }
   if(kind==='non-residential-project-master') {
-    addSheet(wb,'Master Non-Residential Scores',nonResidentialScoreSheetAoA(records),[10,34,24,16,16]);
+    addSheet(wb,'Master Non-Residential Scores',nonResidentialScoreSheetAoA(records),[10,48,34,24,16,16]);
     addSheet(wb,'Non-Residential Register',projectRegisterAoA(records,'non-residential'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
   }
   if(kind==='field-scores') addFieldAssessmentSheets(wb,records,'');
@@ -2001,16 +2224,15 @@ function claimFilesForSelectedProject(records,ids,stream='distance') {
   }
   return files;
 }
-async function streamProgrammeCentreScoreZip(res,records,stream,downloadName) {
-  const groups=projectProgrammeCentreGroups(records,stream);
-  if(!groups.length){res.status(404).json({error:'No approved project-work score rows are available for Programme by Centre export.'});return;}
-  const tempDir=path.join(DATA_DIR,`programme-centre-${crypto.randomUUID()}`);await fsp.mkdir(tempDir,{recursive:true});
+async function streamCentreByCentreScoreZip(res,records,stream,downloadName) {
+  const groups=projectCentreGroups(records,stream);
+  if(!groups.length){res.status(404).json({error:'No approved project-work score rows are available for Centre by Centre export.'});return;}
+  const tempDir=path.join(DATA_DIR,`centre-by-centre-${crypto.randomUUID()}`);await fsp.mkdir(tempDir,{recursive:true});
   try{
-    const zipFiles=[];
+    const zipFiles=[];const used=new Set();
     for(const group of groups){
-      const stem=group.key==='UNCLASSIFIED'?'UNCLASSIFIED':group.key.replace(/\//g,'_');
-      const filename=safeBaseName(`${stem}.xlsx`);const fp=path.join(tempDir,filename);
-      await fsp.writeFile(fp,scoreRowsWorkbookBuffer(group.rows,group.key));zipFiles.push({path:fp,name:filename});
+      const filename=uniqueCentreZipName(group,used);const fp=path.join(tempDir,filename);
+      await fsp.writeFile(fp,scoreRowsWorkbookBuffer(group.rows,group.centreCode));zipFiles.push({path:fp,name:filename});
     }
     res.setHeader('Content-Type','application/zip');res.setHeader('Content-Disposition',`attachment; filename="${safeBaseName(downloadName)}"`);
     await streamZipArchive(res,zipFiles);
@@ -2034,7 +2256,7 @@ function adminRecordsMap(records, assignments=[]) {
       id:r.id,reference:r.reference,submittedAt:r.submittedAt,portalType:r.portalType||'project-work',
       name:r.fullName||r.studentName||r.assessorName||'',secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
       title:r.title||r.studentTitle||r.assessorTitle||'',firstName:r.firstName||r.studentFirstName||r.assessorFirstName||'',lastName:r.lastName||r.studentLastName||r.assessorLastName||'',
-      email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:(r.portalType==='project-work'||!r.portalType)?studyCentreDisplay(r):(r.studyCentre||''),studyCentres:(r.portalType==='project-work'||!r.portalType)?projectStudyCentres(r):[],projectStream:(r.portalType==='project-work'||!r.portalType)?projectStream(r):'',assessmentType:r.portalType==='field-experience'?(r.assessmentType||'legacy'):'',assessmentLabel:r.portalType==='field-experience'?fieldAssessmentLabel(r):'',scoreRows:r.portalType==='field-experience'?fieldValidScoreRows(r).length:validScoreRows(r).length,scoreRowsIncluded:(r.portalType==='project-work'||!r.portalType)?approvedProjectScoreRows(r).length:(r.portalType==='field-experience'?fieldValidScoreRows(r).length:validScoreRows(r).length),
+      email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:(r.portalType==='project-work'||!r.portalType||r.portalType==='field-experience')?studyCentreDisplay(r):(r.studyCentre||''),studyCentres:(r.portalType==='project-work'||!r.portalType||r.portalType==='field-experience')?projectStudyCentres(r):[],projectStream:(r.portalType==='project-work'||!r.portalType)?projectStream(r):'',assessmentType:r.portalType==='field-experience'?(r.assessmentType||'legacy'):'',assessmentLabel:r.portalType==='field-experience'?fieldAssessmentLabel(r):'',scoreRows:r.portalType==='field-experience'?fieldValidScoreRows(r).length:validScoreRows(r).length,scoreRowsIncluded:(r.portalType==='project-work'||!r.portalType)?approvedProjectScoreRows(r).length:(r.portalType==='field-experience'?fieldValidScoreRows(r).length:validScoreRows(r).length),
       projectReviewStatus:projectReviewStatus(r),projectReviewLabel:projectReviewLabel(projectReviewStatus(r)),projectReviewNote:r.reviewNote||'',projectReviewedAt:r.reviewedAt||null,projectReviewedBy:r.reviewedBy||'',projectWarnings:(r.portalType==='project-work'||!r.portalType)?projectSubmissionWarnings(r,records):[],projectReturnEmailStatus:r.reviewReturnEmailStatus||'',projectReturnEmailSentAt:r.reviewReturnEmailSentAt||null,projectReturnEmailError:r.reviewReturnEmailError||'',projectReturnEmailRecipient:r.reviewReturnEmailRecipient||'',
       fieldReviewStatus:projectReviewStatus(r),fieldReviewLabel:projectReviewLabel(projectReviewStatus(r)),fieldReviewNote:r.reviewNote||'',fieldReviewedAt:r.reviewedAt||null,fieldReviewedBy:r.reviewedBy||'',fieldWarnings:r.portalType==='field-experience'?fieldExperienceSubmissionWarnings(r,records):[],fieldReturnEmailStatus:r.reviewReturnEmailStatus||'',fieldReturnEmailSentAt:r.reviewReturnEmailSentAt||null,fieldReturnEmailError:r.reviewReturnEmailError||'',fieldReturnEmailRecipient:r.reviewReturnEmailRecipient||'',
       studentName:r.studentName||'',indexNumber:r.indexNumber||'',dissertationTopic:r.dissertationTopic||'',previousDissertationTopic:r.previousDissertationTopic||'',supervisorName:r.supervisorName||'',submissionType,
@@ -2309,6 +2531,28 @@ app.post('/api/developer/study-centres', developerAuth, upload.single('studyCent
 app.post('/api/developer/study-centres/reset', developerAuth, async(_req,res)=>{
   const catalogue=await readStudyCentreCatalogue();catalogue.business=DEFAULT_STUDY_CENTRES.slice();
   const saved=await writeStudyCentreCatalogue(catalogue);res.json({ok:true,count:saved.business.length,departments:['business'],centres:saved.business,catalogue:saved});
+});
+
+app.get('/api/developer/study-centre-directory', developerAuth, async(_req,res)=>{
+  const centres=await readStudyCentreDirectory();res.json({count:centres.length,centres});
+});
+app.get('/api/developer/study-centre-directory.xlsx', developerAuth, async(_req,res)=>{
+  const centres=await readStudyCentreDirectory();const buffer=centreDirectoryWorkbookBuffer(centres);
+  res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition','attachment; filename="study-centre-code-directory.xlsx"');res.send(buffer);
+});
+app.post('/api/developer/study-centre-directory', developerAuth, upload.single('studyCentreDirectoryFile'), async(req,res)=>{
+  try{
+    if(!req.file) return res.status(400).json({error:'Select an Excel or CSV study-centre directory.'});
+    const ext=path.extname(req.file.originalname||'').toLowerCase();
+    if(!['.xlsx','.xls','.csv'].includes(ext)){await fsp.unlink(req.file.path).catch(()=>{});return res.status(400).json({error:'Upload an .xlsx, .xls or .csv file containing CODE and CENTER_NAME/CENTRE_NAME columns.'});}
+    const centres=parseStudyCentreDirectoryFile(req.file.path);await fsp.unlink(req.file.path).catch(()=>{});const saved=await writeStudyCentreDirectory(centres);
+    res.json({ok:true,count:saved.length,centres:saved});
+  }catch(e){if(req.file?.path)await fsp.unlink(req.file.path).catch(()=>{});res.status(400).json({error:e.message||'Could not update the study-centre code directory.'});}
+});
+app.post('/api/developer/study-centre-directory/reset', developerAuth, async(_req,res)=>{
+  try{const defaults=normalizeStudyCentreDirectory(JSON.parse(await fsp.readFile(DEFAULT_STUDY_CENTRE_DIRECTORY_PATH,'utf8')));const saved=await writeStudyCentreDirectory(defaults);res.json({ok:true,count:saved.length,centres:saved});}
+  catch(e){res.status(500).json({error:'Could not restore the bundled study-centre directory.'});}
 });
 
 app.get('/api/developer/admin-users', developerAuth, async(_req,res)=>res.json((await readAdminUsers()).map(publicAdminUser)));
@@ -2825,13 +3069,20 @@ app.get('/api/admin/:department/export/non-residential-project-master.xlsx', dep
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   sendWorkbook(res,'non-residential-project-master',records,`${req.adminDepartment}-master-non-residential-project-scores.xlsx`);
 });
-app.get('/api/admin/:department/export/project-programme-centre.zip', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
+app.get('/api/admin/:department/export/project-centre-by-centre.zip', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(),req.adminDepartment);
-  try{await streamProgrammeCentreScoreZip(res,records,'distance',`${req.adminDepartment}-distance-programme-by-centre-scores.zip`);}catch(e){console.error('Programme by Centre ZIP failed:',e);if(!res.headersSent)res.status(500).json({error:'Could not create the Programme by Centre ZIP.'});else res.end();}
+  try{await streamCentreByCentreScoreZip(res,records,'distance',`${req.adminDepartment}-distance-centre-by-centre-scores.zip`);}catch(e){console.error('Centre by Centre ZIP failed:',e);if(!res.headersSent)res.status(500).json({error:'Could not create the Centre by Centre ZIP.'});else res.end();}
+});
+app.get('/api/admin/:department/export/non-residential-project-centre-by-centre.zip', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);
+  try{await streamCentreByCentreScoreZip(res,records,'non-residential',`${req.adminDepartment}-non-residential-centre-by-centre-scores.zip`);}catch(e){console.error('Non-Residential Centre by Centre ZIP failed:',e);if(!res.headersSent)res.status(500).json({error:'Could not create the Centre by Centre ZIP.'});else res.end();}
+});
+// Backward-compatible aliases for bookmarks created before v25.
+app.get('/api/admin/:department/export/project-programme-centre.zip', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);try{await streamCentreByCentreScoreZip(res,records,'distance',`${req.adminDepartment}-distance-centre-by-centre-scores.zip`);}catch(e){if(!res.headersSent)res.status(500).json({error:'Could not create the Centre by Centre ZIP.'});else res.end();}
 });
 app.get('/api/admin/:department/export/non-residential-project-programme-centre.zip', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
-  const records=recordsForDepartment(await readDb(),req.adminDepartment);
-  try{await streamProgrammeCentreScoreZip(res,records,'non-residential',`${req.adminDepartment}-non-residential-programme-by-centre-scores.zip`);}catch(e){console.error('Non-Residential Programme by Centre ZIP failed:',e);if(!res.headersSent)res.status(500).json({error:'Could not create the Programme by Centre ZIP.'});else res.end();}
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);try{await streamCentreByCentreScoreZip(res,records,'non-residential',`${req.adminDepartment}-non-residential-centre-by-centre-scores.zip`);}catch(e){if(!res.headersSent)res.status(500).json({error:'Could not create the Centre by Centre ZIP.'});else res.end();}
 });
 app.post('/api/admin/:department/project-claims/download-selected', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
   const ids=Array.isArray(req.body?.ids)?req.body.ids.map(String):[];const stream=req.body?.stream==='non-residential'?'non-residential':'distance';
@@ -2857,7 +3108,34 @@ app.post('/api/admin/:department/project-claims/email-selected', departmentAuth,
   }catch(e){console.error('Email selected claim forms failed:',e);res.status(502).json({error:`Could not email the claim forms: ${e.message||e}`});}
 });
 
-// FIELD EXPERIENCE AND TEACHING PRACTICE exports. Approved submissions are kept in separate worksheets by assessment type.
+// FIELD EXPERIENCE AND TEACHING PRACTICE individual score reports.
+// Field Experience I & II and III & IV are submitted on paired templates, but approved outputs are split into individual reports.
+app.get('/api/admin/:department/export/field-report/:reportKey/scores.xlsx', departmentAuth, requireAdminAccess('field-experience','viewer'), async(req,res)=>{
+  const report=fieldScoreReportSpec(req.params.reportKey); if(!report)return res.status(404).json({error:'Unknown Field Experience report.'});
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);const buffer=fieldScoreReportWorkbookBuffer(records,req.params.reportKey,'scores');
+  res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition',`attachment; filename="${safeBaseName(req.adminDepartment+'-'+req.params.reportKey+'-consolidated-scores.xlsx')}"`);res.send(buffer);
+});
+app.get('/api/admin/:department/export/field-report/:reportKey/master.xlsx', departmentAuth, requireAdminAccess('field-experience','viewer'), async(req,res)=>{
+  const report=fieldScoreReportSpec(req.params.reportKey); if(!report)return res.status(404).json({error:'Unknown Field Experience report.'});
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);const buffer=fieldScoreReportWorkbookBuffer(records,req.params.reportKey,'master');
+  res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition',`attachment; filename="${safeBaseName(req.adminDepartment+'-'+req.params.reportKey+'-master-scores.xlsx')}"`);res.send(buffer);
+});
+app.get('/api/admin/:department/export/field-report/:reportKey/register.xlsx', departmentAuth, requireAdminAccess('field-experience','viewer'), async(req,res)=>{
+  const report=fieldScoreReportSpec(req.params.reportKey); if(!report)return res.status(404).json({error:'Unknown Field Experience report.'});
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);const buffer=fieldScoreReportWorkbookBuffer(records,req.params.reportKey,'register');
+  res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition',`attachment; filename="${safeBaseName(req.adminDepartment+'-'+req.params.reportKey+'-register.xlsx')}"`);res.send(buffer);
+});
+app.get('/api/admin/:department/export/field-report/:reportKey/centre-by-centre.zip', departmentAuth, requireAdminAccess('field-experience','viewer'), async(req,res)=>{
+  const report=fieldScoreReportSpec(req.params.reportKey); if(!report)return res.status(404).json({error:'Unknown Field Experience report.'});
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);
+  try{await streamFieldCentreByCentreScoreZip(res,records,req.params.reportKey,`${req.adminDepartment}-${req.params.reportKey}-centre-by-centre.zip`);}catch(e){console.error('Field Centre by Centre ZIP failed:',e);if(!res.headersSent)res.status(500).json({error:'Could not create the Centre by Centre ZIP.'});else res.end();}
+});
+app.get('/api/admin/:department/export/field-report/:reportKey/programme-centre.zip', departmentAuth, requireAdminAccess('field-experience','viewer'), async(req,res)=>{
+  const report=fieldScoreReportSpec(req.params.reportKey); if(!report)return res.status(404).json({error:'Unknown Field Experience report.'});const records=recordsForDepartment(await readDb(),req.adminDepartment);
+  try{await streamFieldCentreByCentreScoreZip(res,records,req.params.reportKey,`${req.adminDepartment}-${req.params.reportKey}-centre-by-centre.zip`);}catch(e){if(!res.headersSent)res.status(500).json({error:'Could not create the Centre by Centre ZIP.'});else res.end();}
+});
+
+// FIELD EXPERIENCE AND TEACHING PRACTICE overall exports retained for backward compatibility.
 app.get('/api/admin/:department/export/field-experience-scores.xlsx', departmentAuth, requireAdminAccess('field-experience','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   sendWorkbook(res,'field-scores',records,`${req.adminDepartment}-consolidated-field-experience-and-teaching-practice-scores.xlsx`);
@@ -2925,7 +3203,7 @@ app.get('/api/admin/:department/summary',departmentAuth,async(req,res)=>{
   });
 });
 
-app.get('/health',async(_req,res)=>{const admins=await readAdminUsers(),centreCatalogue=await readStudyCentreCatalogue();const centreCount=Object.values(centreCatalogue).reduce((n,list)=>n+(Array.isArray(list)?list.length:0),0);res.json({ok:true,departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:admins.length,pendingAdminInvitations:admins.filter(a=>!a.passwordHash&&a.invitationTokenHash).length,studyCentres:centreCount,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'});});
+app.get('/health',async(_req,res)=>{const admins=await readAdminUsers(),centreCatalogue=await readStudyCentreCatalogue(),centreDirectory=await readStudyCentreDirectory();const centreCount=Object.values(centreCatalogue).reduce((n,list)=>n+(Array.isArray(list)?list.length:0),0);res.json({ok:true,departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:admins.length,pendingAdminInvitations:admins.filter(a=>!a.passwordHash&&a.invitationTokenHash).length,studyCentres:centreCount,studyCentreDirectory:centreDirectory.length,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'});});
 app.get('/vendor/xlsx.full.min.js', (_req,res)=>res.sendFile(path.join(__dirname,'node_modules','xlsx','dist','xlsx.full.min.js')));
 app.use(express.static(path.join(__dirname,'public'),{extensions:['html']}));
 app.use((err,req,res,_next)=>{

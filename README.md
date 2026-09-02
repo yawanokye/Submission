@@ -1,3 +1,11 @@
+# v25 update: Study Centre reporting and Centre by Centre scores
+
+- Consolidated and master Undergraduate Project Work score sheets now include a **STUDY CENTRE** column derived from the centre code in each Registration Number using the approved centre-code directory.
+- Field Experience and Teaching Practice consolidated/master reports now also include **STUDY CENTRE**, including the separate Field Experience I, II, III, IV, V, Micro-Teaching, Macro-Teaching and Reflection reports.
+- **Programme by Centre ZIP** is superseded by **Centre by Centre Scores ZIP**. All students at the same centre are combined in one workbook regardless of programme, sorted by Registration/Index Number, and the workbook is named with the official centre name.
+- The Developer Portal now manages a separate **Study Centre Code Directory**. It accepts XLSX, XLS or CSV with `CODE` and `CENTER_NAME`/`CENTRE_NAME` columns and includes the 93-centre list supplied for this update as the initial directory.
+- Department-specific published centre lists are still used for public-portal checkbox selection and remain independent of the reporting directory.
+
 # v22 update: checkbox selection for multiple Project Work study centres
 
 The Undergraduate Project Work public portal now presents department-published study centres as a **checkbox list** instead of a multi-select dropdown. Supervisors/Examiners can tick one or more Distance study centres directly, which is clearer when groups cut across centres and works consistently on desktop and mobile without Ctrl/Cmd multi-selection.
@@ -223,3 +231,7 @@ Fresh and Revised Dissertation registers retain Supervisor's Name as a dedicated
 The public Field Experience portal is now **Field Experience and Teaching Practice**. Each submission selects exactly one of six assessment categories: Field Experience I & II, Field Experience III & IV, Field Experience V, Micro-Teaching, Macro-Teaching, or Reflection. The portal validates the Excel score sheet against the selected category and can read the matching worksheet from the supplied six-sheet template workbook.
 
 Department administration groups these submissions into the same six categories. Consolidated and master Field/Teaching workbooks use separate worksheets for each category so that the different score structures are never mixed. Older Field Experience records remain accessible as Previous / Unclassified records. This v23 change is confined to the Field Experience section. Undergraduate Project Work, Dissertation Submission and Assessment/Vetting workflows remain unchanged.
+
+
+## v24 Field Experience and Teaching Practice update
+Field Experience resources are now six separate Excel templates. The public portal supports multiple study-centre checkbox selection. After departmental approval, the admin portal provides individual report downloads for Field Experience I, II, III, IV, V, Micro-Teaching, Macro-Teaching and Reflection, including Consolidated Scores, Programme by Centre ZIP, Master Scores and a Register. Paired input sheets (I & II and III & IV) are split into separate approved outputs.

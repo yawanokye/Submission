@@ -1,0 +1,470 @@
+{
+  "version": 1,
+  "centres": [
+    {
+      "id": 2,
+      "code": "GA/02",
+      "name": "ODORGONNO SENIOR HIGH SCHOOL, AWOSHIE-ACCRA"
+    },
+    {
+      "id": 3,
+      "code": "GA/03",
+      "name": "TEMA SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 4,
+      "code": "GA/14",
+      "name": "ACCRA HIGH SCHOOL"
+    },
+    {
+      "id": 5,
+      "code": "GA/06",
+      "name": "ADA COLLEGE OF EDUCATION, ADA-FOAH"
+    },
+    {
+      "id": 7,
+      "code": "GA/09",
+      "name": "PAPAFIO HILLS, ACCRA"
+    },
+    {
+      "id": 8,
+      "code": "GA/10",
+      "name": "WEST AFRICA SENIOR HIGH SCHOOL, ADENTA-ACCRA"
+    },
+    {
+      "id": 13,
+      "code": "AS/07",
+      "name": "KONONGO ODUMASE SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 15,
+      "code": "AS/06",
+      "name": "MAMPONG TECHNICAL COLLEGE OF EDUCATION, MAMPONG-ASHANTI"
+    },
+    {
+      "id": 16,
+      "code": "AS/03",
+      "name": "OBUASI SENIOR HIGH TECHNICAL SCHOOL"
+    },
+    {
+      "id": 17,
+      "code": "AS/01",
+      "name": "WESLEY COLLEGE OF EDUCATION, KUMASI"
+    },
+    {
+      "id": 18,
+      "code": "AS/09",
+      "name": "MMOFRATURO SCHOOL, KUMASI"
+    },
+    {
+      "id": 19,
+      "code": "AS/08",
+      "name": "DWAMENA AKENTEN SENIOR HIGH SCHOOL, OFFINSO"
+    },
+    {
+      "id": 20,
+      "code": "AS/05",
+      "name": "SERWAA NYARKO SENIOR HIGH SCHOOL, KUMASI"
+    },
+    {
+      "id": 21,
+      "code": "AS/10",
+      "name": "T. I. AHMADIYYA SENIOR HIGH SCHOOL, KUMASI"
+    },
+    {
+      "id": 22,
+      "code": "AS/11",
+      "name": "SIMMS SENIOR HIGH SCHOOL, KUMASI"
+    },
+    {
+      "id": 24,
+      "code": "AS/12",
+      "name": "KUMASI TECHNICAL INSTITUTE"
+    },
+    {
+      "id": 25,
+      "code": "AS/13",
+      "name": "MANSOMAN SENIOR HIGH SCHOOL, MANSO ATWERE"
+    },
+    {
+      "id": 26,
+      "code": "BA/01",
+      "name": "SUNYANI TECHNICAL UNIVERSITY"
+    },
+    {
+      "id": 27,
+      "code": "BA/02",
+      "name": "TECHIMAN SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 416,
+      "code": "CR/32",
+      "name": "FOSO COLLEGE OF EDUCATION, FOSU"
+    },
+    {
+      "id": 29,
+      "code": "BA/03",
+      "name": "DORMAA SENIOR HIGH SCHOOL, DORMAA AHENKRO"
+    },
+    {
+      "id": 30,
+      "code": "BA/05",
+      "name": "KINTAMPO SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 31,
+      "code": "BA/06",
+      "name": "DROBO SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 33,
+      "code": "ER/01",
+      "name": "OYOKO METHODIST SENIOR HIGH SCHOOL, KOFORIDUA"
+    },
+    {
+      "id": 36,
+      "code": "ER/04",
+      "name": "GHANA SENIOR HIGH SCHOOL, KOFORIDUA"
+    },
+    {
+      "id": 39,
+      "code": "ER/07",
+      "name": "BEGORO PRESBYTERIAN SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 41,
+      "code": "WR/02",
+      "name": "TAKORADI SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 42,
+      "code": "WR/03",
+      "name": "FIASEMAN SENIOR HIGH SCHOOL, TARKWA"
+    },
+    {
+      "id": 43,
+      "code": "WR/04",
+      "name": "SEFWI WIAWSO COLLEGE OF EDUCATION"
+    },
+    {
+      "id": 44,
+      "code": "WR/06",
+      "name": "HOLY CHILD COLLEGE OF EDUCATION, TAKORADI"
+    },
+    {
+      "id": 45,
+      "code": "WR/08",
+      "name": "ST. JOHNS SENIOR HIGH SCHOOL, TAKORADI"
+    },
+    {
+      "id": 46,
+      "code": "WR/09",
+      "name": "BIBIANI SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 47,
+      "code": "WR/07",
+      "name": "NSEIN SENIOR HIGH SCHOOL, NSEIN-AXIM"
+    },
+    {
+      "id": 48,
+      "code": "WR/10",
+      "name": "ENCHI COLLEGE OF EDUCATION"
+    },
+    {
+      "id": 430,
+      "code": "UE/33",
+      "name": "ST. JOHN BOSCOS COLLEGE OF EDUCATION - NAVRONGO"
+    },
+    {
+      "id": 49,
+      "code": "WR/05",
+      "name": "BIA LAMPLIGHTER COLLEGE OF EDUCATION, SEFWI DEBISO"
+    },
+    {
+      "id": 52,
+      "code": "VR/03",
+      "name": "JASIKAN COLLEGE OF EDUCATION"
+    },
+    {
+      "id": 53,
+      "code": "VR/02",
+      "name": "AKATSI COLLEGE OF EDUCATION"
+    },
+    {
+      "id": 55,
+      "code": "NR/01",
+      "name": "TAMALE TECHNICAL UNIVERSITY"
+    },
+    {
+      "id": 56,
+      "code": "NR/02",
+      "name": "TAMALE COLLEGE OF EDUCATION"
+    },
+    {
+      "id": 60,
+      "code": "UE/02",
+      "name": "BOLGATANGA GIRLS SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 61,
+      "code": "UE/03",
+      "name": "ZEBILLA SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 63,
+      "code": "UW/01",
+      "name": "WA SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 64,
+      "code": "UW/02",
+      "name": "TUMU COLLEGE OF EDUCATION"
+    },
+    {
+      "id": 65,
+      "code": "UW/03",
+      "name": "LAWRA SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 66,
+      "code": "UW/04",
+      "name": "NANDOM SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 67,
+      "code": "CR/01",
+      "name": "UNIVERSITY OF CAPE COAST"
+    },
+    {
+      "id": 70,
+      "code": "CR/04",
+      "name": "SWEDRU SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 71,
+      "code": "CR/06",
+      "name": "BREMAN ASIKUMA SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 72,
+      "code": "CR/05",
+      "name": "BOA AMPONSEM SENIOR HIGH SCHOOL, DUNKWA-ON-OFFIN"
+    },
+    {
+      "id": 74,
+      "code": "CR/09",
+      "name": "APAM SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 75,
+      "code": "CR/08",
+      "name": "TWIFO PRASO SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 78,
+      "code": "WR/01",
+      "name": "BOMPEH SENIOR HIGH TECHNICAL SCHOOL, TAKORADI"
+    },
+    {
+      "id": 80,
+      "code": "AS/14",
+      "name": "KUMASI SENIOR HIGH TECHNICAL SCHOOL"
+    },
+    {
+      "id": 85,
+      "code": "GA/13",
+      "name": "ST. PETERS LUTHERAN SCHOOL, MADINA-ACCRA"
+    },
+    {
+      "id": 86,
+      "code": "CR/07",
+      "name": "NGLESHIE AMANFRO SENIOR HIGH SCHOOL, KASOA"
+    },
+    {
+      "id": 88,
+      "code": "GA/01",
+      "name": "ZENITH COLLEGE, LA-ACCRA"
+    },
+    {
+      "id": 91,
+      "code": "NR/07",
+      "name": "DAMONGO SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 94,
+      "code": "BA/08",
+      "name": "NKORANMAN SENIOR HIGH SCHOOL, SEIKWA"
+    },
+    {
+      "id": 103,
+      "code": "WR/13",
+      "name": "JUABOSO SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 104,
+      "code": "ER/09",
+      "name": "IGNIS SCHOOL, NSAWAM"
+    },
+    {
+      "id": 105,
+      "code": "GA/18",
+      "name": "ADA SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 122,
+      "code": "GA/05",
+      "name": "FAFRAHA COMMUNITY SENIOR HIGH SCHOOL, ACCRA"
+    },
+    {
+      "id": 126,
+      "code": "AS/18",
+      "name": "TEPA SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 127,
+      "code": "BA/10",
+      "name": "WENCHI AGRICULTURAL COLLEGE"
+    },
+    {
+      "id": 128,
+      "code": "VR/07",
+      "name": "MAFI KUMASE SHS"
+    },
+    {
+      "id": 167,
+      "code": "ER/12",
+      "name": "NSAWAM PRISONS"
+    },
+    {
+      "id": 169,
+      "code": "GA/24",
+      "name": "ST. PAULS LUTHERAN SCHOOL, KANDA-ACCRA"
+    },
+    {
+      "id": 170,
+      "code": "GA/25",
+      "name": "TRINITY LUTHERAN SCHOOL, TEMA"
+    },
+    {
+      "id": 171,
+      "code": "BA/11",
+      "name": "SUNYANI SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 172,
+      "code": "UE/04",
+      "name": "BOLGATANGA TECHNICAL INSTITUTE"
+    },
+    {
+      "id": 182,
+      "code": "VR/09",
+      "name": "KETA BUSINESS COLLEGE"
+    },
+    {
+      "id": 186,
+      "code": "BA/12",
+      "name": "ATEBUBU SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 203,
+      "code": "AS/20",
+      "name": "AKROKERRI COLLEGE OF EDUCATION"
+    },
+    {
+      "id": 298,
+      "code": "GA/26",
+      "name": "CHEMU SENIOR HIGH SCHOOL, TEMA"
+    },
+    {
+      "id": 309,
+      "code": "ER/15",
+      "name": "YILO KROBO SENIOR HIGH SCHOOL, SOMANYA"
+    },
+    {
+      "id": 311,
+      "code": "GA/28",
+      "name": "UNIVERSITY OF CAPE COAST PAPAFIO HILLS CAMPUS"
+    },
+    {
+      "id": 332,
+      "code": "BA/15",
+      "name": "WENCHI METHODIST SENIOR HIGH SCHOOL"
+    },
+    {
+      "id": 333,
+      "code": "GA/29",
+      "name": "LASHIBI COMMUNITY SENIOR HIGH SCHOOL, SAKUMONO-TEMA"
+    },
+    {
+      "id": 334,
+      "code": "NR/10",
+      "name": "BUSINESS SENIOR HIGH SCHOOL, TAMALE"
+    },
+    {
+      "id": 342,
+      "code": "CR/18",
+      "name": "RIVER VIEW COLLEGE, TUBA-KASOA"
+    },
+    {
+      "id": 346,
+      "code": "CR/19",
+      "name": "UNIVERSITY OF CAPE COAST NYAKROM CAMPUS"
+    },
+    {
+      "id": 347,
+      "code": "AS/22",
+      "name": "UNIVERSITY OF CAPE COAST DOMINASE CAMPUS"
+    },
+    {
+      "id": 350,
+      "code": "ER/16",
+      "name": "METHODIST COLLEGE OF EDUCATION, AKIM ODA"
+    },
+    {
+      "id": 401,
+      "code": "WR/33",
+      "name": "GOASO NURSING TRAINING COLLEGE"
+    },
+    {
+      "id": 402,
+      "code": "VR/32",
+      "name": "SCHOOL OF HYGIENE, HO"
+    },
+    {
+      "id": 404,
+      "code": "BA/33",
+      "name": "GREENFILED UNIVERSITY COLLEGE - SUNYANI"
+    },
+    {
+      "id": 415,
+      "code": "BA/34",
+      "name": "AL-FARUQ COLLEGE OF EDUCATION, WENCHI"
+    },
+    {
+      "id": 417,
+      "code": "AS/33",
+      "name": "AKROKERRI COLLEGE OF EDUCATION, AKROKERRI"
+    },
+    {
+      "id": 427,
+      "code": "UW/32",
+      "name": "MCCOY COLLEGE OF EDUCATION - NADOWLI"
+    },
+    {
+      "id": 428,
+      "code": "BA/35",
+      "name": "BEREKUM COLLEGE OF EDUCATION - BEREKUM"
+    },
+    {
+      "id": 429,
+      "code": "BA/36",
+      "name": "ATEBUBU COLLEGE OF EDUCATION - ATEBUBU"
+    },
+    {
+      "id": 431,
+      "code": "VR/33",
+      "name": "HO-KPODZI E. P A SCHOOL - HO"
+    }
+  ]
+}
