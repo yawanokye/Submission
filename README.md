@@ -235,3 +235,10 @@ Department administration groups these submissions into the same six categories.
 
 ## v24 Field Experience and Teaching Practice update
 Field Experience resources are now six separate Excel templates. The public portal supports multiple study-centre checkbox selection. After departmental approval, the admin portal provides individual report downloads for Field Experience I, II, III, IV, V, Micro-Teaching, Macro-Teaching and Reflection, including Consolidated Scores, Programme by Centre ZIP, Master Scores and a Register. Paired input sheets (I & II and III & IV) are split into separate approved outputs.
+
+
+## v26: Alphabetical study-centre ordering
+
+Public Study Centre choices in Undergraduate Project Work and Field Experience and Teaching Practice are now displayed alphabetically. Approved consolidated score sheets are sorted first by Study Centre name and then by Registration/Index Number within each centre. The separate Field Experience I, II, III, IV, V, Micro-Teaching, Macro-Teaching and Reflection consolidated reports use the same centre-first ordering. Centre by Centre ZIP files continue to sort students by Registration/Index Number within each centre.
+
+No new environment variable or npm dependency is required for v26.

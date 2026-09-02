@@ -665,7 +665,10 @@ async function readStudyCentreCatalogue() {
 }
 async function readStudyCentres(department='business') {
   const catalogue=await readStudyCentreCatalogue();
-  return Array.isArray(catalogue[department]) ? catalogue[department] : [];
+  const centres=Array.isArray(catalogue[department]) ? catalogue[department] : [];
+  // Always expose public study-centre choices alphabetically, regardless of
+  // the order in which the Developer/System Admin uploaded the list.
+  return centres.slice().sort((a,b)=>String(a||'').localeCompare(String(b||''),undefined,{numeric:true,sensitivity:'base'}));
 }
 async function readProjectStudyCentres(department='business') {
   const centres = await readStudyCentres(department);
@@ -1406,7 +1409,7 @@ function fieldAssessmentAoA(records, assessmentType) {
     .forEach(record=>{
       for(const row of fieldValidScoreRows(record)) rows.push({...row,studyCentre:studyCentreInfoFromRegistration(row.registrationNo,directory).name});
     });
-  rows.sort((a,b)=>compareRegistrationValues(a.registrationNo,b.registrationNo)||String(a.name||'').localeCompare(String(b.name||'')));
+  rows.sort((a,b)=>String(a.studyCentre||'').localeCompare(String(b.studyCentre||''),undefined,{numeric:true,sensitivity:'base'})||compareRegistrationValues(a.registrationNo,b.registrationNo)||String(a.name||'').localeCompare(String(b.name||''),undefined,{sensitivity:'base'}));
   const headers=['S/N','STUDY CENTRE','REGISTRATION','NAME OF STUDENT',...spec.scoreHeaders];
   return [headers,...rows.map((row,i)=>[i+1,row.studyCentre||'',row.registrationNo||'',row.name||'',...spec.scoreHeaders.map((_,idx)=>row.scoreValues?.[idx]||'')])];
 }
@@ -1424,7 +1427,7 @@ function fieldLegacyScoreSheetAoA(records) {
     .forEach(record=>{
       for(const row of validScoreRows(record)) {const centre=studyCentreInfoFromRegistration(row.registrationNo,directory);rows.push({'S/N':0,'STUDY CENTRE':centre.name,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});}
     });
-  rows.sort((a,b)=>compareRegistrationValues(a['REGISTRATION NO.'],b['REGISTRATION NO.'])||String(a.NAME||'').localeCompare(String(b.NAME||'')));
+  rows.sort((a,b)=>String(a['STUDY CENTRE']||'').localeCompare(String(b['STUDY CENTRE']||''),undefined,{numeric:true,sensitivity:'base'})||compareRegistrationValues(a['REGISTRATION NO.'],b['REGISTRATION NO.'])||String(a.NAME||'').localeCompare(String(b.NAME||''),undefined,{sensitivity:'base'}));
   return [PROJECT_EXPORT_HEADERS,...renumberScoreRows(rows).map(r=>PROJECT_EXPORT_HEADERS.map(h=>r[h]))];
 }
 
@@ -2016,7 +2019,7 @@ function projectScoreRowsForStream(records, stream='distance') {
       out.push({'S/N':0,'STUDY CENTRE':centre.name,'CENTRE CODE':centre.code,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
     }
   });
-  out.sort((a,b)=>compareRegistrationValues(a['REGISTRATION NO.'],b['REGISTRATION NO.'])||String(a.NAME||'').localeCompare(String(b.NAME||'')));
+  out.sort((a,b)=>String(a['STUDY CENTRE']||'').localeCompare(String(b['STUDY CENTRE']||''),undefined,{numeric:true,sensitivity:'base'})||compareRegistrationValues(a['REGISTRATION NO.'],b['REGISTRATION NO.'])||String(a.NAME||'').localeCompare(String(b.NAME||''),undefined,{sensitivity:'base'}));
   return renumberScoreRows(out);
 }
 function allScoreRows(records) { return projectScoreRowsForStream(records,'distance'); }
@@ -2057,7 +2060,7 @@ function fieldScoreReportRows(records, reportKey) {
     .forEach(record=>{
       for(const row of fieldValidScoreRows(record)) {const centre=studyCentreInfoFromRegistration(row.registrationNo,directory);out.push({registrationNo:row.registrationNo||'',name:row.name||'',score:row.scoreValues?.[report.scoreIndex]||'',centreCode:centre.code,studyCentre:centre.name});}
     });
-  out.sort((a,b)=>compareRegistrationValues(a.registrationNo,b.registrationNo)||String(a.name||'').localeCompare(String(b.name||'')));
+  out.sort((a,b)=>String(a.studyCentre||'').localeCompare(String(b.studyCentre||''),undefined,{numeric:true,sensitivity:'base'})||compareRegistrationValues(a.registrationNo,b.registrationNo)||String(a.name||'').localeCompare(String(b.name||''),undefined,{sensitivity:'base'}));
   return out;
 }
 function fieldScoreReportAoA(records, reportKey) {

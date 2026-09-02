@@ -58,7 +58,7 @@ async function loadStudyCentres(selectId='studyCentre',extraCentres=[],departmen
   try{
     const res=await fetch(`/api/study-centres?department=${encodeURIComponent(department)}`);let centres=await res.json();
     if(!res.ok||!Array.isArray(centres))throw new Error(centres?.error||'Could not load study centres.');
-    centres=[...new Set([...centres,...(Array.isArray(extraCentres)?extraCentres:[])])];
+    centres=[...new Set([...centres,...(Array.isArray(extraCentres)?extraCentres:[])])].sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true,sensitivity:'base'}));
     const prompt=select.multiple?'Select one or more study centres':'Select study centre';
     select.innerHTML=`<option value="" ${select.multiple?'disabled':''}>${prompt}</option>`+centres.map(c=>`<option value="${resourceEscape(c)}">${resourceEscape(c)}</option>`).join('');
   }catch(e){console.error(e);select.innerHTML='<option value="">Study centres unavailable for this department</option>';}
