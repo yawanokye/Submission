@@ -111,3 +111,6 @@ tr.review-row-returned td{background:#f3f8fd}tr.review-row-returned td:first-chi
 .field-report-set{border:1px solid #d7e0e8;border-radius:10px;background:#f8fafc;padding:10px 12px}
 .field-report-set>strong{display:block;margin-bottom:8px;color:#0a2d52}
 .field-report-set .export-actions{justify-content:flex-start}
+
+/* v27: cleaner tabbed department administration */
+.sub-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 18px;padding:7px;background:#eef3f7;border:1px solid #d7e1e8;border-radius:10px}.sub-tab{border:1px solid transparent;background:transparent;color:var(--navy);border-radius:8px;padding:9px 12px;font-weight:800;cursor:pointer}.sub-tab:hover{background:#fff}.sub-tab.active{background:#fff;border-color:#bfcdd8;box-shadow:0 3px 10px rgba(15,38,61,.08)}.sub-tab span{display:inline-flex;margin-left:5px;min-width:20px;justify-content:center;padding:2px 6px;border-radius:999px;background:#e7edf2;font-size:10px}.field-section{border-top-color:#137a45}.field-category-tabs{margin-top:18px;position:sticky;top:0;z-index:5}.field-experience-subsection{margin-top:0;padding-top:0;border-top:0}.field-assessment-groups{gap:12px}.assignment-history[data-subpanel-group]{margin-top:18px}@media(max-width:760px){.sub-tabs{display:grid;grid-template-columns:1fr 1fr}.sub-tab{width:100%}.field-category-tabs{position:static}}

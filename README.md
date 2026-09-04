@@ -242,3 +242,10 @@ Field Experience resources are now six separate Excel templates. The public port
 Public Study Centre choices in Undergraduate Project Work and Field Experience and Teaching Practice are now displayed alphabetically. Approved consolidated score sheets are sorted first by Study Centre name and then by Registration/Index Number within each centre. The separate Field Experience I, II, III, IV, V, Micro-Teaching, Macro-Teaching and Reflection consolidated reports use the same centre-first ordering. Centre by Centre ZIP files continue to sort students by Registration/Index Number within each centre.
 
 No new environment variable or npm dependency is required for v26.
+
+
+## v27: Configurable Field Experience claim forms and cleaner administration
+
+Field Experience and Teaching Practice now accepts an optional Claim Form by default. The Developer/System Administrator can switch the Claim Form between Optional and Compulsory under Portal Settings; server-side validation follows the saved setting. Department administration has been reorganised into four top-level tabs with additional sub-tabs for Project Work streams, Field Experience assessment categories, Dissertation stages/assignments, and Assessment/Vetting reports. The Developer portal is also tabbed. Study-centre management now supports adding one centre without replacing the full list, deleting individual centres, and adding/updating/deleting individual centre-code directory records while retaining the bulk replacement tools.
+
+No new environment variable or npm dependency is required for v27.

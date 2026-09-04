@@ -146,6 +146,7 @@ const RESOURCES_FILE = path.join(DATA_DIR, 'resources.json');
 const ADMIN_USERS_FILE = path.join(DATA_DIR, 'admin-users.json');
 const STUDY_CENTRES_FILE = path.join(DATA_DIR, 'study-centres.json');
 const STUDY_CENTRE_DIRECTORY_FILE = path.join(DATA_DIR, 'study-centre-directory.json');
+const PORTAL_SETTINGS_FILE = path.join(DATA_DIR, 'portal-settings.json');
 const DEFAULT_STUDY_CENTRE_DIRECTORY_PATH = path.join(__dirname, 'defaults', 'study-centre-directory.json');
 const RESOURCES_DIR = path.join(STORAGE_DIR, 'resources');
 const GMAIL_CLIENT_ID = String(process.env.GMAIL_CLIENT_ID || '').trim();
@@ -354,6 +355,7 @@ if (!fs.existsSync(STUDY_CENTRE_DIRECTORY_FILE)) {
   if (fs.existsSync(DEFAULT_STUDY_CENTRE_DIRECTORY_PATH)) fs.copyFileSync(DEFAULT_STUDY_CENTRE_DIRECTORY_PATH, STUDY_CENTRE_DIRECTORY_FILE);
   else fs.writeFileSync(STUDY_CENTRE_DIRECTORY_FILE, JSON.stringify({version:1,centres:[]}, null, 2), 'utf8');
 }
+if (!fs.existsSync(PORTAL_SETTINGS_FILE)) fs.writeFileSync(PORTAL_SETTINGS_FILE, JSON.stringify({version:1,fieldExperienceClaimFormRequired:false}, null, 2), 'utf8');
 
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
@@ -630,6 +632,28 @@ function normalizeResourcePortals(value) {
   const raw = Array.isArray(value) ? value : String(value || '').split(',');
   return [...new Set(raw.map(v => String(v || '').trim()).filter(v => RESOURCE_PORTALS.has(v)))];
 }
+function normalizePortalSettings(raw) {
+  return {
+    version: 1,
+    fieldExperienceClaimFormRequired: Boolean(raw?.fieldExperienceClaimFormRequired)
+  };
+}
+async function readPortalSettings() {
+  try { return normalizePortalSettings(JSON.parse(await fsp.readFile(PORTAL_SETTINGS_FILE,'utf8'))); }
+  catch { return normalizePortalSettings({}); }
+}
+let portalSettingsWriteQueue=Promise.resolve();
+function writePortalSettings(settings) {
+  portalSettingsWriteQueue=portalSettingsWriteQueue.catch(()=>{}).then(async()=>{
+    const cleaned=normalizePortalSettings(settings);
+    const temp=PORTAL_SETTINGS_FILE+'.tmp';
+    await fsp.writeFile(temp,JSON.stringify(cleaned,null,2),'utf8');
+    await fsp.rename(temp,PORTAL_SETTINGS_FILE);
+    return cleaned;
+  });
+  return portalSettingsWriteQueue;
+}
+
 function emptyStudyCentreCatalogue() {
   return Object.fromEntries(Object.keys(DEPARTMENTS).map(slug => [slug, []]));
 }
@@ -1523,7 +1547,8 @@ app.post('/api/project-work', upload.fields([
 
 // 1B. FIELD EXPERIENCE AND TEACHING PRACTICE SCORES
 app.post('/api/field-experience', upload.fields([
-  { name: 'scoresFile', maxCount: 1 }
+  { name: 'scoresFile', maxCount: 1 },
+  { name: 'claimForm', maxCount: 1 }
 ]), async (req, res) => {
   try {
     const department = validateDepartment(req);
@@ -1538,6 +1563,10 @@ app.post('/api/field-experience', upload.fields([
     const allowedCentres=await readStudyCentres(department);
     const invalidCentres=selectedCentres.filter(c=>!allowedCentres.includes(c));
     if(invalidCentres.length){await removeUploaded(req);return res.status(400).json({error:`The following study centre selection is not published for this department: ${invalidCentres.join(', ')}.`});}
+    const portalSettings=await readPortalSettings();
+    if (portalSettings.fieldExperienceClaimFormRequired && !filesFor(req,'claimForm').length) {
+      await removeUploaded(req); return res.status(400).json({ error: 'The Claim Form is currently compulsory for Field Experience and Teaching Practice submissions.' });
+    }
     if (!filesFor(req,'scoresFile').length) {
       await removeUploaded(req); return res.status(400).json({ error: `The ${assessmentSpec.label} score sheet is required.` });
     }
@@ -1559,7 +1588,7 @@ app.post('/api/field-experience', upload.fields([
         rows: scoreResult.rows
       },
       reviewStatus:'pending', reviewNote:'', reviewedAt:null, reviewedBy:'', reviewHistory:[],
-      files: { scoresFile: fileRecord(filesFor(req,'scoresFile')[0]) }
+      files: { scoresFile: fileRecord(filesFor(req,'scoresFile')[0]), claimForm: fileRecord(filesFor(req,'claimForm')[0]) }
     };
     await saveRecord(record);
     res.status(201).json({
@@ -2510,17 +2539,69 @@ app.delete('/api/developer/resources/:id', developerAuth, async (req,res)=>{
   res.json({ ok:true, deleted:id });
 });
 
+// PUBLIC FIELD EXPERIENCE / TEACHING PRACTICE SETTINGS
+app.get('/api/field-experience/settings', async(_req,res)=>{
+  const settings=await readPortalSettings();
+  res.json({claimFormRequired:settings.fieldExperienceClaimFormRequired});
+});
+
 // PUBLIC STUDY CENTRES + DEVELOPER ADMIN ACCOUNT / STUDY CENTRE MANAGEMENT
 app.get('/api/study-centres', async(req,res)=>{
   const department=String(req.query.department||'').trim();
   if(!departmentFromSlug(department)) return res.status(400).json({error:'Select a valid department before loading study centres.'});
   res.json(await readStudyCentres(department));
 });
+app.get('/api/developer/portal-settings', developerAuth, async(_req,res)=>{
+  const settings=await readPortalSettings();
+  res.json({fieldExperienceClaimFormRequired:settings.fieldExperienceClaimFormRequired});
+});
+app.patch('/api/developer/portal-settings', developerAuth, async(req,res)=>{
+  const current=await readPortalSettings();
+  if(req.body?.fieldExperienceClaimFormRequired!==undefined) current.fieldExperienceClaimFormRequired=Boolean(req.body.fieldExperienceClaimFormRequired);
+  const saved=await writePortalSettings(current);
+  res.json({ok:true,fieldExperienceClaimFormRequired:saved.fieldExperienceClaimFormRequired});
+});
+
 app.get('/api/developer/study-centres', developerAuth, async(_req,res)=>{
   const departments=await readStudyCentreCatalogue();
   const total=Object.values(departments).reduce((n,list)=>n+(Array.isArray(list)?list.length:0),0);
   res.json({departments,total});
 });
+app.post('/api/developer/study-centres/item', developerAuth, async(req,res)=>{
+  try{
+    const name=cleanHumanText(req.body?.name);
+    const departments=normalizeAdminDepartments(req.body?.departments);
+    if(!name)return res.status(400).json({error:'Enter the study-centre name.'});
+    if(!departments.length)return res.status(400).json({error:'Select at least one department for the study centre.'});
+    const catalogue=await readStudyCentreCatalogue();
+    for(const slug of departments){
+      const list=Array.isArray(catalogue[slug])?catalogue[slug]:[];
+      if(!list.some(x=>String(x).localeCompare(name,undefined,{sensitivity:'base'})===0)) list.push(name);
+      catalogue[slug]=list;
+    }
+    const saved=await writeStudyCentreCatalogue(catalogue);
+    res.status(201).json({ok:true,name,departments,catalogue:saved});
+  }catch(e){res.status(400).json({error:e.message||'Could not add the study centre.'});}
+});
+app.delete('/api/developer/study-centres/item', developerAuth, async(req,res)=>{
+  try{
+    const name=cleanHumanText(req.body?.name);
+    const departments=normalizeAdminDepartments(req.body?.departments);
+    if(!name)return res.status(400).json({error:'Specify the study centre to delete.'});
+    if(!departments.length)return res.status(400).json({error:'Specify the department containing the study centre.'});
+    const catalogue=await readStudyCentreCatalogue();
+    let removed=0;
+    for(const slug of departments){
+      const before=Array.isArray(catalogue[slug])?catalogue[slug]:[];
+      const after=before.filter(x=>String(x).localeCompare(name,undefined,{sensitivity:'base'})!==0);
+      removed+=before.length-after.length;catalogue[slug]=after;
+    }
+    if(!removed)return res.status(404).json({error:'Study centre not found in the selected department.'});
+    const saved=await writeStudyCentreCatalogue(catalogue);
+    res.json({ok:true,removed,name,departments,catalogue:saved});
+  }catch(e){res.status(400).json({error:e.message||'Could not delete the study centre.'});}
+});
+
 app.post('/api/developer/study-centres', developerAuth, upload.single('studyCentresCsv'), async(req,res)=>{
   try{
     if(!req.file) return res.status(400).json({error:'Select a CSV file containing study centres.'});
@@ -2544,6 +2625,28 @@ app.get('/api/developer/study-centre-directory.xlsx', developerAuth, async(_req,
   res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition','attachment; filename="study-centre-code-directory.xlsx"');res.send(buffer);
 });
+app.post('/api/developer/study-centre-directory/item', developerAuth, async(req,res)=>{
+  try{
+    const code=normalizeCentreCode(req.body?.code),name=cleanHumanText(req.body?.name),idText=cleanHumanText(req.body?.id);
+    if(!code||!name)return res.status(400).json({error:'Centre code and centre name are required.'});
+    const list=await readStudyCentreDirectory();
+    const existing=list.find(x=>x.code===code);
+    const id=idText&&/^\d+$/.test(idText)?Number(idText):(idText||'');
+    if(existing){existing.name=name;if(idText!=='')existing.id=id;}else list.push({id,code,name});
+    const saved=await writeStudyCentreDirectory(list);
+    res.status(existing?200:201).json({ok:true,updated:Boolean(existing),centre:saved.find(x=>x.code===code),count:saved.length});
+  }catch(e){res.status(400).json({error:e.message||'Could not add or update the study-centre code.'});}
+});
+app.delete('/api/developer/study-centre-directory/item', developerAuth, async(req,res)=>{
+  try{
+    const code=normalizeCentreCode(req.body?.code);if(!code)return res.status(400).json({error:'Specify the centre code to delete.'});
+    const list=await readStudyCentreDirectory();const after=list.filter(x=>x.code!==code);
+    if(after.length===list.length)return res.status(404).json({error:'Centre code not found.'});
+    if(!after.length)return res.status(400).json({error:'The centre-code directory cannot be empty.'});
+    const saved=await writeStudyCentreDirectory(after);res.json({ok:true,deleted:code,count:saved.length});
+  }catch(e){res.status(400).json({error:e.message||'Could not delete the centre code.'});}
+});
+
 app.post('/api/developer/study-centre-directory', developerAuth, upload.single('studyCentreDirectoryFile'), async(req,res)=>{
   try{
     if(!req.file) return res.status(400).json({error:'Select an Excel or CSV study-centre directory.'});

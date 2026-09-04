@@ -57,3 +57,5 @@ input.locked-field,select.locked-field,input:disabled.locked-field,select:disabl
 .centre-placeholder{padding:12px;color:var(--muted);font-size:13px}
 .centre-placeholder.centre-error{color:var(--bad)}
 .centre-selection-count{margin-top:7px;color:var(--navy);font-size:12px;font-weight:750}
+/* v27: Field Experience claim-form requirement indicator */
+.optional-label{display:inline-flex;margin-left:6px;padding:2px 7px;border-radius:999px;background:#eef3f7;color:#607181;font-size:11px;font-weight:800;vertical-align:middle}

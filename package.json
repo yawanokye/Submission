@@ -1,8 +1,8 @@
 {
   "name": "ucc-departmental-submission-portals",
-  "version": "26.0.0",
+  "version": "27.0.0",
   "private": true,
-  "description": "UCC departmental submission portals v26 with alphabetical study-centre display in public Project Work and Field Experience/Teaching Practice portals, centre-first consolidated score sorting, Centre by Centre score ZIPs, developer-managed centre-code directory, Gmail workflows and role-based administration",
+  "description": "UCC departmental submission portals v27 with configurable Field Experience claim forms, cleaner tabbed department/developer administration, incremental study-centre add/delete management, centre reporting, Gmail workflows and role-based administration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
