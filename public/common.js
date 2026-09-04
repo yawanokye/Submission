@@ -36,11 +36,12 @@ function formatBytes(bytes){
 function resourceEscape(value){
   return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 }
-async function loadPortalResources(portal, sectionId='resourcesSection', listId='resourceList'){
+async function loadPortalResources(portal, sectionId='resourcesSection', listId='resourceList', department=''){
   const section=document.getElementById(sectionId),list=document.getElementById(listId);
   if(!section||!list)return;
   try{
-    const res=await fetch(`/api/resources?portal=${encodeURIComponent(portal)}`);
+    const departmentPart=department?`&department=${encodeURIComponent(department)}`:'';
+    const res=await fetch(`/api/resources?portal=${encodeURIComponent(portal)}${departmentPart}`);
     const resources=await res.json().catch(()=>[]);
     if(!res.ok)throw new Error(resources.error||'Could not load resources.');
     if(!Array.isArray(resources)||!resources.length){section.hidden=true;return;}

@@ -249,3 +249,19 @@ No new environment variable or npm dependency is required for v26.
 Field Experience and Teaching Practice now accepts an optional Claim Form by default. The Developer/System Administrator can switch the Claim Form between Optional and Compulsory under Portal Settings; server-side validation follows the saved setting. Department administration has been reorganised into four top-level tabs with additional sub-tabs for Project Work streams, Field Experience assessment categories, Dissertation stages/assignments, and Assessment/Vetting reports. The Developer portal is also tabbed. Study-centre management now supports adding one centre without replacing the full list, deleting individual centres, and adding/updating/deleting individual centre-code directory records while retaining the bulk replacement tools.
 
 No new environment variable or npm dependency is required for v27.
+
+## v28: Project-work reconciliation, claim verification and payment/audit workflow
+
+Version 28 strengthens Undergraduate Project Work verification and downstream claim processing:
+
+- Duplicate approved registration/index numbers now open a reconciliation panel showing both participating score sheets, their supervisors/examiners, the duplicate student row, and the complete extracted score entries for each sheet. Administrators may correct the affected registration/index values and re-approve the participating sheets in one action. Corrected values become the canonical approved rows used by consolidated outputs while the original uploaded workbook and a correction audit history are retained.
+- Project Work claim forms can be reviewed directly in an inline frame. PDF/images display inline, DOCX/DOC content is rendered for review, and spreadsheet/CSV claim forms are shown as a table.
+- **Total Number of Groups Submitting** accepts forms such as `8`, `eight`, `eight(8)` and `eight (8)`. New Project Work submissions are accepted only when the interpreted claim count equals both the number of distinct `GROUP NO.` values in the score sheet and the number of completed project-work files attached. Existing records display the same reconciliation check in administration.
+- Undergraduate Project Work score sheets must contain exactly one Excel worksheet. Multi-sheet Project Work workbooks are rejected before submission.
+- Distance and Non-Residential Project Work now each provide an **Approved Register** containing approved submissions only.
+- A separate **Payroll Portal** processes approved Project Work claims against the approved register and claim form, with Pending, Verified, Approved for Payment, Paid and Queried/Hold states plus a processing history.
+- A separate **Auditor Portal** provides read-only verification of the same approved claims, claim forms, group reconciliation and payroll status.
+- Developer-created administrator accounts can be granted Payroll Portal and Auditor Portal access independently by department and role.
+- Published resources can now be targeted by both submission portal and department. A resource may therefore be shown only to selected departments on Undergraduate Project Work, Field Experience and Teaching Practice, Dissertation Submission, and/or Assessment Report Submission. Older resources without a department restriction remain globally available for backward compatibility.
+
+No new Render environment variable or npm dependency is required for v28.

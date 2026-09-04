@@ -191,7 +191,7 @@ const DEFAULT_STUDY_CENTRES = [
   'Bompeh','GHANASS','Lashibi','Sokode','Riverview Kasoa','Odorgonno','KTI','Tamale','Zenith',
   'STU Sunyani','Fafraha','Lutheran Madina','Fiaseman','UCC','Enchi','Bolga','Wa','Chemu'
 ];
-const ADMIN_SECTIONS = new Set(['project-work','field-experience','dissertation','assessor']);
+const ADMIN_SECTIONS = new Set(['project-work','field-experience','dissertation','assessor','payroll','auditor']);
 const ADMIN_ROLES = new Set(['viewer','officer','administrator']);
 const ROLE_RANK = { viewer:1, officer:2, administrator:3 };
 
@@ -471,7 +471,7 @@ function adminLoginLinks(departments, baseUrl) {
 }
 async function sendAdminPasswordSetupEmail({to,name,username,role,departments,sections,setupUrl,expiresAt,baseUrl,isReset=false}) {
   const deptNames=(departments || []).map(slug=>departmentFromSlug(slug)?.name || slug);
-  const sectionNames=(sections || []).map(section=>section==='project-work'?'Undergraduate Project Work':section==='field-experience'?'Field Experience and Teaching Practice':section==='dissertation'?'Dissertation Submission':'Assessment/Vetting Reports');
+  const sectionNames=(sections || []).map(section=>section==='project-work'?'Undergraduate Project Work':section==='field-experience'?'Field Experience and Teaching Practice':section==='dissertation'?'Dissertation Submission':section==='assessor'?'Assessment/Vetting Reports':section==='payroll'?'Payroll Portal':section==='auditor'?"Auditor's Portal":section);
   const expiryText=new Date(expiresAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'})+' UTC';
   const portalRows=adminLoginLinks(departments,baseUrl).map(x=>`<li><a href="${htmlEscape(x.url)}">${htmlEscape(x.name)} Administration Portal</a></li>`).join('');
   const subject=isReset?'UCC Submission Portal password reset':'Your UCC Submission Portal administrator account';
@@ -483,7 +483,7 @@ async function verifyDepartmentCredentials(slug,user,pass) {
   const dept=departmentFromSlug(slug); if(!dept) return null;
   if(safeEqual(user,dept.user)&&safeEqual(pass,dept.password)) return {
     id:`department-master:${slug}`,name:`${dept.name} Administrator`,username:user,
-    role:'administrator',sections:['project-work','field-experience','dissertation','assessor'],departments:[slug],master:true
+    role:'administrator',sections:['project-work','field-experience','dissertation','assessor','payroll','auditor'],departments:[slug],master:true
   };
   const accounts=await readAdminUsers();
   const account=accounts.find(a=>a.active!==false&&String(a.username||'').toLowerCase()===String(user||'').toLowerCase());
@@ -504,7 +504,7 @@ async function departmentAuth(req, res, next) {
       if(identity){req.adminDepartment=slug;req.adminDepartmentName=dept.name;req.adminIdentity=identity;return next();}
     }
     const wantsHtml=req.method==='GET' && !req.path.startsWith('/api/') && (String(req.headers.accept||'').includes('text/html')||!req.headers.accept);
-    if(wantsHtml) return res.redirect(`/admin-login.html?department=${encodeURIComponent(slug)}`);
+    if(wantsHtml){const next=String(req.originalUrl||'');return res.redirect(`/admin-login.html?department=${encodeURIComponent(slug)}&next=${encodeURIComponent(next)}`);}
     return res.status(401).json({error:'Department administrator authentication required.'});
   } catch(e){console.error('Department authentication failed:',e);return res.status(401).json({error:'Invalid department administrator credentials.'});}
 }
@@ -816,6 +816,7 @@ function publicResource(resource) {
     title: resource.title,
     description: resource.description || '',
     portals: resource.portals || [],
+    departments: Array.isArray(resource.departments) ? resource.departments : [],
     originalName: resource.originalName || 'Download resource',
     size: Number(resource.size || 0),
     uploadedAt: resource.uploadedAt || null,
@@ -889,6 +890,37 @@ async function extractDissertationText(file) {
   }
   throw new Error('Dissertation title validation supports PDF, DOC and DOCX files only.');
 }
+
+async function sendInlineClaimPreview(res, item) {
+  if(!item?.storedName) return res.status(404).send('Claim form is unavailable.');
+  const fp=path.join(FILES_DIR,path.basename(item.storedName));
+  if(!fs.existsSync(fp)) return res.status(404).send('Claim form file is unavailable.');
+  const ext=path.extname(item.originalName||fp).toLowerCase();
+  if(ext==='.pdf'){
+    res.setHeader('Content-Type','application/pdf');
+    res.setHeader('Content-Disposition',`inline; filename="${safeBaseName(item.originalName||'claim-form.pdf')}"`);
+    return fs.createReadStream(fp).pipe(res);
+  }
+  if(['.png','.jpg','.jpeg','.gif','.webp'].includes(ext)){
+    res.setHeader('Content-Type',item.mimeType||'image/jpeg');
+    res.setHeader('Content-Disposition',`inline; filename="${safeBaseName(item.originalName||'claim-form')}"`);
+    return fs.createReadStream(fp).pipe(res);
+  }
+  let body='';
+  try{
+    if(ext==='.docx'){
+      const result=await mammoth.convertToHtml({path:fp});body=String(result.value||'');
+    }else if(ext==='.doc'){
+      const extractor=new WordExtractor();const result=await extractor.extract(fp);body=`<pre>${htmlEscape(result.getBody?result.getBody():'')}</pre>`;
+    }else if(['.xlsx','.xls','.csv'].includes(ext)){
+      const wb=XLSX.readFile(fp,{raw:false});const first=wb.SheetNames[0];body=first?XLSX.utils.sheet_to_html(wb.Sheets[first]):'<p>No worksheet available.</p>';
+    }else{
+      body=`<p>This file type cannot be rendered inline. <a href="#" onclick="history.back();return false">Return</a> and use Download.</p>`;
+    }
+  }catch(e){console.error('Claim preview conversion failed:',e);body=`<p>The claim form could not be rendered inline. Use the Download action to inspect the original file.</p>`;}
+  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Claim Form Preview</title><style>body{font-family:Arial,sans-serif;margin:0;padding:22px;color:#172431;background:#fff}table{border-collapse:collapse;max-width:100%}td,th{border:1px solid #cbd5df;padding:6px 8px}img{max-width:100%;height:auto}pre{white-space:pre-wrap;font-family:Arial,sans-serif;line-height:1.5}.preview-head{position:sticky;top:0;background:#fff;border-bottom:1px solid #dce3ea;padding:0 0 12px;margin-bottom:18px}.preview-head strong{color:#082b4c}</style></head><body><div class="preview-head"><strong>Claim Form Preview</strong><br><small>${htmlEscape(item.originalName||'Claim form')}</small></div>${body}</body></html>`);
+}
+
 async function uploadedFileContainsReviewerIdentity(file, reviewerName='', reviewerEmail='') {
   if(!file) return false;
   const ext=path.extname(file.originalname||file.path).toLowerCase();
@@ -1256,6 +1288,40 @@ function findHeader(matrix) {
 }
 
 function cellText(v) { return v === undefined || v === null ? '' : String(v).trim(); }
+function parseFlexiblePositiveCount(value) {
+  const raw=cleanHumanText(value).toLowerCase();
+  if(!raw) return null;
+  const digits=raw.match(/\b(\d{1,4})\b/);
+  if(digits){const n=Number(digits[1]);return Number.isInteger(n)&&n>0?n:null;}
+  const small={zero:0,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12,thirteen:13,fourteen:14,fifteen:15,sixteen:16,seventeen:17,eighteen:18,nineteen:19};
+  const tens={twenty:20,thirty:30,forty:40,fifty:50,sixty:60,seventy:70,eighty:80,ninety:90};
+  const words=raw.replace(/[()\-]/g,' ').split(/\s+/).filter(Boolean);
+  let total=0,found=false;
+  for(const word of words){
+    if(Object.prototype.hasOwnProperty.call(small,word)){total+=small[word];found=true;continue;}
+    if(Object.prototype.hasOwnProperty.call(tens,word)){total+=tens[word];found=true;continue;}
+    if(word==='hundred'&&found){total=Math.max(1,total)*100;continue;}
+  }
+  return found&&total>0?total:null;
+}
+function normalizeProjectGroupNumber(value){return cleanHumanText(value).toUpperCase().replace(/\s+/g,' ');}
+function projectUniqueGroupNumbersFromRows(rows){
+  const seen=new Map();
+  for(const row of rows||[]){const raw=cleanHumanText(row?.groupNo);const key=normalizeProjectGroupNumber(raw);if(key&&!seen.has(key))seen.set(key,raw);}
+  return [...seen.values()];
+}
+function projectGroupValidation(record){
+  const rows=validScoreRows(record);
+  const groups=projectUniqueGroupNumbersFromRows(rows);
+  const claimed=parseFlexiblePositiveCount(record?.groupCount);
+  const works=Array.isArray(record?.files?.completedWork)?record.files.completedWork.length:(record?.files?.completedWork?1:0);
+  const issues=[];
+  if(!claimed) issues.push('The Total Number of Groups Submitting could not be interpreted as a positive number.');
+  if(claimed&&groups.length!==claimed) issues.push(`Claimed groups (${claimed}) differ from the ${groups.length} distinct group number${groups.length===1?'':'s'} in the score sheet.`);
+  if(claimed&&works!==claimed) issues.push(`Claimed groups (${claimed}) differ from the ${works} completed project work file${works===1?'':'s'} attached.`);
+  if(groups.length&&works!==groups.length) issues.push(`The score sheet contains ${groups.length} distinct group${groups.length===1?'':'s'}, but ${works} completed project work file${works===1?'':'s'} ${works===1?'was':'were'} attached.`);
+  return {claimedGroupCount:claimed,scoreSheetGroupCount:groups.length,groupNumbers:groups,completedProjectWorkCount:works,valid:issues.length===0,issues};
+}
 function numericSn(v) { return /^\d+(?:\.0+)?$/.test(String(v || '').trim()); }
 
 // Project/Field score templates may contain signature metadata underneath the student table.
@@ -1283,6 +1349,7 @@ function isStoredScoreFooterRow(row) {
 function parseScoreWorkbook(filePath) {
   const workbook = XLSX.readFile(filePath, { cellDates: false });
   if (!workbook.SheetNames.length) throw new Error('The workbook contains no worksheet.');
+  if (workbook.SheetNames.length !== 1) throw new Error('Undergraduate Project Work score sheets must contain one Excel worksheet only. Remove additional worksheets and upload the single score sheet again.');
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
   const header = findHeader(matrix);
@@ -1526,14 +1593,24 @@ app.post('/api/project-work', upload.fields([
     let scoreResult;
     try { scoreResult = parseScoreWorkbook(filesFor(req,'scoresFile')[0].path); }
     catch (e) { await removeUploaded(req); return res.status(400).json({ error: e.message }); }
+    const claimedGroupCount=parseFlexiblePositiveCount(text(req,'groupCount'));
+    const groupNumbers=projectUniqueGroupNumbersFromRows(scoreResult.rows);
+    const completedProjectWorkCount=filesFor(req,'completedWork').length;
+    if(!claimedGroupCount){await removeUploaded(req);return res.status(400).json({error:'Enter Total Number of Groups Submitting as a number or words, for example 8, eight, eight (8), or eight(8).'});}
+    if(groupNumbers.length!==claimedGroupCount || completedProjectWorkCount!==claimedGroupCount){
+      const parts=[`Claim form/portal total: ${claimedGroupCount}`,`Distinct groups in score sheet: ${groupNumbers.length}`,`Completed project works attached: ${completedProjectWorkCount}`];
+      await removeUploaded(req);
+      return res.status(400).json({error:`The number being claimed cannot be different from the completed supervised project works. ${parts.join(' · ')}. Correct the Total Number of Groups Submitting, GROUP NO. entries, or project-work attachments before submitting.`});
+    }
     const record = {
       id: crypto.randomUUID(), portalType: 'project-work', department, departmentName: DEPARTMENTS[department].name,
       reference: makeReference('PWORK'), submittedAt: new Date().toISOString(),
       title:text(req,'title'), firstName:text(req,'firstName'), lastName:text(req,'lastName'),
       fullName:buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'lastName')),
-      phone: text(req,'phone'), email: text(req,'email'), groupCount: text(req,'groupCount'), studyCentres:selectedCentres, studyCentre:selectedCentres.join(' | '),
+      phone: text(req,'phone'), email: text(req,'email'), groupCount: text(req,'groupCount'), claimedGroupCount, studyCentres:selectedCentres, studyCentre:selectedCentres.join(' | '),
       projectStream: selectedCentres.length===1 && selectedCentres[0] === 'Non-Residential' ? 'non-residential' : 'distance',
       scoreSheet: { worksheet: scoreResult.sheetName, headerRow: scoreResult.headerRow, rowCount: scoreResult.rows.length, rows: scoreResult.rows },
+      groupValidation:{claimedGroupCount,scoreSheetGroupCount:groupNumbers.length,groupNumbers,completedProjectWorkCount,valid:true,validatedAt:new Date().toISOString()},
       reviewStatus:'pending', reviewNote:'', reviewedAt:null, reviewedBy:'', reviewHistory:[],
       files: {
         claimForm: fileRecord(filesFor(req,'claimForm')[0]), reportFile: fileRecord(filesFor(req,'reportFile')[0]),
@@ -1958,14 +2035,45 @@ function projectSubmissionWarnings(record, records) {
   if(duplicateRegs.length){
     const unique=[...new Map(duplicateRegs.map(x=>[normalizeIndexNumber(x.registrationNo),x])).values()];
     const sample=unique.slice(0,5).map(x=>x.registrationNo).join(', ');
-    warnings.push({code:'duplicate-approved-registration',message:`${unique.length} registration number${unique.length===1?'':'s'} already appear in other approved score sheet${unique.length===1?'':'s'}${sample?`: ${sample}${unique.length>5?'…':''}`:''}.`});
+    warnings.push({code:'duplicate-approved-registration',message:`Potential duplicate student detected: ${unique.length} registration number${unique.length===1?'':'s'} already appear in other approved score sheet${unique.length===1?'':'s'}${sample?`: ${sample}${unique.length>5?'…':''}`:''}. Open Duplicate Reconciliation to compare the two score sheets and supervisors before approval.`});
   }
+  const groupValidation=projectGroupValidation(record);
+  if(!groupValidation.valid) warnings.push({code:'group-count-mismatch',message:`Group-count verification requires attention. ${groupValidation.issues.join(' ')}`});
   const rowCount=validScoreRows(record).length;
   if(rowCount>PROJECT_HIGH_ROW_WARNING) warnings.push({code:'high-row-count',message:`This submission contains ${rowCount} score rows, above the current review-warning threshold of ${PROJECT_HIGH_ROW_WARNING}.`});
   const accessWarning=projectAccessWarning(record);
   if(accessWarning) warnings.push(accessWarning);
   return warnings;
 }
+
+function projectDuplicateReconciliation(record, records) {
+  if(!record) return [];
+  const stream=projectStream(record);
+  const projects=projectRecords(records||[]).filter(r=>projectStream(r)===stream);
+  const others=projects.filter(r=>r.id!==record.id&&projectReviewStatus(r)==='approved');
+  const byRegistration=new Map();
+  for(const other of others){
+    for(const row of validScoreRowsWithMeta(other).filter(x=>x.included!==false)){
+      const key=normalizeIndexNumber(row.registrationNo);if(!key)continue;
+      if(!byRegistration.has(key))byRegistration.set(key,[]);
+      byRegistration.get(key).push({record:other,row});
+    }
+  }
+  const groups=[];
+  for(const currentRow of validScoreRowsWithMeta(record)){
+    const key=normalizeIndexNumber(currentRow.registrationNo);if(!key||!byRegistration.has(key))continue;
+    const occurrences=[{record,row:currentRow},...byRegistration.get(key)];
+    groups.push({
+      registrationNo:currentRow.registrationNo,
+      normalizedRegistrationNo:key,
+      occurrences:occurrences.map(({record:r,row})=>({
+        submissionId:r.id,reference:r.reference||r.id,supervisorName:r.fullName||r.name||'',supervisorEmail:r.email||'',studyCentres:projectStudyCentres(r),status:projectReviewLabel(projectReviewStatus(r)),sourceIndex:row.sourceIndex,originalSn:row.originalSn||'',studentName:row.name||'',registrationNo:row.registrationNo||'',groupNo:row.groupNo||'',totalScore:row.totalScore||'',included:row.included!==false,scoreRows:validScoreRowsWithMeta(r).map(x=>({sourceIndex:x.sourceIndex,originalSn:x.originalSn||'',name:x.name||'',registrationNo:x.registrationNo||'',groupNo:x.groupNo||'',totalScore:x.totalScore||'',included:x.included!==false}))
+      }))
+    });
+  }
+  return [...new Map(groups.map(g=>[g.normalizedRegistrationNo,g])).values()];
+}
+
 function fieldExperienceSubmissionWarnings(record, records) {
   if(!record) return [];
   const warnings=[];
@@ -2160,6 +2268,19 @@ function projectRegisterAoA(records, stream='distance') {
   const h=['S/N','REFERENCE','SUBMITTED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE(S)','STUDENT STREAM','NO. OF GROUPS / CANDIDATES','SCORE ROWS EXTRACTED','ROWS INCLUDED FOR CONSOLIDATION','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
   const body=projectRecords(records).filter(r=>projectStream(r)===stream).map((r,i)=>[i+1,r.reference,r.submittedAt,r.fullName,r.phone,r.email,studyCentreDisplay(r),stream==='non-residential'?'Non-Residential (Regular)':'Distance',r.groupCount,validScoreRows(r).length,approvedProjectScoreRows(r).length,projectReviewLabel(projectReviewStatus(r)),r.reviewedAt||'',r.reviewedBy||'',r.reviewNote||'']); return [h,...body];
 }
+
+function approvedProjectRegisterRecords(records, stream='all') {
+  return projectRecords(records).filter(r=>projectReviewStatus(r)==='approved'&&(stream==='all'||projectStream(r)===stream)).slice().sort((a,b)=>String(a.reviewedAt||a.submittedAt||'').localeCompare(String(b.reviewedAt||b.submittedAt||''))||String(a.reference||'').localeCompare(String(b.reference||'')));
+}
+function projectApprovedRegisterAoA(records, stream='all') {
+  const h=['S/N','REFERENCE','APPROVED AT','EXAMINER / SUPERVISOR','PHONE','EMAIL','STUDY CENTRE(S)','STUDENT STREAM','TOTAL NUMBER OF GROUPS SUBMITTING','INTERPRETED GROUP COUNT','DISTINCT GROUPS IN SCORE SHEET','COMPLETED PROJECT WORKS ATTACHED','SCORE ROWS APPROVED','CLAIM FORM','GROUP VERIFICATION','APPROVED BY'];
+  const body=approvedProjectRegisterRecords(records,stream).map((r,i)=>{const gv=projectGroupValidation(r);const claim=Array.isArray(r.files?.claimForm)?r.files.claimForm[0]:r.files?.claimForm;return [i+1,r.reference,r.reviewedAt||'',r.fullName,r.phone,r.email,studyCentreDisplay(r),projectStream(r)==='non-residential'?'Non-Residential (Regular)':'Distance',r.groupCount||'',gv.claimedGroupCount||'',gv.scoreSheetGroupCount,gv.completedProjectWorkCount,approvedProjectScoreRows(r).length,claim?.originalName||'',gv.valid?'MATCH':'REQUIRES RECONCILIATION',r.reviewedBy||''];});
+  return [h,...body];
+}
+function payrollStatusLabel(record){return {pending:'Pending Payroll Verification',verified:'Verified','approved-for-payment':'Approved for Payment',paid:'Paid',queried:'Queried / On Hold'}[String(record?.payroll?.status||'pending')]||'Pending Payroll Verification';}
+function payrollClaimRow(record){const gv=projectGroupValidation(record);const claim=Array.isArray(record.files?.claimForm)?record.files.claimForm[0]:record.files?.claimForm;return {id:record.id,reference:record.reference,approvedAt:record.reviewedAt||'',approvedBy:record.reviewedBy||'',supervisorName:record.fullName||'',email:record.email||'',phone:record.phone||'',studyCentres:studyCentreDisplay(record),studentStream:projectStream(record)==='non-residential'?'Non-Residential (Regular)':'Distance',claimedGroupsRaw:record.groupCount||'',claimedGroupCount:gv.claimedGroupCount,scoreSheetGroupCount:gv.scoreSheetGroupCount,groupNumbers:gv.groupNumbers,completedProjectWorkCount:gv.completedProjectWorkCount,groupValidation:gv,approvedScoreRows:approvedProjectScoreRows(record).length,claimFormName:claim?.originalName||'',claimFormPresent:Boolean(claim),claimPreviewUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/claim-preview`,payrollStatus:String(record?.payroll?.status||'pending'),payrollStatusLabel:payrollStatusLabel(record),payrollNote:record?.payroll?.note||'',payrollUpdatedAt:record?.payroll?.updatedAt||null,payrollUpdatedBy:record?.payroll?.updatedBy||''};}
+function payrollRegisterAoA(records){const h=['S/N','REFERENCE','APPROVED AT','SUPERVISOR / EXAMINER','EMAIL','PHONE','STUDY CENTRE(S)','STREAM','CLAIMED GROUPS','GROUPS IN SCORE SHEET','PROJECT WORKS ATTACHED','GROUP CHECK','CLAIM FORM','PAYROLL STATUS','PAYROLL NOTE','PAYROLL UPDATED AT','PAYROLL UPDATED BY'];const body=approvedProjectRegisterRecords(records,'all').map((r,i)=>{const x=payrollClaimRow(r);return [i+1,x.reference,x.approvedAt,x.supervisorName,x.email,x.phone,x.studyCentres,x.studentStream,x.claimedGroupCount||x.claimedGroupsRaw,x.scoreSheetGroupCount,x.completedProjectWorkCount,x.groupValidation.valid?'MATCH':'MISMATCH',x.claimFormName,x.payrollStatusLabel,x.payrollNote,x.payrollUpdatedAt||'',x.payrollUpdatedBy||''];});return [h,...body];}
+
 function fieldExperienceRegisterAoA(records) {
   const h=['S/N','REFERENCE','SUBMITTED AT','ASSESSMENT TYPE','MENTOR / SUPERVISOR / EXAMINER','PHONE','EMAIL','STUDY CENTRE(S)','NO. OF STUDENTS / CANDIDATES','SCORE ROWS EXTRACTED','REVIEW STATUS','REVIEWED AT','REVIEWED BY','REVIEW NOTE'];
   const body=fieldExperienceRecords(records)
@@ -2210,6 +2331,9 @@ function workbookBuffer(kind,records) {
     } else addSheet(wb,'Clean Scores',individualScoreSheetAoA(record),[10,34,24,16,16]);
   }
   if(kind==='project-register') addSheet(wb,'Distance Project Register',projectRegisterAoA(records,'distance'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
+  if(kind==='project-approved-register') addSheet(wb,'Approved Distance Register',projectApprovedRegisterAoA(records,'distance'),[8,22,24,34,18,30,34,24,26,22,24,26,22,32,28,28]);
+  if(kind==='non-residential-project-approved-register') addSheet(wb,'Approved Non-Residential',projectApprovedRegisterAoA(records,'non-residential'),[8,22,24,34,18,30,34,24,26,22,24,26,22,32,28,28]);
+  if(kind==='payroll-register') addSheet(wb,'Payroll Register',payrollRegisterAoA(records),[8,22,24,34,30,18,34,24,18,22,22,20,32,28,38,24,28]);
   if(kind==='non-residential-project-register') addSheet(wb,'Non-Residential Register',projectRegisterAoA(records,'non-residential'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
   if(kind==='project-master') {
     addSheet(wb,'Master Distance Project Scores',scoreSheetAoA(records),[10,48,34,24,16,16]);
@@ -2475,10 +2599,17 @@ app.get('/secure/feedback/:token/download', async(req,res)=>{
 // PUBLIC RESOURCES + DEVELOPER RESOURCE ADMINISTRATION
 app.get('/api/resources', async (req, res) => {
   const portal = String(req.query.portal || '').trim();
+  const department = String(req.query.department || '').trim();
   if (portal && !RESOURCE_PORTALS.has(portal)) return res.status(400).json({ error:'Unknown submission portal.' });
+  if (department && !departmentFromSlug(department)) return res.status(400).json({ error:'Unknown department.' });
   const uploaded = await readResources();
   const all = [...BUILTIN_RESOURCES, ...uploaded];
-  const filtered = portal ? all.filter(r => (r.portals || []).includes(portal)) : all;
+  const filtered = all.filter(r => {
+    if (portal && !(r.portals || []).includes(portal)) return false;
+    const departments=Array.isArray(r.departments)?r.departments:[];
+    if (department) return !departments.length || departments.includes(department);
+    return departments.length===0;
+  });
   res.json(filtered.map(publicResource));
 });
 
@@ -2509,10 +2640,12 @@ app.post('/api/developer/resources', developerAuth, resourceUpload.single('resou
     const title = cleanHumanText(req.body?.title);
     const description = String(req.body?.description || '').trim().slice(0, 1000);
     const portals = normalizeResourcePortals(req.body?.portals);
+    const departments = normalizeAdminDepartments(req.body?.departments);
     if (!title) { await fsp.unlink(req.file.path).catch(()=>{}); return res.status(400).json({ error:'Resource title is required.' }); }
     if (!portals.length) { await fsp.unlink(req.file.path).catch(()=>{}); return res.status(400).json({ error:'Select at least one submission portal where the resource should appear.' }); }
+    if (!departments.length) { await fsp.unlink(req.file.path).catch(()=>{}); return res.status(400).json({ error:'Select at least one department where the resource should appear.' }); }
     const record = {
-      id: crypto.randomUUID(), title: title.slice(0,180), description, portals,
+      id: crypto.randomUUID(), title: title.slice(0,180), description, portals, departments,
       originalName: req.file.originalname, storedName: path.basename(req.file.path), mimeType:req.file.mimetype,
       size:req.file.size, uploadedAt:new Date().toISOString(), builtIn:false
     };
@@ -2934,6 +3067,11 @@ app.get('/admin',(_req,res)=>res.sendFile(path.join(__dirname,'admin','chooser.h
 app.get('/admin/admin.css',(_req,res)=>res.sendFile(path.join(__dirname,'admin','admin.css')));
 app.get('/admin/admin.js',(_req,res)=>res.sendFile(path.join(__dirname,'admin','admin.js')));
 app.get('/admin/:department',departmentAuth,(req,res)=>res.sendFile(path.join(__dirname,'admin','index.html')));
+app.get('/operations/portal.css',(_req,res)=>res.sendFile(path.join(__dirname,'operations','portal.css')));
+app.get('/operations/payroll.js',(_req,res)=>res.sendFile(path.join(__dirname,'operations','payroll.js')));
+app.get('/operations/auditor.js',(_req,res)=>res.sendFile(path.join(__dirname,'operations','auditor.js')));
+app.get('/payroll/:department',departmentAuth,(req,res)=>adminCan(req,'payroll','viewer')?res.sendFile(path.join(__dirname,'operations','payroll.html')):res.status(403).send('Your account does not have access to the Payroll Portal.'));
+app.get('/auditor/:department',departmentAuth,(req,res)=>adminCan(req,'auditor','viewer')?res.sendFile(path.join(__dirname,'operations','auditor.html')):res.status(403).send("Your account does not have access to the Auditor's Portal."));
 
 app.get('/api/admin/:department/info', departmentAuth, async(req,res)=>{
   res.json({ department:req.adminDepartment, departmentName:req.adminDepartmentName, admin:{name:req.adminIdentity?.name||'',username:req.adminIdentity?.username||'',role:req.adminIdentity?.role||'viewer',sections:req.adminIdentity?.sections||[],master:Boolean(req.adminIdentity?.master)} });
@@ -2982,6 +3120,61 @@ app.post('/api/admin/:department/project-work/:id/review', departmentAuth, requi
   }
   const departmentRecords=recordsForDepartment(all,req.adminDepartment);
   res.json({ok:true,status,label:projectReviewLabel(status),reviewedAt:now,reviewedBy:reviewer,includedRows:approvedProjectScoreRows(target).length,totalRows:validScoreRows(target).length,warnings:projectSubmissionWarnings(target,departmentRecords),emailSent,emailError});
+});
+
+
+app.post('/api/admin/:department/project-work/:id/reconcile-duplicates', departmentAuth, requireAdminAccess('project-work','administrator'), async(req,res)=>{
+  try{
+    const edits=Array.isArray(req.body?.edits)?req.body.edits:[];
+    const requestedIds=Array.isArray(req.body?.affectedSubmissionIds)?req.body.affectedSubmissionIds.map(String):[];
+    if(!edits.length)return res.status(400).json({error:'No registration/index-number corrections were submitted.'});
+    const all=await readDb();
+    const current=all.find(r=>r.id===req.params.id&&r.department===req.adminDepartment&&(r.portalType==='project-work'||!r.portalType));
+    if(!current)return res.status(404).json({error:'Project work submission not found in this department.'});
+    const affected=new Set([current.id,...requestedIds]);
+    const reviewer=req.adminIdentity?.name||req.adminIdentity?.username||'Department administrator';
+    const now=new Date().toISOString();
+    const audit=[];
+    for(const edit of edits){
+      const submissionId=String(edit?.submissionId||'');const sourceIndex=Number(edit?.sourceIndex);const registrationNo=cleanHumanText(edit?.registrationNo).slice(0,120);
+      if(!submissionId||!Number.isInteger(sourceIndex)||!registrationNo)return res.status(400).json({error:'Each correction must identify a submission row and contain the corrected registration/index number.'});
+      const record=all.find(r=>r.id===submissionId&&r.department===req.adminDepartment&&(r.portalType==='project-work'||!r.portalType));
+      if(!record)return res.status(400).json({error:'One of the selected duplicate score sheets is no longer available in this department.'});
+      const row=record?.scoreSheet?.rows?.[sourceIndex];
+      if(!row||isStoredScoreFooterRow(row))return res.status(400).json({error:`A selected score row could not be found in ${record.reference||record.id}. Refresh the record and try again.`});
+      const oldRegistrationNo=cellText(row.registrationNo);
+      if(oldRegistrationNo!==registrationNo){
+        row.registrationNo=registrationNo;
+        record.registrationCorrectionHistory=Array.isArray(record.registrationCorrectionHistory)?record.registrationCorrectionHistory:[];
+        const history={sourceIndex,oldRegistrationNo,newRegistrationNo:registrationNo,correctedAt:now,correctedBy:reviewer,reason:'Duplicate registration/index-number reconciliation'};
+        record.registrationCorrectionHistory.push(history);if(record.registrationCorrectionHistory.length>100)record.registrationCorrectionHistory=record.registrationCorrectionHistory.slice(-100);
+        audit.push({submissionId,reference:record.reference,sourceIndex,oldRegistrationNo,newRegistrationNo:registrationNo});
+      }
+      affected.add(submissionId);
+    }
+    // Re-approve every score sheet participating in the reconciliation. Consolidated outputs
+    // are generated dynamically, so corrected registration numbers replace the old approved rows.
+    for(const id of affected){
+      const record=all.find(r=>r.id===id&&r.department===req.adminDepartment&&(r.portalType==='project-work'||!r.portalType));
+      if(!record)continue;
+      record.reviewStatus='approved';record.reviewedAt=now;record.reviewedBy=reviewer;
+      record.reviewNote='Re-approved after duplicate registration/index-number reconciliation.';
+      record.reviewHistory=Array.isArray(record.reviewHistory)?record.reviewHistory:[];
+      record.reviewHistory.push({status:'approved',note:record.reviewNote,reviewedAt:now,reviewedBy:reviewer,action:'duplicate-reconciliation'});
+      if(record.reviewHistory.length>50)record.reviewHistory=record.reviewHistory.slice(-50);
+    }
+    // Do not commit a reconciliation that still leaves an approved duplicate in the affected score sheets.
+    const remaining=[];
+    const departmentRecords=recordsForDepartment(all,req.adminDepartment);
+    for(const id of affected){
+      const record=departmentRecords.find(r=>r.id===id);if(!record)continue;
+      const duplicateWarning=projectSubmissionWarnings(record,departmentRecords).find(w=>w.code==='duplicate-approved-registration');
+      if(duplicateWarning)remaining.push(`${record.reference||id}: ${duplicateWarning.message}`);
+    }
+    if(remaining.length)return res.status(400).json({error:`The correction still leaves duplicate approved registration/index numbers. ${remaining.slice(0,3).join(' ')}`});
+    await writeDb(all);
+    res.json({ok:true,correctedRows:audit.length,reapprovedSubmissions:affected.size,reviewedAt:now,reviewedBy:reviewer});
+  }catch(e){console.error('Duplicate reconciliation failed:',e);res.status(500).json({error:'The duplicate score-sheet reconciliation could not be completed.'});}
 });
 
 app.post('/api/admin/:department/project-work/:id/resend-return-email', departmentAuth, requireAdminAccess('project-work','administrator'), async(req,res)=>{
@@ -3070,7 +3263,7 @@ app.get('/api/admin/:department/submissions/:id', departmentAuth, async(req,res)
   if(!r)return res.status(404).json({error:'Submission not found in this department.'});
   if(!requireRecordAccess(req,res,r,'viewer'))return;
   if((r.portalType||'project-work')==='project-work'){
-    return res.json({...r,reviewScoreRows:validScoreRowsWithMeta(r).map((row,i)=>({reviewNo:i+1,sourceIndex:row.sourceIndex,originalSn:row.originalSn,name:row.name,registrationNo:row.registrationNo,groupNo:row.groupNo,totalScore:row.totalScore,included:row.included}))});
+    return res.json({...r,reviewScoreRows:validScoreRowsWithMeta(r).map((row,i)=>({reviewNo:i+1,sourceIndex:row.sourceIndex,originalSn:row.originalSn,name:row.name,registrationNo:row.registrationNo,groupNo:row.groupNo,totalScore:row.totalScore,included:row.included})),groupValidation:projectGroupValidation(r),duplicateReconciliation:projectDuplicateReconciliation(r,records)});
   }
   if(r.portalType==='field-experience'){
     return res.json({...r,assessmentLabel:fieldAssessmentLabel(r),reviewFieldScoreRows:fieldValidScoreRows(r).map((row,i)=>({reviewNo:i+1,originalSn:row.originalSn,registrationNo:row.registrationNo,name:row.name,scoreHeaders:row.scoreHeaders,scoreValues:row.scoreValues}))});
@@ -3142,6 +3335,18 @@ app.get('/api/admin/:department/submissions/:id/files/:kind/:index?', department
   if(!fs.existsSync(fp))return res.status(404).send('Stored file is unavailable.');
   res.download(fp,item.originalName);
 });
+
+app.get('/api/admin/:department/submissions/:id/claim-preview', departmentAuth, async(req,res)=>{
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);const r=records.find(x=>x.id===req.params.id);
+  if(!r)return res.status(404).send('Submission not found in this department.');
+  const allowed=adminCan(req,'project-work','viewer')||adminCan(req,'field-experience','viewer')||adminCan(req,'payroll','viewer')||adminCan(req,'auditor','viewer');
+  if(!allowed)return res.status(403).send('You do not have access to claim-form verification.');
+  if(!['project-work','field-experience'].includes(r.portalType||'project-work'))return res.status(400).send('This submission does not contain a supported claim form.');
+  const item=Array.isArray(r.files?.claimForm)?r.files.claimForm[0]:r.files?.claimForm;
+  if(!item)return res.status(404).send('No claim form was submitted with this record.');
+  return sendInlineClaimPreview(res,item);
+});
+
 app.get('/api/admin/:department/submissions/:id/scores.xlsx', departmentAuth, async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   const r=records.find(x=>x.id===req.params.id);
@@ -3159,6 +3364,10 @@ app.get('/api/admin/:department/export/project-register.xlsx', departmentAuth, r
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   sendWorkbook(res,'project-register',records,`${req.adminDepartment}-distance-project-work-register.xlsx`);
 });
+app.get('/api/admin/:department/export/project-approved-register.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  sendWorkbook(res,'project-approved-register',records,`${req.adminDepartment}-approved-distance-project-work-register.xlsx`);
+});
 app.get('/api/admin/:department/export/project-master.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   sendWorkbook(res,'project-master',records,`${req.adminDepartment}-master-distance-project-scores.xlsx`);
@@ -3170,6 +3379,10 @@ app.get('/api/admin/:department/export/non-residential-project-scores.xlsx', dep
 app.get('/api/admin/:department/export/non-residential-project-register.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   sendWorkbook(res,'non-residential-project-register',records,`${req.adminDepartment}-non-residential-project-work-register.xlsx`);
+});
+app.get('/api/admin/:department/export/non-residential-project-approved-register.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(), req.adminDepartment);
+  sendWorkbook(res,'non-residential-project-approved-register',records,`${req.adminDepartment}-approved-non-residential-project-work-register.xlsx`);
 });
 app.get('/api/admin/:department/export/non-residential-project-master.xlsx', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
@@ -3256,6 +3469,42 @@ app.get('/api/admin/:department/export/field-experience-master.xlsx', department
 });
 
 // DISSERTATION register and selected-document ZIP. No dissertation content is consolidated.
+
+// PAYROLL AND AUDITOR PORTALS. These operate only on approved Undergraduate Project Work claims.
+app.get('/api/payroll/:department/claims', departmentAuth, requireAdminAccess('payroll','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);
+  res.json(approvedProjectRegisterRecords(records,'all').map(payrollClaimRow));
+});
+app.post('/api/payroll/:department/claims/:id/status', departmentAuth, requireAdminAccess('payroll','officer'), async(req,res)=>{
+  const status=String(req.body?.status||'').trim();
+  const allowed=new Set(['pending','verified','approved-for-payment','paid','queried']);
+  if(!allowed.has(status))return res.status(400).json({error:'Choose a valid payroll processing status.'});
+  const note=String(req.body?.note||'').trim().slice(0,1500);
+  const all=await readDb();const record=all.find(r=>r.id===req.params.id&&r.department===req.adminDepartment&&(r.portalType==='project-work'||!r.portalType));
+  if(!record)return res.status(404).json({error:'Approved Project Work claim not found.'});
+  if(projectReviewStatus(record)!=='approved')return res.status(400).json({error:'Only approved Project Work submissions can be processed for payment.'});
+  const now=new Date().toISOString(),by=req.adminIdentity?.name||req.adminIdentity?.username||'Payroll officer';
+  record.payroll={...(record.payroll||{}),status,note,updatedAt:now,updatedBy:by};
+  record.payroll.history=Array.isArray(record.payroll.history)?record.payroll.history:[];
+  record.payroll.history.push({status,note,updatedAt:now,updatedBy:by});if(record.payroll.history.length>100)record.payroll.history=record.payroll.history.slice(-100);
+  await writeDb(all);res.json({ok:true,claim:payrollClaimRow(record)});
+});
+app.get('/api/payroll/:department/register.xlsx', departmentAuth, requireAdminAccess('payroll','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);sendWorkbook(res,'payroll-register',records,`${req.adminDepartment}-project-work-payroll-register.xlsx`);
+});
+app.get('/api/payroll/:department/approved-register.xlsx', departmentAuth, requireAdminAccess('payroll','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);const wb=XLSX.utils.book_new();addSheet(wb,'Approved Project Work',projectApprovedRegisterAoA(records,'all'),[8,22,24,34,18,30,34,24,26,22,24,26,22,32,28,28]);const buffer=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition',`attachment; filename="${req.adminDepartment}-approved-project-work-register.xlsx"`);res.send(buffer);
+});
+app.get('/api/auditor/:department/claims', departmentAuth, requireAdminAccess('auditor','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);res.json(approvedProjectRegisterRecords(records,'all').map(payrollClaimRow));
+});
+app.get('/api/auditor/:department/register.xlsx', departmentAuth, requireAdminAccess('auditor','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);sendWorkbook(res,'payroll-register',records,`${req.adminDepartment}-auditor-project-work-claims-register.xlsx`);
+});
+app.get('/api/auditor/:department/approved-register.xlsx', departmentAuth, requireAdminAccess('auditor','viewer'), async(req,res)=>{
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);const wb=XLSX.utils.book_new();addSheet(wb,'Approved Project Work',projectApprovedRegisterAoA(records,'all'),[8,22,24,34,18,30,34,24,26,22,24,26,22,32,28,28]);const buffer=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition',`attachment; filename="${req.adminDepartment}-approved-project-work-register.xlsx"`);res.send(buffer);
+});
+
 app.get('/api/admin/:department/export/fresh-dissertation-register.xlsx', departmentAuth, requireAdminAccess('dissertation','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
   sendWorkbook(res,'fresh-dissertation-register',records,`${req.adminDepartment}-fresh-dissertation-register.xlsx`);

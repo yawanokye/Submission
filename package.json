@@ -1,12 +1,12 @@
 {
   "name": "ucc-departmental-submission-portals",
-  "version": "27.0.0",
+  "version": "28.0.0",
   "private": true,
-  "description": "UCC departmental submission portals v27 with configurable Field Experience claim forms, cleaner tabbed department/developer administration, incremental study-centre add/delete management, centre reporting, Gmail workflows and role-based administration",
+  "description": "UCC departmental submission portals v28 with duplicate score reconciliation, inline claim verification, group-count validation, approved registers, Payroll/Auditor portals and department-scoped resources",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check admin/admin.js && node --check public/common.js && node --check developer/developer.js"
+    "check": "node --check server.js && node --check admin/admin.js && node --check public/common.js && node --check developer/developer.js && node --check operations/payroll.js && node --check operations/auditor.js"
   },
   "engines": {
     "node": ">=24.14.1 <25"

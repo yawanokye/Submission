@@ -49,6 +49,7 @@ function workCard(i,data={},locked=false){const n=i+1,ro=locked?'readonly aria-r
 function renderWorkEntries(){if(assignmentContext){workEntries.innerHTML=assignmentContext.works.map((w,i)=>workCard(i,w,true)).join('');return;}const old=snapshotEntries(),n=countValue();workCount.value=String(n);workEntries.innerHTML=Array.from({length:n},(_,i)=>workCard(i,old[i]||{},false)).join('');}
 function lock(el,value){el.value=value||'';el.disabled=true;el.classList.add('locked-field');}
 async function loadAssignmentContext(){if(token){location.replace(`/secure/dissertations/${encodeURIComponent(token)}`);return;}renderWorkEntries();}
+department.addEventListener('change',()=>loadPortalResources('assessor','resourcesSection','resourceList',department.value));
 workCount.addEventListener('input',renderWorkEntries);workCount.addEventListener('change',renderWorkEntries);reportType.addEventListener('change',renderWorkEntries);
 form.addEventListener('submit',async e=>{e.preventDefault();if(!form.reportValidity())return;try{await submitForm(form,'/api/assessor',status,btn);if(!assignmentContext){workCount.value='1';renderWorkEntries();}}catch{}});
 loadAssignmentContext();
