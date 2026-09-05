@@ -39,13 +39,15 @@ function resourceEscape(value){
 async function loadPortalResources(portal, sectionId='resourcesSection', listId='resourceList', department=''){
   const section=document.getElementById(sectionId),list=document.getElementById(listId);
   if(!section||!list)return;
+  if(!department){section.hidden=true;list.innerHTML='';return;}
   try{
     const departmentPart=department?`&department=${encodeURIComponent(department)}`:'';
     const res=await fetch(`/api/resources?portal=${encodeURIComponent(portal)}${departmentPart}`);
     const resources=await res.json().catch(()=>[]);
     if(!res.ok)throw new Error(resources.error||'Could not load resources.');
     if(!Array.isArray(resources)||!resources.length){section.hidden=true;return;}
-    list.innerHTML=resources.map(r=>`<article class="resource-card"><div class="resource-icon">↓</div><div class="resource-copy"><h4>${resourceEscape(r.title)}</h4>${r.description?`<p>${resourceEscape(r.description)}</p>`:''}<div class="resource-meta">${resourceEscape(r.originalName||'Resource')}${r.size?` · ${resourceEscape(formatBytes(r.size))}`:''}</div></div><a class="btn secondary resource-download" href="${resourceEscape(r.downloadUrl)}">Download</a></article>`).join('');
+    const heading=section.querySelector('h3');if(heading)heading.textContent=`${resources[0]?.departmentName||'Department'} Resources`;
+    list.innerHTML=resources.map(r=>`<article class="resource-card"><div class="resource-icon">↓</div><div class="resource-copy"><h4>${resourceEscape(r.title)}</h4>${r.description?`<p>${resourceEscape(r.description)}</p>`:''}<div class="resource-meta">${resourceEscape(r.departmentName||'')} · ${resourceEscape(r.originalName||'Resource')}${r.size?` · ${resourceEscape(formatBytes(r.size))}`:''}</div></div><a class="btn secondary resource-download" href="${resourceEscape(r.downloadUrl)}">Download</a></article>`).join('');
     section.hidden=false;
   }catch(e){
     console.error('Could not load portal resources:',e);

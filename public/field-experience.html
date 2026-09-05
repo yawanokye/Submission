@@ -21,7 +21,6 @@
 <aside id="resourcesSection" class="resource-section resource-aside" hidden><h3>Resources</h3><p class="section-note">Download the required Field Experience and Teaching Practice score-sheet template separately for each submission category.</p><div id="resourceList" class="resource-list"></div></aside>
 </div></main><footer>University of Cape Coast · Field Experience and Teaching Practice Score Submission</footer>
 <script src="/vendor/xlsx.full.min.js"></script><script src="/common.js"></script><script>
-loadPortalResources('field-experience');
 const claimForm=document.getElementById('claimForm'),claimFormRequirement=document.getElementById('claimFormRequirement'),claimFormHelp=document.getElementById('claimFormHelp');
 async function loadFieldPortalSettings(){try{const r=await fetch('/api/field-experience/settings'),d=await r.json();if(!r.ok)throw new Error(d.error||'Could not load portal settings.');const required=Boolean(d.claimFormRequired);claimForm.required=required;claimFormRequirement.textContent=required?'Compulsory *':'Optional';claimFormRequirement.className=required?'req':'optional-label';claimFormHelp.textContent=required?'A completed claim form is compulsory for this submission.':'Upload a completed claim form if applicable. The Developer/System Administrator currently classifies it as optional.';}catch(e){console.error(e);claimForm.required=false;claimFormRequirement.textContent='Optional';}}
 loadFieldPortalSettings();

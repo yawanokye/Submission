@@ -1,9 +1,19 @@
+# v31 update: department resources, Field Experience claims, payment gate and centres
+
+- Every built-in Project Work and Field Experience resource is selected by department. Downloaded Word and Excel headings identify Education Programmes, Business Programmes, Arts and Social Sciences, or Science and Mathematics Programmes as appropriate.
+- The supplied Field Experience and Reflection allocation/claim form is available as a department-specific built-in resource.
+- Field Experience and Teaching Practice now matches the Undergraduate Project Work control pattern for claimed-quantity validation, row-level inclusion, duplicate-registration warnings, side-by-side reconciliation, corrected registration numbers, re-approval history, approved registers and consolidated exports.
+- Payroll receives only Project Work and Field Experience submissions approved by the department. Payroll cannot approve a claim for payment when its claim form is missing or its claimed quantity does not reconcile with approved scores.
+- The Auditor's Portal is populated only after Payroll marks a claim **Approved for Payment**. Paid claims remain available for audit history.
+- The approved centre-code directory now contains 197 records from `code_centres2. (1)(2).xlsx`. The approved centre names are available to all four departments by default.
+- Developer centre management now saves a centre code, official name and department assignments together. A centre can be disabled temporarily and later enabled without deleting its code or assignments.
+
 # v25 update: Study Centre reporting and Centre by Centre scores
 
 - Consolidated and master Undergraduate Project Work score sheets now include a **STUDY CENTRE** column derived from the centre code in each Registration Number using the approved centre-code directory.
 - Field Experience and Teaching Practice consolidated/master reports now also include **STUDY CENTRE**, including the separate Field Experience I, II, III, IV, V, Micro-Teaching, Macro-Teaching and Reflection reports.
 - **Programme by Centre ZIP** is superseded by **Centre by Centre Scores ZIP**. All students at the same centre are combined in one workbook regardless of programme, sorted by Registration/Index Number, and the workbook is named with the official centre name.
-- The Developer Portal now manages a separate **Study Centre Code Directory**. It accepts XLSX, XLS or CSV with `CODE` and `CENTER_NAME`/`CENTRE_NAME` columns and includes the 93-centre list supplied for this update as the initial directory.
+- The Developer Portal manages a separate **Study Centre Code Directory**. The earlier 93-centre directory has been superseded in v31 by the supplied 197-record centre and code directory.
 - Department-specific published centre lists are still used for public-portal checkbox selection and remain independent of the reporting directory.
 
 # v22 update: checkbox selection for multiple Project Work study centres
@@ -265,3 +275,21 @@ Version 28 strengthens Undergraduate Project Work verification and downstream cl
 - Published resources can now be targeted by both submission portal and department. A resource may therefore be shown only to selected departments on Undergraduate Project Work, Field Experience and Teaching Practice, Dissertation Submission, and/or Assessment Report Submission. Older resources without a department restriction remain globally available for backward compatibility.
 
 No new Render environment variable or npm dependency is required for v28.
+
+
+## v29 Developer passwordless portal preview
+
+The Developer Administration Portal now includes a **Portal Preview** tab. An authenticated developer can create a short-lived 30-minute department session without knowing or entering a department user's password. The developer can preview a standard Department Administrator, Department Officer, Department Viewer, Payroll Officer or Auditor profile, or select an existing active administrator account and reproduce that account's department/section permissions.
+
+Preview destinations include the Department Administration Portal, Payroll Portal and Auditor's Portal. Public Undergraduate Project Work, Field Experience and Teaching Practice, Dissertation and Assessment Report portals are also linked directly because they do not require login.
+
+All protected preview pages display a **Developer Preview Mode** banner with the identity being previewed, expiry information, a link back to the Developer Portal and an Exit Preview action. Administrative or payroll actions performed during preview remain real actions and are attributed in the audit fields as **Developer Preview as ...** rather than being silently attributed to the impersonated user.
+
+Existing administrator accounts also have a **Preview** button in the Developer Portal. No administrator password, password hash or reset is required for developer preview. The existing developer Basic Authentication remains the security gate for creating preview sessions.
+
+
+## v30: Responsive Payroll and Auditor portal layout
+
+The Payroll Portal and Auditor Portal now use the full available browser width on desktop. Their approved-claims tables use fixed responsive column proportions, compact spacing and safe wrapping for long references, emails, centre names, notes and status labels. Payroll action buttons are arranged in a compact two-column action grid so the Actions column no longer expands beyond the page. On narrower screens the tables retain horizontal scrolling rather than compressing content to unreadable widths. No payroll, audit, claim-preview or permission logic has changed.
+
+No new Render environment variable or npm dependency is required for v30.

@@ -1,8 +1,8 @@
 {
   "name": "ucc-departmental-submission-portals",
-  "version": "28.0.0",
+  "version": "31.0.0",
   "private": true,
-  "description": "UCC departmental submission portals v28 with duplicate score reconciliation, inline claim verification, group-count validation, approved registers, Payroll/Auditor portals and department-scoped resources",
+  "description": "UCC departmental submission portals v31 with department-specific resources, Field Experience reconciliation, controlled Payroll-to-Auditor flow, and approved centre-code management",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
