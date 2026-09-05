@@ -94,3 +94,28 @@
   .operations-page main{padding:10px}
   .operations-page .card{padding:8px}
 }
+
+/* v32: compact central Payroll and Auditor workspaces */
+.operations-page main{max-width:1780px;padding:12px clamp(9px,1vw,18px)}
+.operations-page .compact-intro{padding:13px 15px;align-items:center}
+.operations-page .compact-intro h2{font-size:21px;margin:2px 0 5px}
+.operations-page .compact-intro p{font-size:13px;line-height:1.4;max-width:900px}
+.operations-page .operations-card{padding:11px}
+.operations-filters{display:grid;grid-template-columns:1.15fr 1.3fr 1fr 1.35fr;gap:9px;margin-bottom:10px;padding:10px;border:1px solid #dce3ea;border-radius:9px;background:#f7f9fb}
+.operations-filters label{display:grid;gap:4px;color:#526575;font-size:11px;font-weight:800}
+.operations-filters select,.operations-filters input{width:100%;height:35px;margin:0;padding:6px 9px;border:1px solid #c9d3dc;border-radius:7px;background:#fff;color:#172431;font:inherit;font-size:12px}
+.result-count{margin:2px 2px 9px;font-size:13px}.result-count strong{color:#082b4c;font-size:17px}
+.operations-page .operations-table{width:100%;min-width:0;table-layout:fixed}
+.operations-page .operations-table th,.operations-page .operations-table td{padding:7px 7px;font-size:11.5px;line-height:1.26;overflow-wrap:break-word;word-break:normal}
+.operations-page .operations-table th{font-size:11px}
+.operations-page .operations-table td>small{display:block;margin-top:3px;color:#536575;font-size:10.5px;line-height:1.25}
+.claim-reference{display:block;color:#102d47;font-size:12px;line-height:1.2}
+.workflow-label{display:inline-block;margin:4px 0 1px;padding:2px 6px;border-radius:999px;background:#eaf2f8;color:#174c72;font-size:10px;font-weight:850}
+.quantity-stack,.check-stack{display:grid;gap:4px}.quantity-stack span{display:block}.quantity-stack b{font-size:12px;color:#102d47}
+.payroll-note{padding:5px 6px;border-radius:6px;background:#f5f7f9}.read-only{color:#687987;font-size:11px}
+.operations-page .compact-btn{padding:5px 7px;font-size:10.5px;white-space:nowrap}
+.operations-page .operations-table col.c-sn{width:3%}.operations-page .operations-table col.c-claim{width:18%}.operations-page .operations-table col.c-claimant{width:15%}.operations-page .operations-table col.c-approved{width:13%}.operations-page .operations-table col.c-quantities{width:12%}.operations-page .operations-table col.c-checks{width:13%}.operations-page .operations-table col.c-payroll{width:12%}.operations-page .operations-table col.c-actions{width:14%}.operations-page .operations-table col.c-updated{width:14%}
+.payroll-page .payroll-row-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}.payroll-page .payroll-row-actions .btn{min-width:0;padding:5px 4px;font-size:10px;line-height:1.15;overflow-wrap:normal;word-break:normal;white-space:normal}.payroll-page .payroll-row-actions .reset-action{grid-column:1/-1}
+.auditor-page .operations-table col.c-claim{width:19%}.auditor-page .operations-table col.c-claimant{width:15%}.auditor-page .operations-table col.c-approved{width:13%}.auditor-page .operations-table col.c-quantities{width:12%}.auditor-page .operations-table col.c-checks{width:12%}.auditor-page .operations-table col.c-payroll{width:12%}.auditor-page .operations-table col.c-updated{width:14%}
+@media(max-width:1280px){.operations-page .operations-table{min-width:980px}.operations-filters{grid-template-columns:1fr 1fr}}
+@media(max-width:700px){.operations-filters{grid-template-columns:1fr}.operations-page .compact-intro{align-items:stretch}.operations-page .operations-table{min-width:900px}}

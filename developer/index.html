@@ -19,6 +19,7 @@
   <button class="developer-tab" type="button" data-dev-tab="admins">Administrators</button>
   <button class="developer-tab" type="button" data-dev-tab="centres">Study Centres</button>
   <button class="developer-tab" type="button" data-dev-tab="settings">Portal Settings</button>
+  <button class="developer-tab" type="button" data-dev-tab="operations">Payroll &amp; Auditor</button>
   <button class="developer-tab" type="button" data-dev-tab="preview">Portal Preview</button>
 </nav>
 
@@ -52,6 +53,19 @@
 <div class="developer-panel hidden" data-dev-panel="settings">
   <section class="card settings-card"><div class="section-head"><div><h3>Field Experience and Teaching Practice</h3><p>Control whether a Claim Form is optional or compulsory on this public submission portal. This setting does not affect Project Work, Dissertation or Assessment/Vetting portals.</p></div></div>
     <form id="portalSettingsForm"><div class="grid"><label>Claim Form Requirement <span>*</span><select id="fieldExperienceClaimRequirement" name="fieldExperienceClaimRequirement" required><option value="optional">Optional</option><option value="required">Compulsory</option></select></label></div><div class="actions"><div id="portalSettingsStatus" class="status"></div><button id="savePortalSettingsBtn" type="submit">Save Portal Setting</button></div></form>
+  </section>
+</div>
+
+<div class="developer-panel hidden" data-dev-panel="operations">
+  <section class="card operations-launch-card">
+    <div class="section-head"><div><h3>Central Payroll and Auditor Access</h3><p>Payroll and Auditor access is managed here, separately from Department Administration. Select the starting department, then open the required portal. The portal itself allows authorised switching between departments and activities.</p></div></div>
+    <div class="preview-notice"><strong>Developer operations sessions last 30 minutes.</strong> Payroll actions are live and recorded as Developer Preview actions. The Auditor Portal remains read only.</div>
+    <div class="operations-launch-grid">
+      <label>Starting Department <span>*</span><select id="operationsDepartment" required></select></label>
+      <article class="operations-launch-option"><div><span class="operations-icon">P</span><div><h4>Payroll Portal</h4><p>Process only department-approved claims. Filter by department, activity and Field Experience option.</p></div></div><button id="openPayrollPortal" type="button">Open Payroll Portal</button></article>
+      <article class="operations-launch-option"><div><span class="operations-icon">A</span><div><h4>Auditor's Portal</h4><p>Verify only claims that Payroll has marked Approved for Payment or Paid.</p></div></div><button id="openAuditorPortal" type="button">Open Auditor's Portal</button></article>
+    </div>
+    <div id="operationsLaunchStatus" class="status" aria-live="polite"></div>
   </section>
 </div>
 

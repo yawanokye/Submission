@@ -1,3 +1,12 @@
+# v32 update: central operations access, activity filtering and compact layouts
+
+- Payroll and Auditor links have been removed from the Department chooser and Department Administration header. The Developer Portal now contains a dedicated **Payroll & Auditor** tab for direct, passwordless operations access.
+- Central operations sessions can switch among all four departments from inside the Payroll and Auditor portals.
+- Payroll and Auditor pages now filter by department, activity and processing status. Field Experience and Teaching Practice includes its six individual submission options.
+- Dissertation Assessment and Dissertation Vetting claims now have a department claim-approval decision. Only approved claims enter Payroll, and they reach the Auditor only after Payroll marks them Approved for Payment.
+- Payroll and Auditor tables have been reduced to eight grouped columns with compact actions, quantities and claim checks so the complete workspace fits a normal desktop page.
+- The Field Experience and Teaching Practice public form now selects **Department of Education Programmes** by default while still allowing the submitter to change departments.
+
 # v31 update: department resources, Field Experience claims, payment gate and centres
 
 - Every built-in Project Work and Field Experience resource is selected by department. Downloaded Word and Excel headings identify Education Programmes, Business Programmes, Arts and Social Sciences, or Science and Mathematics Programmes as appropriate.

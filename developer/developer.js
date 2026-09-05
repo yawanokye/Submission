@@ -31,11 +31,25 @@ function updatePreviewMode(){
 }
 async function loadPreviewOptions(){
   previewOptions=await getJson('/api/developer/preview-options');
-  const department=document.getElementById('previewDepartment'),profile=document.getElementById('previewProfile');
+  const department=document.getElementById('previewDepartment'),operationsDepartment=document.getElementById('operationsDepartment'),profile=document.getElementById('previewProfile');
   if(department){department.innerHTML=(previewOptions.departments||[]).map(d=>`<option value="${esc(d.slug)}">${esc(d.name)}</option>`).join('');}
+  if(operationsDepartment){operationsDepartment.innerHTML=(previewOptions.departments||[]).map(d=>`<option value="${esc(d.slug)}" ${d.slug==='education'?'selected':''}>${esc(d.name)}</option>`).join('');}
   if(profile){profile.innerHTML=(previewOptions.profiles||[]).map(p=>`<option value="${esc(p.id)}">${esc(p.label)} · ${esc(roleLabels[p.role]||p.role)}</option>`).join('');}
   updatePreviewAccountOptions();updatePreviewProfileHelp();updatePreviewMode();
 }
+
+async function launchOperationsPortal(destination){
+  const department=document.getElementById('operationsDepartment')?.value||'education',status=document.getElementById('operationsLaunchStatus');
+  const button=document.getElementById(destination==='payroll'?'openPayrollPortal':'openAuditorPortal');
+  const target=window.open('about:blank','_blank');button.disabled=true;status.className='status';status.textContent=`Opening ${destination==='payroll'?'Payroll':"Auditor's"} Portal…`;
+  try{
+    const data=await getJson('/api/developer/preview-session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'profile',department,destination,profileId:'operations-officer'})});
+    status.className='status ok';status.textContent=`${destination==='payroll'?'Payroll':"Auditor's"} Portal opened with access to all departments.`;
+    if(target)target.location.href=data.redirect;else location.href=data.redirect;
+  }catch(error){if(target)target.close();status.className='status bad';status.textContent=error.message;}finally{button.disabled=false;}
+}
+document.getElementById('openPayrollPortal')?.addEventListener('click',()=>launchOperationsPortal('payroll'));
+document.getElementById('openAuditorPortal')?.addEventListener('click',()=>launchOperationsPortal('auditor'));
 
 async function loadResources(){const data=await getJson('/api/developer/resources');document.getElementById('resourceCount').textContent=data.length;document.getElementById('resourceRows').innerHTML=data.map((r,i)=>`<tr><td>${i+1}</td><td><span class="resource-title">${esc(r.title)}${r.builtIn?'<span class="builtin">BUILT-IN</span>':''}</span>${r.description?`<span class="resource-desc">${esc(r.description)}</span>`:''}</td><td>${esc(r.originalName)}${r.size?`<br><small>${esc(size(r.size))}</small>`:''}</td><td>${(r.departments||[]).length?(r.departments||[]).map(d=>`<span class="tag">${esc(deptLabels[d]||d)}</span>`).join(''):'<span class="tag">All departments</span>'}</td><td>${(r.portals||[]).map(p=>`<span class="tag">${esc(portalLabels[p]||p)}</span>`).join('')}</td><td>${esc(fmt(r.uploadedAt))}</td><td><a class="download" href="${esc(r.downloadUrl)}">Download</a>${r.canDelete?` <button class="danger" onclick="removeResource('${esc(r.id)}')">Delete</button>`:''}</td></tr>`).join('');}
 function accountState(a){if(!a.active)return {label:'Disabled',cls:'inactive-pill',detail:''};if(a.passwordSet)return {label:'Ready',cls:'active-pill',detail:a.passwordSetAt?`Password set ${fmt(a.passwordSetAt)}`:''};if(a.invitationEmailStatus==='failed')return {label:'Email failed',cls:'failed-pill',detail:a.invitationLastError||''};if(a.invitationExpired)return {label:'Invite expired',cls:'expired-pill',detail:a.invitationExpiresAt?`Expired ${fmt(a.invitationExpiresAt)}`:''};if(a.invitationEmailStatus==='sent')return {label:'Awaiting setup',cls:'pending-pill',detail:a.invitationExpiresAt?`Expires ${fmt(a.invitationExpiresAt)}`:''};return {label:'Invitation pending',cls:'pending-pill',detail:''};}

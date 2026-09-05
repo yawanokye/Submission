@@ -1,8 +1,8 @@
 {
   "name": "ucc-departmental-submission-portals",
-  "version": "31.0.0",
+  "version": "32.0.0",
   "private": true,
-  "description": "UCC departmental submission portals v31 with department-specific resources, Field Experience reconciliation, controlled Payroll-to-Auditor flow, and approved centre-code management",
+  "description": "UCC departmental submission portals v32 with central Payroll and Auditor access, department and activity filters, compact operations layouts, and department-approved dissertation claims",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
