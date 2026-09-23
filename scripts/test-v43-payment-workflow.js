@@ -16,7 +16,7 @@ async function json(url,options={}){const response=await request(url,options),da
 function hashFile(buffer){return crypto.createHash('sha256').update(buffer).digest('hex')}
 
 async function main(){
-  const storage=await fsp.mkdtemp(path.join(os.tmpdir(),'codeacademicservices-v43-')),dataDir=path.join(storage,'data'),filesDir=path.join(storage,'files');await fsp.mkdir(dataDir,{recursive:true});await fsp.mkdir(filesDir,{recursive:true});
+  const storage=await fsp.mkdtemp(path.join(os.tmpdir(),'ucc-code-eservices-v43-')),dataDir=path.join(storage,'data'),filesDir=path.join(storage,'files');await fsp.mkdir(dataDir,{recursive:true});await fsp.mkdir(filesDir,{recursive:true});
   const sourceFiles={claim:'claim-original.pdf',report:'report.docx',score:'scores.xlsx',work1:'work-one.docx',work2:'work-two.docx'},claimBytes=Buffer.from('%PDF-1.4\noriginal claim fixture\n%%EOF');
   await Promise.all([fsp.writeFile(path.join(filesDir,sourceFiles.claim),claimBytes),fsp.writeFile(path.join(filesDir,sourceFiles.report),'report'),fsp.writeFile(path.join(filesDir,sourceFiles.score),'scores'),fsp.writeFile(path.join(filesDir,sourceFiles.work1),'work one'),fsp.writeFile(path.join(filesDir,sourceFiles.work2),'work two')]);
   const file=(storedName,originalName)=>({storedName,originalName,mimeType:'application/octet-stream',size:1});

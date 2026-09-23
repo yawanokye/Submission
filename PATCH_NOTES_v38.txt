@@ -1,4 +1,4 @@
-CoDE Academic Services Portal v38.0.0
+CoDE eServices Portal v38.0.0
 Deferment, resumption and registration requests
 
 New service-request categories

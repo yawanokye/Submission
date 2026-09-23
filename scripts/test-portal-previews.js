@@ -53,7 +53,7 @@ async function expectJson(url, cookie) {
 }
 
 async function main() {
-  const storage = await fsp.mkdtemp(path.join(os.tmpdir(), 'codeacademicservices-preview-'));
+  const storage = await fsp.mkdtemp(path.join(os.tmpdir(), 'ucc-code-eservices-preview-'));
   const dataDir = path.join(storage, 'data');
   await fsp.mkdir(dataDir, { recursive:true });
   const submissions = [{ id:'project-search-fixture', portalType:'project-work', department:'education', departmentName:'Education', reference:'PWORK-SEARCH-001', submittedAt:'2026-09-01T09:00:00.000Z', title:'Dr', firstName:'Ama', lastName:'Supervisor', fullName:'Dr Ama Supervisor', email:'ama.supervisor@example.edu', phone:'0240000000', groupCount:'1', studyCentre:'Cape Coast', studyCentres:['Cape Coast'], projectStream:'distance', scoreSheet:{ rows:[{ originalSn:'1', name:'Kwame Search Student', registrationNo:'STU001', groupNo:'G1', totalScore:'87' }] }, files:{} }];

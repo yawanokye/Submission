@@ -20,7 +20,7 @@ services:
       - key: GMAIL_SENDER_EMAIL
         sync: false
       - key: GMAIL_FROM_NAME
-        value: CoDE Academic Services Portal
+        value: CoDE eServices Portal
       - key: ASSIGNMENT_EXPIRY_DAYS
         value: 14
       - key: STUDENT_FEEDBACK_EXPIRY_DAYS

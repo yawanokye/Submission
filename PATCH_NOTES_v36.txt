@@ -1,4 +1,4 @@
-CoDE Academic Services Portal v36.0.0
+CoDE eServices Portal v36.0.0
 Developer preview and monitoring correction
 
 1. Fixed the Functional Units Staff Portal loading screen

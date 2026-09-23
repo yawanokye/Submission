@@ -1,4 +1,4 @@
-CoDE Academic Services v34 - Priority 2 Student Support upgrade
+UCC-CoDE eServices v34 - Priority 2 Student Support upgrade
 ===============================================================
 
 This release builds on the complete v33 case workflow with proactive service management, student guidance, quality feedback, exports and accessibility improvements.
@@ -30,7 +30,7 @@ Accessibility and deployment readiness
 --------------------------------------
 - Increased operational label and control sizes, 44-pixel control targets, stronger keyboard focus and reduced-motion support.
 - Student tracking and feedback layouts wrap safely on small screens.
-- The environment-variable example now matches the actual CoDE Academic Services application and includes all Student Support controls.
+- The environment-variable example now matches the actual UCC-CoDE eServices application and includes all Student Support controls.
 
 New optional environment variable
 ---------------------------------

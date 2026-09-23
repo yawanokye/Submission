@@ -1,4 +1,4 @@
-CoDE Academic Services Portal v37.0.0
+CoDE eServices Portal v37.0.0
 Dual registration and assigned-staff resolution lifecycle
 
 1. Direct dual registration

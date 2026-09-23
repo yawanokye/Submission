@@ -1,4 +1,4 @@
-CoDE Academic Services v45.0.0
+UCC-CoDE eServices v45.0.0
 ================================
 
 Student Support chatbot

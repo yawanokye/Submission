@@ -1,4 +1,4 @@
-CoDE Academic Services v44.0.0
+UCC-CoDE eServices v44.0.0
 Duplicate score policy and audited administrator removal
 
 IMPLEMENTED

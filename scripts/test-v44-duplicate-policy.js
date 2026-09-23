@@ -24,7 +24,7 @@ function project(id,reference,reviewedAt,fullName,email,rows){return {id,referen
 function field(id,reference,reviewedAt,fullName,email,rows){return {id,reference,portalType:'field-experience',department:'education',departmentName:'Department of Education Programmes',submittedAt:reviewedAt,reviewedAt,reviewedBy:'Fixture reviewer',reviewStatus:'approved',fullName,email,phone:'0240000000',studyCentre:'Cape Coast',studyCentres:['Cape Coast'],assessmentType:'micro-teaching',assessmentLabel:'Micro-Teaching',groupCount:String(rows.length),claimedCandidateCount:rows.length,scoreSheet:{scoreHeaders:['SCORE'],rows},fieldScoreReviewExcludedRows:[],files:{}}}
 
 async function main(){
-  const storage=await fsp.mkdtemp(path.join(os.tmpdir(),'codeacademicservices-v44-'));
+  const storage=await fsp.mkdtemp(path.join(os.tmpdir(),'ucc-code-eservices-v44-'));
   const dataDir=path.join(storage,'data');await fsp.mkdir(dataDir,{recursive:true});await fsp.mkdir(path.join(storage,'files'),{recursive:true});
   const first=project('sheet-a','PWORK-DUP-A','2026-09-20T09:00:00.000Z','Dr First Supervisor','first@example.edu',[
     scoreRow('1','Alice Mensah','BEP/CC/01/001','1','80'),

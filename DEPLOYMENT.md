@@ -1,4 +1,4 @@
-# CoDE Academic Services Portal deployment guide
+# CoDE eServices Portal deployment guide
 
 ## Render service
 

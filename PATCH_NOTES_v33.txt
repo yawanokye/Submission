@@ -1,4 +1,4 @@
-CoDE Academic Services v33 - Student Support Services workflow upgrade
+UCC-CoDE eServices v33 - Student Support Services workflow upgrade
 =====================================================================
 
 This release turns the Student Support feature into a complete, role-aware case workflow while preserving the existing submissions, claims, department, payroll and audit features.

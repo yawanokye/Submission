@@ -1,0 +1,27 @@
+UCC-CoDE eServices v46.0.0
+============================
+
+Branding update
+---------------
+- Replaced the former public-facing service name with “UCC-CoDE eServices”.
+- Renamed the previous portal title to “CoDE eServices Portal”.
+- Updated page titles, headers, footers, emails, health status, deployment examples and PDF metadata.
+
+Logo and browser identity
+-------------------------
+- Replaced the header logo with the supplied University of Cape Coast crest.
+- Added a multi-size favicon for browser tabs and URLs.
+- Added an Apple touch icon for iPhone and iPad bookmarks and home-screen shortcuts.
+- Added explicit icon links to every public, administrative, developer, payroll and auditor page.
+
+Deployment safety
+-----------------
+- Preserved the existing Render service name and persistent-disk mount path so the live service remains attached to its current stored submissions, complaints, accounts and resources.
+
+Verification
+------------
+- npm run check
+- npm run test:chatbot
+- npm run test:duplicates
+- npm run test:payments
+- npm run test:portals
