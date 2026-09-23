@@ -1,0 +1,53 @@
+CoDE Academic Services v45.0.0
+================================
+
+Student Support chatbot
+-----------------------
+- Added a visible “Ask CoDE Support” launcher to the Student Support portal.
+- The assistant is rule-based and does not call an AI model or send student questions to an AI provider.
+- Students can choose frequently asked questions or type a question of up to 500 characters.
+- Matching uses administrator-approved titles, alternative questions, keywords, categories and language.
+- Only Published responses are visible to students. Draft and Retired responses remain private.
+- Answers show the responsible unit and an approved next action.
+- A local action preselects the complaint/request type and category and carries the student’s question into the existing submission form.
+- Students can open the existing ticket-tracking dialog directly from the assistant.
+- Students can mark an answer Helpful or Not helpful.
+
+Privacy and escalation
+----------------------
+- Email addresses, mobile numbers and likely student-number formats are removed from stored unanswered questions.
+- Sensitive/confidential questions are neither matched nor stored. Students are directed to the confidential complaint form.
+- Questions without an approved answer are registered in the administrator review list and can be escalated to Student Support Services.
+- The assistant displays an explicit warning not to provide passwords, payment-card details or confidential information.
+
+System Administrator response library
+-------------------------------------
+- Added a Chatbot Response Library tab to the Developer/System Administrator portal.
+- Administrators can create, edit, publish, retire and delete eligible responses.
+- Published responses must first be retired before deletion.
+- Each response stores title, alternative questions, keywords, category, matter type, approved answer, responsible unit, action label, action URL, language, quick-question flag and sort order.
+- Each change creates a new version and retains the previous title, answer, status, editor and update time in history.
+- Dashboard totals show all responses, published, draft, retired, questions asked and unanswered questions.
+- Unanswered questions can prefill a new draft response or be dismissed.
+- XLSX/CSV import supports controlled bulk updates. Excel export contains Response Library and Unanswered Questions worksheets.
+
+Default approved guidance
+-------------------------
+- Registration challenges
+- Deferment requests
+- Resumption after deferment
+- Resumption after rustication
+- Transcript requests
+- Incomplete or missing results
+- Fees or payment problems
+- Study-centre changes
+- Assessment, Project Work, Field Experience and Teaching Practice issues
+- Certificate issues
+
+Verification
+------------
+- npm run check
+- npm run test:chatbot
+- npm run test:duplicates
+- npm run test:payments
+- npm run test:portals

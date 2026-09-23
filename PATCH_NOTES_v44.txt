@@ -1,0 +1,36 @@
+CoDE Academic Services v44.0.0
+Duplicate score policy and audited administrator removal
+
+IMPLEMENTED
+
+1. Exact duplicate rule
+   - Student names are compared without case, punctuation or spacing differences.
+   - Registration or index numbers are compared without case or spacing differences.
+   - Numeric score formats such as 80 and 80.0 are treated as the same score.
+   - For multi-score Field Experience records, all score fields must match.
+   - Exact matches are accepted and counted once in approved consolidated and master outputs.
+
+2. Conflicting duplicate rule
+   - A matching registration or index number with a different name or score remains a warning.
+   - The administrator can correct the registration or index number in the existing reconciliation panel.
+   - The administrator can remove a selected conflicting row from approved records and provide a reason.
+
+3. Preservation and audit
+   - Row removal does not alter or delete the original uploaded workbook.
+   - The audit trail records the submission, row number, student, registration or index number, score, reason, administrator and date.
+   - A score sheet cannot be left with zero approved rows through row removal. The administrator must keep at least one row or delete the whole submission separately.
+   - Any approved payment document is invalidated when the approved score data changes.
+
+4. Portal display
+   - Green status identifies an exact duplicate that will be counted once.
+   - Red status identifies a conflict requiring correction or removal.
+   - The source workbook, extracted sheet and whole-submission delete action remain available.
+
+VERIFICATION
+
+- npm run check
+- npm run test:duplicates
+- npm run test:payments
+- npm run test:portals
+
+The automated duplicate test confirms exact-match classification, one-record export, conflict classification, audited row removal and corrected consolidated output.

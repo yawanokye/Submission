@@ -1,5 +1,67 @@
 # Changelog
 
+## 45.0.0 rule-based Student Support assistant
+
+- Added a non-AI chatbot to the Student Support portal with approved quick questions and typed-question matching.
+- Added a System Administrator Chatbot Response Library with draft, published and retired states.
+- Added administrator-managed titles, alternative questions, keywords, categories, matter types, answers, responsible units, actions, languages and display order.
+- Added response version history, usage counts and helpful or not-helpful feedback.
+- Added redacted unanswered-question review with one-click conversion into a draft response.
+- Excluded sensitive questions from chatbot storage and directed them to the confidential complaint pathway.
+- Added Excel import and export for the response library and unanswered-question register.
+- Added automated verification for matching, publication controls, privacy redaction, feedback and workbook export.
+
+## 44.0.0 duplicate score policy and audited removal
+
+- Classifies duplicate students by normalised name, registration or index number, and score.
+- Accepts exact duplicates as normal and records them once in consolidated and master score outputs.
+- Keeps conflicting duplicates visible for administrator correction before approval.
+- Lets authorised administrators remove a conflicting student row from approved records without changing the uploaded workbook.
+- Records the removed row, reason, administrator, date and source submission in the audit history.
+- Keeps whole-submission deletion as a separate confirmed action.
+- Applies the same policy to Project Work, Field Experience and Teaching Practice score workflows.
+
+## 43.0.0 controlled HoD claim approval
+
+- Added account-controlled HoD signature profiles and password-confirmed approval decisions.
+- Generates a separate approved-claim PDF with a verification code and source fingerprint while preserving the original claim.
+- Added claimant email certification and prohibited artificial claimant signatures.
+- Added centre-aware project-group counting and selectable part-payment units with mandatory reconciliation reasons.
+- Added departmental and Payroll Approved for Payment registers, full audit access, and Payroll return-to-department processing.
+- Invalidates prior HoD approval after source/review changes and requires fresh approval.
+
+## 42.0.0 focused tracking and structured identity fields
+
+- Moved student and coordinator ticket tracking into a responsive, accessible modal so the submission form does not distract the user during lookup and review.
+- Preserved the separate tracking-only page for signed email links.
+- Replaced Student Support study-centre select menus with single-choice checkbox lists and added assisted-submission centre validation.
+- Added optional middle-name fields and separate first-name and surname fields to every active person-name entry workflow.
+- Stored structured name parts while preserving combined display names and compatibility with older records and API clients.
+- Expanded portal contract and integration checks for the new fields, modal and validation rules.
+
+## 41.0.0 assignment, decision and redirection audit
+
+- Converted staff-assignment failures into readable inline reasons and added a protected server-side failure response.
+- Recorded assignment colour transitions and exposed click-to-open resolution and final-decision narratives.
+- Synchronized final decisions to green across Student Support, responsible-unit, student tracking and downloadable registers.
+- Corrected Student Support reassignment to act on the current responsible office rather than its oversight copy.
+- Retained redirected cases in the former unit as read-only records with destination, date, officer and reason.
+- Expanded complaint and request exports with redirection and decision history.
+
+## 40.0.0 automatic staff account activation
+
+- Creates a permanent Officer account automatically when a complaint or request is first assigned to a new institutional email.
+- Sends one activation-and-assignment email without a temporary password.
+- Signs the staff member in after password creation and opens the assigned case directly.
+- Reuses active accounts for later assignments and blocks automatic reactivation of suspended accounts.
+
+## 39.0.0 secure assignments and Directorate monitoring
+
+- Protected emailed staff assignments with account authentication and email-to-assignment matching.
+- Added production CSP, HSTS, cache prevention and indexing prevention for sensitive assignment pages.
+- Expanded both Directorate dashboards and downloadable reports to all non-confidential complaints and requests.
+- Replaced the unrelated deployment instructions with the correct Render and browser-warning recovery guide.
+
 ## 2.9.0 guided human supervisory review
 
 - Reviews a complete thesis one chapter at a time and pauses after each chapter for an explicit user Continue action.

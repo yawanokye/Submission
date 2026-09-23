@@ -1,3 +1,111 @@
+# v45 update: non-AI Student Support chatbot
+
+- The Student Support portal now includes a guided chatbot that works without an AI service or external AI charges.
+- Students can ask questions or choose frequently requested services. The assistant searches only published, administrator-approved responses.
+- Answers identify the responsible unit and provide a direct action that preselects the correct complaint or service-request form.
+- Questions with no approved match can be escalated into the normal Student Support workflow. Sensitive questions are not stored in the chatbot log.
+- The System Administrator portal now includes a Chatbot Response Library for draft, publish, retire, update, delete, import and export controls.
+- Administrators can review redacted unanswered questions, turn them into approved responses, and monitor usage and helpfulness.
+- Every response keeps version history. Published responses must be retired before deletion.
+
+See `PATCH_NOTES_v45.txt` for implementation and verification details.
+
+# v44 update: exact duplicates counted once and conflicts controlled
+
+- An exact duplicate means the normalised student name, registration or index number, and score all match. It is accepted without a warning and appears once in approved consolidated and master score outputs.
+- If any of those values differ, the portal marks the item as a conflicting duplicate and keeps the administrator correction workflow available.
+- Administrators can remove a selected conflicting row from approved records. The uploaded source workbook remains unchanged.
+- Each removal records the row details, reason, administrator and date in the audit history. Approved payment evidence is invalidated when approved score data changes.
+- The duplicate review panel uses green labels for exact matches and red labels for conflicts. Whole-submission deletion remains a separate confirmed option.
+
+See `PATCH_NOTES_v44.txt` for implementation and verification details.
+
+# v43 update: controlled HoD approval and payment registers
+
+- Authorised HoDs upload a protected signature once through their individual account and confirm every payment approval with their password.
+- Approval creates a separate integrity-checked PDF containing the claim reference, department, HoD identity/signature, approval time, payable quantity, claimant certification and verification code. The original claim file is never modified.
+- Claimants tick a declaration and verify it through their email instead of receiving an artificial cursive signature.
+- Departmental consolidation/claim verification is separate from HoD approval for payment. HoDs can select eligible items for documented part-payment and record the reconciliation reason.
+- Payroll receives the approved PDF and audit trail, can return a claim to the department with a reason, and maintains its own Approved for Payment register.
+- Departments have a separate Approved for Payment register. Auditor visibility still begins only after Payroll approval.
+- Project groups are counted by Programme Code + Study Centre Code + Group Number, so the same group number at different centres is counted separately.
+- Editing approved score/review data invalidates the existing HoD approval and requires fresh approval.
+
+See `PATCH_NOTES_v43.txt` for implementation and verification details.
+
+# v42 update: focused tracking, checkbox centre choice and structured names
+
+- Student ticket tracking now opens in a focused modal on both the public and assisted support pages. The complaint or request form remains behind the modal and cannot be edited while tracking is open.
+- Signed links still use the separate tracking-only page and open ticket results without showing a new submission form.
+- Student Support and assisted submissions now present study centres as checkboxes. Only one centre can be selected for an individual complaint or request, while assisted submissions require a centre.
+- Person names are collected as first name, optional middle name and surname throughout support, project work, field experience, dissertation, assessor, staff-assignment and developer account workflows.
+- Combined display names remain available in registers and emails, while the separate name parts are saved for new records. Existing records and legacy API submissions remain compatible.
+- Automated checks cover the modal contract, checkbox centre controls, structured-name persistence, single-centre validation and the existing complaint workflow.
+
+See `PATCH_NOTES_v42.txt` for the implementation and verification details.
+
+# v41 update: dependable assignment, final-decision and redirection workflow
+
+- Staff-assignment failures now appear as clear, actionable reasons in the portal instead of raw API or JSON output.
+- Assignment creation is protected by a dedicated error boundary, while malformed, non-institutional, suspended and storage-related failures return specific guidance.
+- Red, yellow and green assignment changes are retained as a colour history. A final decision turns the current indicator green across authorised online and downloadable registers.
+- The colour-history control opens the recorded resolution or final-decision narrative, decision date, unit and officer where permitted.
+- Student Support can redirect any visible complaint or request from its actual responsible unit. The former unit keeps a blue, read-only redirected record with the reason and destination.
+- CSV and Excel registers now include redirection history, the current decision narrative, decision officer and date, and earlier decision history.
+
+See `PATCH_NOTES_v41.txt` for the verified workflows.
+
+# v40 update: Automatic permanent account on first assignment
+
+- Assigning a case to a new institutional email now creates a pending permanent Officer account automatically.
+- One email lets the staff member choose a password and then opens the assigned case directly.
+- No temporary password is emailed. Existing active accounts are reused for later assignments.
+- Suspended accounts require deliberate reactivation in the Developer Portal.
+
+See `PATCH_NOTES_v40.txt` for the complete workflow.
+
+# v39 update: Secure staff links and Directorate-wide monitoring
+
+- Staff assignment links now require the individual staff account registered to the assigned institutional email and unit.
+- Complaint details and evidence remain hidden until authentication succeeds.
+- Both Directorate monitoring roles receive institution-wide dashboards and downloadable registers for all non-confidential complaints and requests, matching Provost oversight scope except for restricted cases.
+- Production security headers and a portal-specific browser-warning recovery guide are included.
+
+See `PATCH_NOTES_v39.txt` and `DEPLOYMENT.md` before deploying.
+
+# v35 update: Priority 3 service-quality improvements
+
+- A searchable knowledge base now covers frequently requested student services and opens preselected request forms.
+- The student satisfaction survey measures overall service, ease, communication, timeliness, courtesy, resolution, notifications and language assistance.
+- Optional SMS and WhatsApp alerts can be enabled through Twilio. Mobile alerts expose only the reference, stage and secure tracking link.
+- English, Twi and French assistance is available in the knowledge base, support guidance and mobile notices.
+- Protected service-performance reports compare study centres and functional units using caseload, SLA, satisfaction and resolution indicators.
+- Downloadable complaint and request registers are available to Student Support, functional units, centre and regional staff, monitoring roles and leadership, with existing confidentiality controls preserved.
+
+See `PATCH_NOTES_v35.txt` for configuration and the complete Priority 3 change list.
+
+# v34 update: Priority 2 Student Support service quality
+
+- Category-specific preparation guidance now explains expected evidence, responsible unit and standard target before submission.
+- Automated lifecycle processing records SLA warnings and breach escalations and, when email is configured, notifies authorised institutional recipients.
+- Students awaiting evidence receive a configurable reminder, and accepted or closed cases can submit service feedback.
+- Leadership dashboards include SLA compliance, satisfaction, feedback-response and low-rating indicators.
+- Student Support can export the filtered queue safely to CSV and use editable response templates.
+- Accessibility, keyboard focus, mobile wrapping and the deployment environment example were improved.
+
+See `PATCH_NOTES_v34.txt` for the complete Priority 2 change list and deployment settings.
+
+# v33 update: complete Student Support Services workflow
+
+- Students receive a permanent reference, can securely track a case, add evidence, accept a resolution, reopen it during the response window, or appeal.
+- Student Support has a searchable, filtered and paginated triage queue with controlled classification, priority, ownership and officer assignment.
+- Receiving functional units can accept, investigate, request evidence, attach officer records, resolve, issue a final decision, return or reassign a case.
+- Sensitive complaints use a restricted Confidential Case Handler route and Provost oversight instead of ordinary unit routing.
+- Working-day SLAs now support warning/breach flags, evidence pauses, resumption, response windows and leadership service-level dashboards.
+- Student Support tickets use SQLite persistence with a JSON compatibility snapshot, signed tracking links, institutional unit routing and stronger request protections.
+
+See `PATCH_NOTES_v33.txt` for deployment variables and the complete change list.
+
 # v32 update: central operations access, activity filtering and compact layouts
 
 - Payroll and Auditor links have been removed from the Department chooser and Department Administration header. The Developer Portal now contains a dedicated **Payroll & Auditor** tab for direct, passwordless operations access.
@@ -302,3 +410,36 @@ Existing administrator accounts also have a **Preview** button in the Developer 
 The Payroll Portal and Auditor Portal now use the full available browser width on desktop. Their approved-claims tables use fixed responsive column proportions, compact spacing and safe wrapping for long references, emails, centre names, notes and status labels. Payroll action buttons are arranged in a compact two-column action grid so the Actions column no longer expands beyond the page. On narrower screens the tables retain horizontal scrolling rather than compressing content to unreadable widths. No payroll, audit, claim-preview or permission logic has changed.
 
 No new Render environment variable or npm dependency is required for v30.
+
+## v14 delivery update: reliable staff previews, complete monitoring, and Project Work student search
+
+- Fixed the Functional Units Staff Portal loading failure caused by Priority 3 report controls being referenced by JavaScript but absent from the page.
+- Developer-opened staff and Student Support portals now show a visible preview banner and redirect cleanly to sign-in if their session expires. Browser scripts remain loadable so an authentication failure can never leave an unexplained loading shell.
+- Monitoring now shows colour-coded totals for complaints, service requests, open, overdue, and resolved cases. It includes every workflow status and a functional-unit matrix with complaint, request, total, and per-status counts. Student Support, Quality Assurance, and Provost monitoring roles receive the full permitted all-unit view. Other staff roles remain restricted to their assigned units.
+- Added a dedicated Project Work student search in Department Administration. Administrators can search by student name, registration/index number, or supervisor/examiner and receive student details, submission status, study centre, supervisor contacts, full submission access, and all related file downloads.
+- Added an automated HTML-to-JavaScript DOM contract check to prevent another portal release with missing required page controls.
+
+No new environment variable or npm dependency is required for this update.
+
+## v37: Dual registration and staff assignment lifecycle
+
+- A student complaint or service request is now registered automatically with both Student Support Services and the responsible functional unit selected from the service category. Both units work from the same permanent reference, evidence, history, and status record.
+- Student Support and receiving functional units may reassign the same case to another functional unit. Each receiving unit is added to the registration history, while Student Support retains oversight.
+- Each functional-unit administrator can assign a registered case to a staff member using an approved institutional email address. The staff member receives a personal secure link when email delivery is configured. The link is also returned to the administrator for copying when delivery is unavailable.
+- Staff assignment indicators are red until the assigned staff member opens the secure link, yellow after opening, and green after the staff member checks all required resolution confirmations and records the resolution.
+- The colour and assignment timestamps appear consistently in Student Support, Functional Units, CSV registers, and Excel registers.
+- Reassignment supersedes any unfinished assignment in the sending unit, clears the assignee, and starts the receiving unit at red without changing the permanent case reference.
+
+No new npm dependency is required. Existing Gmail settings are used for staff assignment emails. `SUPPORT_ALLOWED_EMAIL_DOMAINS` continues to control approved staff email domains.
+
+## v38: Deferment, resumption and registration requests
+
+- Added Request for Deferment.
+- Added Request for Resumption from Deferment.
+- Added Request for Resumption from Rustication.
+- The three academic-status requests route directly to the Student Support Services Unit.
+- Added Registration Challenge, which routes directly to the new Registration Officer Portal while remaining registered with Student Support Services for monitoring.
+- Added Registration Officer Portal access to developer previews, staff-account permissions, shared referrals, reassignment, staff email assignment and downloadable registers.
+- Added guidance and knowledge-base entries for the four services, including the information and evidence students should prepare.
+
+No new environment variable or npm dependency is required.
