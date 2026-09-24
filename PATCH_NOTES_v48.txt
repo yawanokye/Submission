@@ -1,0 +1,19 @@
+CoDEAcademicServices v48
+========================
+
+1. Distance and Non-Residential movement is now explicit in the Project Work and Field Experience / Teaching Practice departmental registers:
+   - Distance records display “Move to Non-Residential” and “Change Distance Centre”.
+   - Non-Residential records display “Move to Distance”.
+   - The same controls are available inside the full submission record.
+   - Movement is available for Pending, Approved, Returned and Rejected records.
+   - Every change keeps the original reference and files, records the reason/officer/date, updates affected processing batches and makes the corrected record available to the correct future batch.
+
+2. Automated round-trip coverage now verifies Distance → Non-Residential → Distance for Project Work and Non-Residential → Distance → Non-Residential for Field Experience / Teaching Practice, including a returned record.
+
+3. The main landing page is reorganised into two equal, high-visibility choices:
+   - Academic Records & Claims
+   - Student Support & Study Centres
+
+4. Public pages now use concise user guidance. Technical routing, consolidation and administrator-configuration explanations were removed from student-facing copy and retained only where staff need them.
+
+5. The Student Support Services page now includes a responsive, Ghanaian university student-support hero visual, clearer primary actions and mobile-safe layout. The image is served as an optimised WebP file.
