@@ -1,0 +1,17 @@
+CoDEAcademicServices v47
+========================
+
+1. Student category is now explicit in both Project Work and Field Experience / Teaching Practice:
+   - Distance students select one or more published study centres.
+   - Non-Residential students are selected separately and no longer appear in the study-centre list.
+
+2. Department administrators can correct a Project Work or Field/Teaching submission from Distance to Non-Residential, from Non-Residential to Distance, or change its Distance study centre(s). The original reference and uploaded files remain unchanged, and every correction is recorded with the reason, officer and date/time.
+
+3. Stable processing batches prevent later submissions from changing files already downloaded for work:
+   - Create a fixed Project Work batch by student category.
+   - Create a fixed Field/Teaching batch by student category and assessment type.
+   - Download the immutable batch ZIP at any time.
+   - Mark a batch completed without removing its download.
+   - Reclassified records generate a correction pack for every affected earlier batch and become eligible for a new batch under the corrected classification.
+
+4. The supplied UCC crest is used throughout visible portal headers. The favicon and Apple touch icon used by the browser URL/tab were deliberately left unchanged.
