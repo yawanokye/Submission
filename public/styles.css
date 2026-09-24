@@ -120,3 +120,17 @@ input.locked-field,select.locked-field,input:disabled.locked-field,select:disabl
 
 /* v47: student category is separate from the Distance study-centre directory */
 .stream-choice-group{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:8px}.stream-choice{display:flex;align-items:flex-start;gap:10px;border:2px solid #d9e2e9;border-radius:12px;padding:14px;background:#fff;cursor:pointer}.stream-choice:has(input:checked){border-color:#153f78;background:#eef5ff;box-shadow:0 0 0 2px rgba(21,63,120,.08)}.stream-choice input{width:auto;margin-top:3px;accent-color:#153f78}.stream-choice span{display:grid;gap:3px}.stream-choice small{color:#607080;font-weight:400}.field.wide{grid-column:1/-1}[hidden]{display:none!important}@media(max-width:650px){.stream-choice-group{grid-template-columns:1fr}}
+
+/* v48: two clear public service pathways */
+.home-choice-intro{padding:24px 28px 0;margin-bottom:18px}.home-service-split{grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}.service-pathway{min-height:440px;padding:34px;border-top:7px solid var(--navy)}.service-pathway.support-pathway{border-top-color:var(--gold)}.service-pathway .service-icon{width:58px;height:58px;font-size:27px}.service-pathway h3{font-size:28px}.service-pathway p,.service-pathway li{font-size:15px}.service-pathway .pathway-button{width:100%;min-height:52px;font-size:16px;margin-top:auto}.pathway-actions{display:grid;gap:12px;margin-top:auto}.pathway-actions .pathway-button{margin-top:0}.pathway-secondary{display:block;text-align:center;color:var(--navy);font-size:13px;font-weight:800;text-decoration:none}.pathway-secondary:hover{text-decoration:underline}.public-help-strip .strip-links{min-width:210px}@media(max-width:900px){.home-service-split{grid-template-columns:1fr}.service-pathway{min-height:0}}
+
+/* v48: welcoming Student Support Services landing hero */
+.student-support-hero{max-width:1180px;margin:30px auto 28px;min-height:390px;border-radius:22px;overflow:hidden;display:grid;grid-template-columns:minmax(330px,.9fr) minmax(0,1.55fr);background:#fff;box-shadow:0 18px 46px rgba(8,43,76,.14);border:1px solid #d9e3eb}
+.student-support-hero-copy{padding:44px 42px;display:flex;flex-direction:column;justify-content:center;background:linear-gradient(145deg,#fff 0%,#f3f8fc 100%);position:relative;z-index:1}
+.student-support-hero-copy h2{font-size:clamp(32px,4vw,52px);line-height:1.06;color:var(--navy);margin:8px 0 16px;letter-spacing:-.025em}
+.student-support-hero-copy p{color:var(--muted);font-size:17px;margin:0;max-width:530px}
+.student-support-hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:25px}.student-support-hero-actions .btn{min-width:150px}
+.student-support-hero-visual{min-height:390px;background:#dce9f2}.student-support-hero-visual img{width:100%;height:100%;display:block;object-fit:cover;object-position:center}
+#supportForm{scroll-margin-top:110px}
+@media(max-width:850px){.student-support-hero{grid-template-columns:1fr;margin-top:18px}.student-support-hero-copy{padding:30px 24px}.student-support-hero-visual{min-height:260px;order:-1}.student-support-hero-visual img{object-position:62% center}.student-support-hero-actions .btn{flex:1}}
+@media(max-width:480px){.student-support-hero{border-radius:15px}.student-support-hero-copy h2{font-size:31px}.student-support-hero-visual{min-height:210px}.student-support-hero-actions{display:grid}.student-support-hero-actions .btn{width:100%}}
