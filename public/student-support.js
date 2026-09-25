@@ -213,7 +213,7 @@
     ticketResult.classList.remove('hidden');
     const slaText = ticket.sla?.paused ? `Paused: ${ticket.sla.pauseReason || 'awaiting information'}` : ticket.sla?.overdue ? 'Overdue' : ticket.sla?.atRisk ? 'Due soon' : 'Within target';
     const languageLabel=({en:'English',tw:'Twi',fr:'French'})[ticket.language]||'English';
-    const notificationLabel=({'email':'Email only','email-sms':'Email and SMS','email-whatsapp':'Email and WhatsApp'})[ticket.notificationPreference]||'Email only';
+    const notificationLabel=({'email':'Email only','email-sms':'Email and SMS'})[ticket.notificationPreference]||'Email only';
     const decision = ticket.finalDecision || null;
     const decisionMarkup = ticket.resolution ? `<details class="ticket-decision decision-disclosure"><summary>${esc(decision?.label || 'Decision')} narrative</summary><p>${esc(decision?.narrative || ticket.resolution)}</p>${decision?.unitLabel || decision?.at ? `<small>${decision?.unitLabel ? esc(decision.unitLabel) : ''}${decision?.unitLabel && decision?.at ? ' · ' : ''}${decision?.at ? esc(formatDate(decision.at)) : ''}</small>` : ''}</details>` : '';
     ticketResult.innerHTML = `<div class="ticket-result-head"><div><span class="ticket-ref-label">${esc(ticket.reference)}</span><h3>${esc(ticket.subject || 'Support matter')}</h3></div><span class="status-chip status-${esc(ticket.status)}">${esc(statusLabels[ticket.status] || ticket.status)}</span></div><dl><dt>Matter</dt><dd>${ticket.type === 'service-request' ? 'Service request' : 'Complaint'}</dd><dt>Category</dt><dd>${esc(ticket.category)}</dd><dt>Responsible unit</dt><dd>${esc(ticket.ownerUnit)}</dd><dt>Reported urgency</dt><dd>${esc(ticket.priority)}</dd><dt>Evidence received</dt><dd>${esc(ticket.evidenceCount || 0)} file(s)</dd><dt>Assistance language</dt><dd>${esc(languageLabel)}</dd><dt>Notifications</dt><dd>${esc(notificationLabel)}</dd><dt>Service target</dt><dd>${ticket.sla?.paused ? esc(slaText) : esc(formatDate(ticket.dueAt))}</dd><dt>SLA position</dt><dd>${esc(slaText)}</dd><dt>Last updated</dt><dd>${esc(formatDate(ticket.lastUpdatedAt))}</dd></dl><section class="ticket-updates"><h4>Case progress</h4>${updates(ticket)}</section>${decisionMarkup}${responseForm(ticket)}${decisionPanel(ticket)}${feedbackPanel(ticket)}`;
@@ -319,7 +319,12 @@
       const availableNotifications = (data.notificationChannels || []).filter(item => item.available);
       if (notifications && availableNotifications.length) notifications.innerHTML = availableNotifications.map(item => `<option value="${esc(item.id)}">${esc(item.label)}</option>`).join('');
       const notificationHint = document.getElementById('notificationHint');
-      if (notificationHint && availableNotifications.length === 1) notificationHint.textContent = 'Email is currently the available notification channel.';
+      const smsEnabled = availableNotifications.some(item => item.id === 'email-sms');
+      const phone = document.getElementById('phone');
+      const phoneRequirement = document.getElementById('phoneRequirement');
+      if (phone) phone.required = smsEnabled;
+      if (phoneRequirement) { phoneRequirement.textContent = smsEnabled ? 'Required *' : 'Optional'; phoneRequirement.className = smsEnabled ? 'req' : 'optional-label'; }
+      if (notificationHint) notificationHint.textContent = smsEnabled ? 'Email and SMS are sent when a submission is received, more information is requested, or a final decision is recorded. Other updates are sent by email.' : 'Email is currently the available notification channel.';
       applyRequestedDefaults();
       syncCategoryGuidance();
     } catch {}
@@ -380,7 +385,7 @@
     const submittedEmail = String(formData.get('email') || '').trim();
     formData.append('originRole', page.dataset.originRole || 'student');
     const button = supportForm.querySelector('button[type=submit]');
-    if (['email-sms','email-whatsapp'].includes(String(formData.get('notificationPreference') || '')) && !String(formData.get('phone') || '').trim()) return show(supportMessage, 'Enter a phone number for SMS or WhatsApp notifications.', false);
+    if (String(formData.get('notificationPreference') || '') === 'email-sms' && !String(formData.get('phone') || '').trim()) return show(supportMessage, 'Enter a phone number for email and SMS notifications.', false);
     button.disabled = true;
     show(supportMessage, 'Submitting your matter and uploading evidence…', true);
     try {
