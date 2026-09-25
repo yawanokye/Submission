@@ -190,7 +190,10 @@ const ARKESEL_SENDER_ID = String(process.env.ARKESEL_SENDER_ID || 'UCC-CoDE').tr
 const ARKESEL_CALLBACK_SECRET = String(process.env.ARKESEL_CALLBACK_SECRET || '').trim();
 const ARKESEL_API_BASE_URL = String(process.env.ARKESEL_API_BASE_URL || 'https://sms.arkesel.com/api/v2').trim().replace(/\/$/, '');
 const CANONICAL_PUBLIC_BASE_URL = 'https://mycode360.app';
-const configuredPublicBaseUrl = String(process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/$/, '');
+function cleanConfiguredUrl(value) {
+  return String(value || '').trim().replace(/^(["'])(.*)\1$/, '$2').replace(/\/+$/, '');
+}
+const configuredPublicBaseUrl = cleanConfiguredUrl(process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '');
 const PUBLIC_BASE_URL = /(^|\.)submission2-2z89\.onrender\.com$/i.test((()=>{try{return new URL(configuredPublicBaseUrl).hostname;}catch{return '';}})())
   ? CANONICAL_PUBLIC_BASE_URL
   : (configuredPublicBaseUrl || CANONICAL_PUBLIC_BASE_URL);
@@ -424,6 +427,8 @@ function initSupportDatabase() {
   supportDatabase = new DatabaseSync(SUPPORT_DB_FILE);
   supportDatabase.exec('PRAGMA journal_mode = WAL');
   supportDatabase.exec('PRAGMA busy_timeout = 5000');
+  supportDatabase.exec('PRAGMA foreign_keys = ON');
+  supportDatabase.exec('PRAGMA synchronous = NORMAL');
   supportDatabase.exec(`CREATE TABLE IF NOT EXISTS support_tickets (
     id TEXT PRIMARY KEY,
     reference TEXT NOT NULL UNIQUE,
@@ -439,6 +444,17 @@ function initSupportDatabase() {
   )`);
   supportDatabase.exec('CREATE INDEX IF NOT EXISTS idx_support_email ON support_tickets(student_email)');
   supportDatabase.exec('CREATE INDEX IF NOT EXISTS idx_support_queue ON support_tickets(status, category_key, owner_unit, sensitive, due_at)');
+  supportDatabase.exec(`CREATE TABLE IF NOT EXISTS portal_sessions (
+    token_hash TEXT PRIMARY KEY,
+    department TEXT NOT NULL,
+    identity_json TEXT NOT NULL,
+    ttl_ms INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+  supportDatabase.exec('CREATE INDEX IF NOT EXISTS idx_portal_sessions_expiry ON portal_sessions(expires_at)');
+  supportDatabase.prepare('DELETE FROM portal_sessions WHERE expires_at <= ?').run(Date.now());
   const existing = Number(supportDatabase.prepare('SELECT COUNT(*) AS count FROM support_tickets').get()?.count || 0);
   if (!existing && fs.existsSync(SUPPORT_TICKETS_FILE)) {
     try {
@@ -491,10 +507,10 @@ app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Form-based administrator sessions. Basic authentication remains accepted for backward compatibility.
-const ADMIN_SESSIONS = new Map();
+// Form-based administrator sessions. Tokens are hashed and persisted so a Render restart does not sign staff out.
 const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const DEVELOPER_PREVIEW_TTL_MS = 30 * 60 * 1000;
+const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 function parseCookies(req) {
   const out={};
   for(const part of String(req.headers.cookie||'').split(';')){
@@ -503,29 +519,68 @@ function parseCookies(req) {
   }
   return out;
 }
+function sessionTokenHash(token) {
+  return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+function deletePortalSession(token) {
+  if (token) supportDatabase.prepare('DELETE FROM portal_sessions WHERE token_hash = ?').run(sessionTokenHash(token));
+}
+function readPortalSession(token) {
+  if (!token) return null;
+  const tokenHash = sessionTokenHash(token);
+  const row = supportDatabase.prepare('SELECT department, identity_json, ttl_ms, expires_at, updated_at FROM portal_sessions WHERE token_hash = ?').get(tokenHash);
+  if (!row) return null;
+  if (Number(row.expires_at) <= Date.now()) {
+    supportDatabase.prepare('DELETE FROM portal_sessions WHERE token_hash = ?').run(tokenHash);
+    return null;
+  }
+  try {
+    return { tokenHash, department:row.department, identity:JSON.parse(row.identity_json), ttlMs:Number(row.ttl_ms), expiresAt:Number(row.expires_at), updatedAt:row.updated_at };
+  } catch {
+    supportDatabase.prepare('DELETE FROM portal_sessions WHERE token_hash = ?').run(tokenHash);
+    return null;
+  }
+}
+function touchPortalSession(session, department = session.department) {
+  const now = Date.now();
+  const safeTtl = Math.max(60 * 1000, Number(session.ttlMs) || ADMIN_SESSION_TTL_MS);
+  const touchAfter = Math.min(SESSION_TOUCH_INTERVAL_MS, Math.floor(safeTtl / 4));
+  if (department === session.department && Number(session.expiresAt) - now > safeTtl - touchAfter) return session;
+  session.department = department;
+  session.expiresAt = now + safeTtl;
+  if (session.identity?.developerPreview) session.identity.previewExpiresAt = new Date(session.expiresAt).toISOString();
+  const updatedAt = new Date(now).toISOString();
+  supportDatabase.prepare('UPDATE portal_sessions SET department = ?, identity_json = ?, expires_at = ?, updated_at = ? WHERE token_hash = ?')
+    .run(session.department, JSON.stringify(session.identity), session.expiresAt, updatedAt, session.tokenHash);
+  session.updatedAt = updatedAt;
+  return session;
+}
 function createAdminSession(identity, department, ttlMs=ADMIN_SESSION_TTL_MS) {
   const token=crypto.randomBytes(32).toString('hex');
   const safeTtl=Math.max(60*1000,Number(ttlMs)||ADMIN_SESSION_TTL_MS);
-  ADMIN_SESSIONS.set(token,{identity,department,ttlMs:safeTtl,expiresAt:Date.now()+safeTtl});
+  const now=Date.now(),timestamp=new Date(now).toISOString();
+  supportDatabase.prepare('DELETE FROM portal_sessions WHERE expires_at <= ?').run(now);
+  supportDatabase.prepare(`INSERT INTO portal_sessions
+    (token_hash, department, identity_json, ttl_ms, expires_at, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(sessionTokenHash(token),department,JSON.stringify(identity),safeTtl,now+safeTtl,timestamp,timestamp);
   return token;
 }
 function sessionIdentity(req, department) {
   const token=parseCookies(req).ucc_admin_session; if(!token) return null;
-  const s=ADMIN_SESSIONS.get(token);
-  if(!s || s.expiresAt<=Date.now()){if(s)ADMIN_SESSIONS.delete(token);return null;}
+  const s=readPortalSession(token);
+  if(!s) return null;
   if(s.department!==department && !(s.identity?.departments||[]).includes(department)) return null;
-  s.department=department;
-  s.expiresAt=Date.now()+(Number(s.ttlMs)||ADMIN_SESSION_TTL_MS);
-  if(s.identity?.developerPreview) s.identity.previewExpiresAt=new Date(s.expiresAt).toISOString();
+  touchPortalSession(s,department);
   return s.identity;
 }
-function clearAdminSession(req) { const token=parseCookies(req).ucc_admin_session; if(token) ADMIN_SESSIONS.delete(token); }
+function clearAdminSession(req) { deletePortalSession(parseCookies(req).ucc_admin_session); }
 function staffSessionIdentity(req) {
   const token=parseCookies(req).ucc_admin_session; if(!token) return null;
-  const session=ADMIN_SESSIONS.get(token);
-  if(!session || session.expiresAt<=Date.now()){if(session)ADMIN_SESSIONS.delete(token);return null;}
+  const session=readPortalSession(token);
+  if(!session) return null;
   if(session.department!=='__staff__' || !normalizeStaffUnits(session.identity?.units).length) return null;
-  session.expiresAt=Date.now()+(Number(session.ttlMs)||ADMIN_SESSION_TTL_MS);
+  touchPortalSession(session);
   return session.identity;
 }
 
@@ -722,9 +777,19 @@ async function staffAuth(req,res,next) {
       const identity=await verifyStaffCredentials(sep>=0?decoded.slice(0,sep):decoded,sep>=0?decoded.slice(sep+1):'');
       if(identity){req.staffIdentity=identity;return next();}
     }
-    const wantsHtml=req.method==='GET'&&!req.path.startsWith('/api/')&&(String(req.headers.accept||'').includes('text/html')||!req.headers.accept);
-    return wantsHtml?res.redirect(`/staff-login.html?next=${encodeURIComponent(req.originalUrl||'/staff')}`):res.status(401).json({error:'Functional unit staff authentication required.'});
-  } catch(error) { console.error('Staff authentication failed:',error); return res.status(401).json({error:'Invalid functional unit staff credentials.'}); }
+    const secureAssignment=/^\/secure\/support-assignment\/[a-f0-9]{64}(?:\/(?:resolve|internal-feedback))?$/i.test(req.path);
+    const isHtmlPage=req.method==='GET'&&!req.path.startsWith('/api/');
+    if(isHtmlPage||secureAssignment){
+      const nextPath=secureAssignment?req.originalUrl.replace(/\/(?:resolve|internal-feedback)(?:\?.*)?$/,''):req.originalUrl||'/staff';
+      return res.redirect(req.method==='GET'?302:303,`/staff-login.html?next=${encodeURIComponent(nextPath)}&reason=session-expired`);
+    }
+    return res.status(401).json({error:'Your staff session has expired. Sign in again and retry the action.'});
+  } catch(error) {
+    console.error('Staff authentication failed:',error);
+    const secureAssignment=req.path.startsWith('/secure/support-assignment/');
+    if(secureAssignment)return res.redirect(req.method==='GET'?302:303,`/staff-login.html?next=${encodeURIComponent(req.originalUrl.replace(/\/(?:resolve|internal-feedback)(?:\?.*)?$/,''))}&reason=session-error`);
+    return res.status(401).json({error:'Staff authentication could not be verified. Sign in again.'});
+  }
 }
 function requireStaffUnit(unit, minimumRole='viewer') {
   return (req,res,next) => {
@@ -2548,15 +2613,23 @@ function supportSameOrigin(req, res, next) {
   const origin = String(req.headers.origin || '').trim();
   if (!origin) return next();
   try {
-    const allowedOrigins = new Set();
-    const addOrigin = value => { try { if (value) allowedOrigins.add(new URL(value).origin); } catch {} };
-    addOrigin(PUBLIC_BASE_URL);
+    const normaliseHost = value => String(value || '').trim().toLowerCase().replace(/\.$/, '').replace(/^www\./, '');
+    const allowedHosts = new Set();
+    const addHost = value => {
+      try { if (value) allowedHosts.add(normaliseHost(new URL(value).hostname)); }
+      catch { if (value) allowedHosts.add(normaliseHost(String(value).split(':')[0])); }
+    };
+    addHost(PUBLIC_BASE_URL);
+    addHost(CANONICAL_PUBLIC_BASE_URL);
     const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
-    const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || req.protocol || 'https';
-    if (forwardedHost) addOrigin(`${forwardedProto}://${forwardedHost}`);
-    if (req.get('host')) addOrigin(`${req.protocol || forwardedProto}://${req.get('host')}`);
-    if (allowedOrigins.has(new URL(origin).origin)) return next();
+    addHost(forwardedHost);
+    addHost(req.get('host'));
+    const parsedOrigin = new URL(origin);
+    if (['http:','https:'].includes(parsedOrigin.protocol) && allowedHosts.has(normaliseHost(parsedOrigin.hostname))) return next();
   } catch {}
+  const safePath=String(req.path||'').replace(/[a-f0-9]{64}/gi,'[secure-token]');
+  let originHost='invalid';try{originHost=new URL(origin).hostname;}catch{}
+  console.warn(`Rejected cross-origin request for ${safePath}: origin=${originHost}`);
   const message = 'This request could not be verified. Refresh the page on mycode360.app and try again.';
   if (req.path.startsWith('/secure/')) return res.status(403).type('html').send(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:32px"><h1>Action not completed</h1><p>${htmlEscape(message)}</p><p><a href="${htmlEscape(req.originalUrl.replace(/\/resolve$|\/internal-feedback$/,''))}">Return to the assigned case</a></p></body></html>`);
   return res.status(403).json({ error: message });
@@ -6645,7 +6718,7 @@ app.get('/api/admin/:department/summary',departmentAuth,async(req,res)=>{
   });
 });
 
-app.get('/health',async(_req,res)=>{const admins=await readAdminUsers(),centreCatalogue=await readStudyCentreCatalogue(),centreDirectory=await readStudyCentreDirectory(),supportTickets=await readSupportTickets();const centreCount=Object.values(centreCatalogue).reduce((n,list)=>n+(Array.isArray(list)?list.length:0),0);res.json({ok:true,appName:'UCC-CoDE eServices',departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',smsConfigured:supportMobileChannelConfigured('sms'),smsProvider:supportMobileChannelConfigured('sms')?'arkesel':'',resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:admins.length,pendingAdminInvitations:admins.filter(a=>!a.passwordHash&&a.invitationTokenHash).length,studyCentres:centreCount,studyCentreDirectory:centreDirectory.length,supportTickets:supportTickets.length,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'});});
+app.get('/health',async(_req,res)=>{const admins=await readAdminUsers(),centreCatalogue=await readStudyCentreCatalogue(),centreDirectory=await readStudyCentreDirectory(),supportTickets=await readSupportTickets();const centreCount=Object.values(centreCatalogue).reduce((n,list)=>n+(Array.isArray(list)?list.length:0),0);const activeSessions=Number(supportDatabase.prepare('SELECT COUNT(*) AS count FROM portal_sessions WHERE expires_at > ?').get(Date.now())?.count||0);res.json({ok:true,appName:'UCC-CoDE eServices',departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',smsConfigured:supportMobileChannelConfigured('sms'),smsProvider:supportMobileChannelConfigured('sms')?'arkesel':'',resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:admins.length,pendingAdminInvitations:admins.filter(a=>!a.passwordHash&&a.invitationTokenHash).length,studyCentres:centreCount,studyCentreDirectory:centreDirectory.length,supportTickets:supportTickets.length,sessionStore:'sqlite',persistentSessions:true,activeSessions,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'});});
 app.get('/vendor/xlsx.full.min.js', (_req,res)=>res.sendFile(path.join(__dirname,'node_modules','xlsx','dist','xlsx.full.min.js')));
 app.use(express.static(path.join(__dirname,'public'),{extensions:['html']}));
 app.use((err,req,res,_next)=>{

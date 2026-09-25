@@ -1,5 +1,14 @@
 # Changelog
 
+## 51.0.0 persistent sessions and assignment recovery
+
+- Replaced process-memory staff and administrator sessions with hashed SQLite sessions that survive service restarts.
+- Added automatic expiry cleanup and throttled sliding-session renewal.
+- Redirected expired secure-assignment submissions to staff login with a safe return path instead of returning raw authentication JSON.
+- Accepted the canonical custom domain and its `www` alias while retaining cross-origin request blocking.
+- Normalised quoted or trailing-slash `PUBLIC_BASE_URL` values.
+- Added session-store status to the health endpoint and an automated restart-persistence test.
+
 ## 50.0.0 assigned-staff evidence, private feedback and canonical domain
 
 - Assigned staff can attach optional decision evidence when marking a complaint or request complete.

@@ -82,7 +82,7 @@ See `PATCH_NOTES_v39.txt` and `DEPLOYMENT.md` before deploying.
 - Protected service-performance reports compare study centres and functional units using caseload, SLA, satisfaction and resolution indicators.
 - Downloadable complaint and request registers are available to Student Support, functional units, centre and regional staff, monitoring roles and leadership, with existing confidentiality controls preserved.
 
-See `PATCH_NOTES_v50.txt` for the current assigned-staff workflow and custom-domain update. `PATCH_NOTES_v49.txt` contains the Arkesel notification configuration.
+See `PATCH_NOTES_v51.txt` for persistent staff sessions and assignment recovery. `PATCH_NOTES_v50.txt` contains the assigned-staff evidence and custom-domain update.
 
 # v34 update: Priority 2 Student Support service quality
 
@@ -102,7 +102,7 @@ See `PATCH_NOTES_v34.txt` for the complete Priority 2 change list and deployment
 - Receiving functional units can accept, investigate, request evidence, attach officer records, resolve, issue a final decision, return or reassign a case.
 - Sensitive complaints use a restricted Confidential Case Handler route and Provost oversight instead of ordinary unit routing.
 - Working-day SLAs now support warning/breach flags, evidence pauses, resumption, response windows and leadership service-level dashboards.
-- Student Support tickets use SQLite persistence with a JSON compatibility snapshot, signed tracking links, institutional unit routing and stronger request protections.
+- Student Support tickets and hashed portal sessions use SQLite persistence with a JSON compatibility snapshot, signed tracking links, institutional unit routing and stronger request protections.
 
 See `PATCH_NOTES_v33.txt` for deployment variables and the complete change list.
 

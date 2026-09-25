@@ -12,6 +12,8 @@ Health check: /health
 
 Attach the persistent disk at `/var/data/codeacademicservices`. Do not deploy a new service without the existing disk or the saved submissions, complaints, accounts and resources will not be present.
 
+Version 51 also stores administrator and functional-unit staff sessions on this disk in the Student Support SQLite database. This prevents routine service restarts from signing staff out. Keep the service at one instance while using the disk-backed SQLite session store.
+
 ## Required production settings
 
 Set these values in Render without committing their real values:

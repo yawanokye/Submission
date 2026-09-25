@@ -1,0 +1,40 @@
+UCC-CoDE eServices v51
+Persistent staff sessions and secure assignment recovery
+
+WHAT CHANGED
+
+1. Administrator and functional-unit staff sessions are now stored in SQLite instead of server memory.
+2. Staff remain signed in when the Render service restarts, provided the existing persistent disk remains mounted.
+3. Only a SHA-256 hash of each browser session token is stored. The raw cookie token is not written to the database.
+4. Expired or missing staff sessions on assignment forms now return the officer to the staff login page instead of displaying raw JSON.
+5. After login, the officer is returned to the assigned case. Because browsers cannot safely retain an interrupted file upload, the officer must re-enter and resubmit an action that was interrupted by session expiry.
+6. The same-origin check accepts both mycode360.app and www.mycode360.app, along with the trusted proxy host, while continuing to block unrelated origins.
+7. PUBLIC_BASE_URL values copied with surrounding quotation marks or trailing slashes are normalised safely.
+8. The health endpoint reports the SQLite session store, persistent-session status and active-session count.
+9. SQLite now explicitly uses WAL mode, a 5-second busy timeout, foreign-key enforcement and NORMAL synchronous mode.
+
+DEPLOYMENT
+
+Keep the existing Render persistent disk mounted at:
+
+/var/data/codeacademicservices
+
+Keep this environment variable:
+
+PUBLIC_BASE_URL=https://mycode360.app
+
+The existing SUPPORT_DB_FILE setting may be retained. If it is not set, the session and Student Support tables use:
+
+STORAGE_DIR/data/support-tickets.sqlite
+
+Important: the SQLite session design is intended for one Render service instance using one persistent disk. If the service is later scaled to multiple instances, move sessions to a shared store such as PostgreSQL or Redis before scaling.
+
+VERIFICATION
+
+Run:
+
+npm run check
+npm run test:sessions
+npm run test:portals
+
+The v51 session test stops and restarts the server, verifies the existing staff cookie still works, confirms the database stores only a token hash, checks friendly sign-in recovery, and tests accepted and rejected origins.
