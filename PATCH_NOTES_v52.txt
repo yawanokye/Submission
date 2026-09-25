@@ -1,0 +1,44 @@
+UCC-CoDE eServices v52
+Trusted-origin recovery and legacy submission protection
+
+WHAT CHANGED
+
+1. Staff assignment completion now accepts browser-confirmed same-origin requests on the trusted mycode360.app host, including browsers or proxies that send an opaque or rewritten Origin value.
+2. The recovery path requires the browser-controlled Sec-Fetch-Site header to report same-origin and the effective request host to be a trusted portal host.
+3. Requests from unrelated websites remain blocked.
+4. mycode360.app, www.mycode360.app and submission2-2z89.onrender.com are explicitly recognised during the transition period.
+5. Rejected requests now display a short support code. The matching server log records the safe path, reported origin host, effective request host, fetch-site value and referrer host without exposing the secure assignment token.
+6. Old Render GET and HEAD links continue to redirect permanently to the equivalent mycode360.app address.
+7. In-flight POST uploads sent by an old or cached form to submission2-2z89.onrender.com are processed without redirecting the request body. The response identifies the canonical mycode360.app location.
+8. The referrer policy is now strict-origin-when-cross-origin. Same-origin diagnostics remain available, while cross-origin requests disclose only the site origin and not secure paths or tokens.
+9. All v51 SQLite session persistence and staff-login recovery controls remain active.
+
+SECURITY MODEL
+
+The same-origin recovery is not a general bypass. It is accepted only when:
+
+- the request is being handled for a trusted portal host; and
+- the browser reports Sec-Fetch-Site: same-origin.
+
+An unrelated website reports cross-site and remains blocked. Directly trusted origins also continue to work normally.
+
+DEPLOYMENT
+
+Keep:
+
+PUBLIC_BASE_URL=https://mycode360.app
+STORAGE_DIR=/var/data/codeacademicservices
+
+Keep the existing Render persistent disk mounted at /var/data/codeacademicservices.
+
+After deployment, regenerate any staff assignment link that was exposed during troubleshooting.
+
+VERIFICATION
+
+Run:
+
+npm run check
+npm run test:sessions
+npm run test:portals
+
+The v52 tests cover persistent sessions, direct custom-domain origins, the www alias, the legacy Render origin, browser-confirmed same-origin recovery, rejection of cross-site requests, support-code output, preservation of legacy upload bodies and the complete assignment resolution workflow.

@@ -35,6 +35,8 @@ The application sends `https://<your production domain>/api/support/sms/arkesel/
 
 `PUBLIC_BASE_URL` must remain `https://mycode360.app`. Assignment, password-setup and tracking links use it. Requests to the former `submission2-2z89.onrender.com` address are redirected to the custom domain.
 
+Version 52 redirects old-domain GET and HEAD requests. It processes in-flight POST uploads from cached legacy forms without redirecting the body, then marks the response with the canonical custom-domain location. This prevents an attached score sheet or project file from being lost during the domain transition.
+
 ## Chrome and iPhone security-warning recovery
 
 A browser-wide red warning is a reputation or security classification, not an ordinary page-layout error. Do not instruct staff or students to bypass it.

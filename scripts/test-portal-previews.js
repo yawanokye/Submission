@@ -250,8 +250,8 @@ async function main() {
     const resolutionBody = new FormData();
     Object.entries({ reviewed:'yes', actionCompleted:'yes', resolutionRecorded:'yes', resolutionNote:'The responsible unit completed the transcript request and recorded the outcome.', internalFeedback:'The supporting verification record has been attached for the unit head.' }).forEach(([key,value])=>resolutionBody.set(key,value));
     resolutionBody.set('decisionEvidence',new Blob(['decision evidence fixture'],{type:'text/plain'}),'decision-evidence.txt');
-    const resolutionResponse = await request(`${secureAssignmentPath}/resolve`, { method:'POST', headers:{ cookie:workflowOfficerCookie, origin:'https://mycode360.app' }, body:resolutionBody });
-    assert.equal(resolutionResponse.status, 200, 'all checked resolution confirmations should complete the assignment');
+    const resolutionResponse = await request(`${secureAssignmentPath}/resolve`, { method:'POST', headers:{ cookie:workflowOfficerCookie, origin:'null', 'sec-fetch-site':'same-origin', 'x-forwarded-host':'mycode360.app' }, body:resolutionBody });
+    assert.equal(resolutionResponse.status, 200, 'a browser-confirmed same-origin request on mycode360.app should complete the assignment');
     const resolutionHtml = await resolutionResponse.text();
     assert.match(resolutionHtml, /indicator is now green/i);
     assert.match(resolutionHtml, /decision-evidence\.txt/i);

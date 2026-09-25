@@ -19,7 +19,7 @@ app.set('trust proxy', 1);
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self' data:; frame-src 'self' blob:");
   const forwardedProtocol = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
@@ -30,8 +30,11 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
   const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim().toLowerCase();
   const requestHost = (forwardedHost || String(req.get('host') || '')).split(':')[0].toLowerCase();
-  if (requestHost === 'submission2-2z89.onrender.com' && ['GET','HEAD'].includes(req.method) && req.path !== '/health') {
-    return res.redirect(308, `${CANONICAL_PUBLIC_BASE_URL}${req.originalUrl}`);
+  if (requestHost === 'submission2-2z89.onrender.com') {
+    if (['GET','HEAD'].includes(req.method) && req.path !== '/health') return res.redirect(308, `${CANONICAL_PUBLIC_BASE_URL}${req.originalUrl}`);
+    // Do not redirect an in-flight upload. Process it, then identify the canonical location.
+    res.setHeader('Content-Location', `${CANONICAL_PUBLIC_BASE_URL}${req.originalUrl}`);
+    res.setHeader('X-UCC-Portal-Canonical-Origin', CANONICAL_PUBLIC_BASE_URL);
   }
   return next();
 });
@@ -2612,25 +2615,30 @@ function supportRateLimit(limit, windowMs = 60 * 60 * 1000) {
 function supportSameOrigin(req, res, next) {
   const origin = String(req.headers.origin || '').trim();
   if (!origin) return next();
-  try {
-    const normaliseHost = value => String(value || '').trim().toLowerCase().replace(/\.$/, '').replace(/^www\./, '');
-    const allowedHosts = new Set();
-    const addHost = value => {
-      try { if (value) allowedHosts.add(normaliseHost(new URL(value).hostname)); }
-      catch { if (value) allowedHosts.add(normaliseHost(String(value).split(':')[0])); }
-    };
-    addHost(PUBLIC_BASE_URL);
-    addHost(CANONICAL_PUBLIC_BASE_URL);
-    const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
-    addHost(forwardedHost);
-    addHost(req.get('host'));
-    const parsedOrigin = new URL(origin);
-    if (['http:','https:'].includes(parsedOrigin.protocol) && allowedHosts.has(normaliseHost(parsedOrigin.hostname))) return next();
-  } catch {}
+  const normaliseHost = value => String(value || '').trim().toLowerCase().replace(/\.$/, '').replace(/^www\./, '').split(':')[0];
+  const hostFromUrl = value => { try { return normaliseHost(new URL(String(value || '')).hostname); } catch { return ''; } };
+  const trustedHosts = new Set(['mycode360.app','submission2-2z89.onrender.com']);
+  const configuredHost = hostFromUrl(PUBLIC_BASE_URL);
+  if (configuredHost) trustedHosts.add(configuredHost);
+  const requestHost = normaliseHost(req.get('host'));
+  const forwardedHost = normaliseHost(String(req.headers['x-forwarded-host'] || '').split(',')[0]);
+  const effectiveHost = forwardedHost || requestHost;
+  const originHost = hostFromUrl(origin);
+  const refererHost = hostFromUrl(req.headers.referer);
+  const fetchSite = String(req.headers['sec-fetch-site'] || '').trim().toLowerCase();
+  const trustedRequestHost = trustedHosts.has(effectiveHost) || trustedHosts.has(requestHost);
+
+  if (originHost && trustedHosts.has(originHost)) return next();
+  if (trustedRequestHost && fetchSite === 'same-origin') {
+    console.info(`Recovered trusted same-origin request for ${String(req.path||'').replace(/[a-f0-9]{64}/gi,'[secure-token]')}: browserOrigin=${originHost||'opaque'} host=${effectiveHost}`);
+    return next();
+  }
+  if (trustedRequestHost && refererHost && trustedHosts.has(refererHost) && fetchSite !== 'cross-site') return next();
+
   const safePath=String(req.path||'').replace(/[a-f0-9]{64}/gi,'[secure-token]');
-  let originHost='invalid';try{originHost=new URL(origin).hostname;}catch{}
-  console.warn(`Rejected cross-origin request for ${safePath}: origin=${originHost}`);
-  const message = 'This request could not be verified. Refresh the page on mycode360.app and try again.';
+  const supportCode=crypto.randomBytes(4).toString('hex').toUpperCase();
+  console.warn(`Rejected cross-origin request code=${supportCode} path=${safePath} origin=${originHost||'opaque'} host=${effectiveHost||'unknown'} fetchSite=${fetchSite||'not-sent'} referer=${refererHost||'not-sent'}`);
+  const message = `The browser reported an untrusted submission origin. Return to the assigned case on mycode360.app and try again. Support code: ${supportCode}.`;
   if (req.path.startsWith('/secure/')) return res.status(403).type('html').send(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:32px"><h1>Action not completed</h1><p>${htmlEscape(message)}</p><p><a href="${htmlEscape(req.originalUrl.replace(/\/resolve$|\/internal-feedback$/,''))}">Return to the assigned case</a></p></body></html>`);
   return res.status(403).json({ error: message });
 }

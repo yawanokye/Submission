@@ -1,5 +1,14 @@
 # Changelog
 
+## 52.0.0 trusted-origin recovery and legacy upload protection
+
+- Added a browser-confirmed same-origin recovery path for trusted custom-domain requests whose Origin value is opaque or changed by an intermediary.
+- Kept unrelated cross-site requests blocked and added traceable support codes to rejection pages and logs.
+- Explicitly recognised the canonical domain, its `www` alias and the legacy Render upstream during transition.
+- Preserved in-flight POST uploads sent from cached legacy forms instead of redirecting and risking loss of the request body.
+- Continued permanent redirects for legacy GET and HEAD links.
+- Changed the referrer policy to `strict-origin-when-cross-origin` for safe same-origin diagnostics without disclosing secure paths cross-site.
+
 ## 51.0.0 persistent sessions and assignment recovery
 
 - Replaced process-memory staff and administrator sessions with hashed SQLite sessions that survive service restarts.
