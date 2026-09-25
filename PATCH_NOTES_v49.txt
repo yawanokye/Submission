@@ -1,0 +1,43 @@
+UCC-CoDE eServices v49
+Arkesel email and SMS notification update
+
+WHAT CHANGED
+
+1. Arkesel replaces the earlier SMS provider integration.
+2. Student Support sends both email and SMS for these three events:
+   - complaint or request received;
+   - additional information requested from the student;
+   - final decision recorded.
+3. All other student-facing notifications are sent by email only.
+4. A valid mobile number is required on the Student Support and assisted-submission forms when Arkesel SMS is enabled.
+5. SMS delivery attempts and Arkesel message identifiers are recorded in the case notification history.
+6. An authenticated Arkesel delivery callback can update the recorded delivery status.
+7. Email and SMS delivery are independent. A failure on one channel does not prevent the other channel from being attempted.
+8. Student-facing pages and the knowledge base now explain the notification policy without offering WhatsApp.
+
+RENDER ENVIRONMENT VARIABLES
+
+SUPPORT_SMS_ENABLED=true
+ARKESEL_API_KEY=<your Arkesel API key>
+ARKESEL_SENDER_ID=UCC-CoDE
+ARKESEL_CALLBACK_SECRET=<a separate long random secret>
+PUBLIC_BASE_URL=https://<your production domain>
+
+The sender ID must be approved in the Arkesel account and must not exceed 11 characters. Do not place the production API key in the source code or ZIP file.
+
+DELIVERY CALLBACK
+
+After setting PUBLIC_BASE_URL and ARKESEL_CALLBACK_SECRET, the application includes this delivery callback URL in every Arkesel SMS request:
+
+https://<your production domain>/api/support/sms/arkesel/callback?token=<secret>
+
+The endpoint accepts GET or POST delivery reports and records matching message delivery updates in the complaint or request notification history. No separate webhook entry is required in the Arkesel dashboard when the API accepts the callback URL sent with the message.
+
+VERIFICATION
+
+Run:
+
+npm run check
+npm run test:sms
+
+The Arkesel test uses a local mock provider and confirms the event policy, phone normalization, provider authentication, delivery callback and email-only handling for other updates.

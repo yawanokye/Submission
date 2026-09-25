@@ -77,12 +77,12 @@ See `PATCH_NOTES_v39.txt` and `DEPLOYMENT.md` before deploying.
 
 - A searchable knowledge base now covers frequently requested student services and opens preselected request forms.
 - The student satisfaction survey measures overall service, ease, communication, timeliness, courtesy, resolution, notifications and language assistance.
-- Optional SMS and WhatsApp alerts can be enabled through Twilio. Mobile alerts expose only the reference, stage and secure tracking link.
+- Arkesel SMS alerts can be enabled for ticket receipt, requests for additional information and final decisions. All other student updates remain email-only. Text messages expose only the reference, action required and secure tracking link.
 - English, Twi and French assistance is available in the knowledge base, support guidance and mobile notices.
 - Protected service-performance reports compare study centres and functional units using caseload, SLA, satisfaction and resolution indicators.
 - Downloadable complaint and request registers are available to Student Support, functional units, centre and regional staff, monitoring roles and leadership, with existing confidentiality controls preserved.
 
-See `PATCH_NOTES_v35.txt` for configuration and the complete Priority 3 change list.
+See `PATCH_NOTES_v50.txt` for the current assigned-staff workflow and custom-domain update. `PATCH_NOTES_v49.txt` contains the Arkesel notification configuration.
 
 # v34 update: Priority 2 Student Support service quality
 

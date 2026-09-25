@@ -96,6 +96,9 @@ async function main() {
     const secureHeaderResponse = await request('/', { headers:{ 'x-forwarded-proto':'https' } });
     assert.match(secureHeaderResponse.headers.get('content-security-policy') || '', /default-src 'self'/, 'production responses should include a content-security policy');
     assert.match(secureHeaderResponse.headers.get('strict-transport-security') || '', /max-age=31536000/, 'HTTPS responses should require transport security');
+    const legacyDomainResponse = await request('/admin-set-password.html?token=legacy-token&next=%2Fstaff', { redirect:'manual', headers:{ 'x-forwarded-host':'submission2-2z89.onrender.com', 'x-forwarded-proto':'https' } });
+    assert.equal(legacyDomainResponse.status, 308, 'old Render browser links must redirect permanently');
+    assert.equal(legacyDomainResponse.headers.get('location'), 'https://mycode360.app/admin-set-password.html?token=legacy-token&next=%2Fstaff', 'legacy redirects must preserve paths and token query strings');
 
     const staffAccountResponse = await request('/api/developer/admin-users', { method:'POST', headers:{ authorization:developerAuthorization, 'content-type':'application/json' }, body:JSON.stringify({ firstName:'Akosua', middleName:'Efua', lastName:'Mensah', email:'akosua.mensah@ucc.edu.gh', role:'officer', units:['student-support'] }) });
     const staffAccountData = await staffAccountResponse.json();
@@ -212,6 +215,8 @@ async function main() {
     assert.equal(assignmentData.account.created, true, 'first assignment should create a permanent staff account automatically');
     assert.equal(assignmentData.account.activationRequired, true, 'new staff account should require one-time activation');
     assert.ok(assignmentData.activationUrl, 'activation link should be returned when test email delivery is not configured');
+    assert.equal(new URL(assignmentData.secureUrl).origin, 'https://mycode360.app', 'staff assignment links must use the custom domain');
+    assert.equal(new URL(assignmentData.activationUrl).origin, 'https://mycode360.app', 'account activation links must use the custom domain');
     const secureAssignmentPath = new URL(assignmentData.secureUrl).pathname;
     const blockedAssignment = await request(secureAssignmentPath, { redirect:'manual', headers:{ accept:'text/html' } });
     assert.equal(blockedAssignment.status, 302, 'assignment must require staff authentication before showing case data');
@@ -226,20 +231,39 @@ async function main() {
     const openedResponse = await request(secureAssignmentPath, { headers:{ cookie:workflowOfficerCookie, accept:'text/html' } });
     assert.equal(openedResponse.status, 200, 'assigned staff secure link should open');
     assert.match(openedResponse.headers.get('x-robots-tag') || '', /noindex/, 'assignment pages must be excluded from indexing');
-    assert.match(await openedResponse.text(), /Opened by assigned staff/);
+    const openedHtml = await openedResponse.text();
+    assert.match(openedHtml, /Opened by assigned staff/);
+    assert.match(openedHtml, /Private feedback to unit head or administrator/);
+    assert.match(openedHtml, /Decision evidence/);
 
     const supportQueueAfterOpen = await expectJson('/api/support/admin/tickets', staffPreview.cookie);
     const openedTicket = supportQueueAfterOpen.tickets.find(item => item.reference === workflowTicket.reference);
     assert.equal(openedTicket.assignment.colour, 'yellow', 'opening the link must turn the shared register yellow');
 
-    const resolutionBody = new URLSearchParams({ reviewed:'yes', actionCompleted:'yes', resolutionRecorded:'yes', resolutionNote:'The responsible unit completed the transcript request and recorded the outcome.' });
-    const resolutionResponse = await request(`${secureAssignmentPath}/resolve`, { method:'POST', headers:{ cookie:workflowOfficerCookie, 'content-type':'application/x-www-form-urlencoded' }, body:resolutionBody });
+    const privateFeedbackText = 'Please note that the legacy transcript record required a manual verification by the unit head.';
+    const privateFeedbackResponse = await request(`${secureAssignmentPath}/internal-feedback`, { method:'POST', headers:{ cookie:workflowOfficerCookie, origin:'https://mycode360.app', 'content-type':'application/x-www-form-urlencoded' }, body:new URLSearchParams({ message:privateFeedbackText }) });
+    assert.equal(privateFeedbackResponse.status, 200, 'the custom domain origin must pass verification for private feedback');
+    assert.match(await privateFeedbackResponse.text(), /not visible to the student/i);
+    const publicTicketAfterFeedback = await request(`/api/support/tickets/${encodeURIComponent(workflowTicket.reference)}?email=${encodeURIComponent('workflow.student@example.edu')}`).then(response=>response.json());
+    assert.equal(Object.prototype.hasOwnProperty.call(publicTicketAfterFeedback.ticket,'internalFeedback'), false, 'private assigned-staff feedback must never be returned to the student');
+
+    const resolutionBody = new FormData();
+    Object.entries({ reviewed:'yes', actionCompleted:'yes', resolutionRecorded:'yes', resolutionNote:'The responsible unit completed the transcript request and recorded the outcome.', internalFeedback:'The supporting verification record has been attached for the unit head.' }).forEach(([key,value])=>resolutionBody.set(key,value));
+    resolutionBody.set('decisionEvidence',new Blob(['decision evidence fixture'],{type:'text/plain'}),'decision-evidence.txt');
+    const resolutionResponse = await request(`${secureAssignmentPath}/resolve`, { method:'POST', headers:{ cookie:workflowOfficerCookie, origin:'https://mycode360.app' }, body:resolutionBody });
     assert.equal(resolutionResponse.status, 200, 'all checked resolution confirmations should complete the assignment');
-    assert.match(await resolutionResponse.text(), /indicator is now green/i);
+    const resolutionHtml = await resolutionResponse.text();
+    assert.match(resolutionHtml, /indicator is now green/i);
+    assert.match(resolutionHtml, /decision-evidence\.txt/i);
     const supportQueueAfterResolution = await expectJson('/api/support/admin/tickets', staffPreview.cookie);
     const resolvedWorkflowTicket = supportQueueAfterResolution.tickets.find(item => item.reference === workflowTicket.reference);
     assert.equal(resolvedWorkflowTicket.assignment.colour, 'green', 'resolution must turn every authorised register green');
     assert.equal(resolvedWorkflowTicket.status, 'resolved');
+    assert.equal(resolvedWorkflowTicket.assignment.decisionEvidence.length, 1, 'decision evidence must be linked to the completed assignment');
+    assert.ok(resolvedWorkflowTicket.officerEvidence.some(file=>file.originalName==='decision-evidence.txt'&&file.decisionEvidence===true), 'decision evidence must appear in the authorised officer evidence register');
+    const generalOfficeAfterResolution = await expectJson('/api/staff/referrals', generalOfficePreview.cookie);
+    const generalOfficeResolvedTicket = generalOfficeAfterResolution.referrals.find(item=>item.reference===workflowTicket.reference);
+    assert.ok(generalOfficeResolvedTicket.internalFeedback.some(item=>item.message===privateFeedbackText), 'the responsible unit administrator must receive private assignee feedback');
     const supportRegisterResponse = await request('/api/support/admin/tickets.csv', { headers:{ cookie:staffPreview.cookie } });
     const supportRegisterText = await supportRegisterResponse.text();
     assert.equal(supportRegisterResponse.status, 200);

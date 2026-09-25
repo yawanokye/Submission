@@ -10,7 +10,7 @@ services:
       - key: STORAGE_DIR
         value: /var/data/codeacademicservices
       - key: PUBLIC_BASE_URL
-        sync: false
+        value: https://mycode360.app
       - key: GMAIL_CLIENT_ID
         sync: false
       - key: GMAIL_CLIENT_SECRET

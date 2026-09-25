@@ -17,7 +17,7 @@ Attach the persistent disk at `/var/data/codeacademicservices`. Do not deploy a 
 Set these values in Render without committing their real values:
 
 ```env
-PUBLIC_BASE_URL=https://your-approved-domain.example
+PUBLIC_BASE_URL=https://mycode360.app
 DEVELOPER_ADMIN_PASSWORD=<strong unique password>
 EDUCATION_ADMIN_PASSWORD=<strong unique password>
 BUSINESS_ADMIN_PASSWORD=<strong unique password>
@@ -27,9 +27,11 @@ SUPPORT_STATUS_TOKEN_SECRET=<strong random value different from every password>
 SUPPORT_ALLOWED_EMAIL_DOMAINS=ucc.edu.gh
 ```
 
-Use the existing Gmail OAuth settings for invitation, assignment and case-update email delivery. Add Twilio settings only if SMS or WhatsApp has been approved and configured.
+Use the existing Gmail OAuth settings for invitation, assignment and case-update email delivery. Add the Arkesel settings after the UCC-CoDE sender ID has been approved. Student Support sends both email and SMS for ticket receipt, requests for additional information and final decisions. Other updates are email-only.
 
-`PUBLIC_BASE_URL` must be the exact HTTPS production origin. Assignment, password-setup and tracking links use it. Do not leave it pointing to an old Render hostname after a custom domain is activated.
+The application sends `https://<your production domain>/api/support/sms/arkesel/callback?token=<ARKESEL_CALLBACK_SECRET>` as the `callback_url` in each Arkesel SMS request. The endpoint accepts GET and POST delivery reports. Keep the callback secret different from every password and token secret.
+
+`PUBLIC_BASE_URL` must remain `https://mycode360.app`. Assignment, password-setup and tracking links use it. Requests to the former `submission2-2z89.onrender.com` address are redirected to the custom domain.
 
 ## Chrome and iPhone security-warning recovery
 
@@ -37,7 +39,7 @@ A browser-wide red warning is a reputation or security classification, not an or
 
 1. Pause distribution of affected links while the warning is active.
 2. In Render, confirm the deployed Git commit, deploy history, environment variables and authorised administrators. Remove any unknown deployment or credential.
-3. Rotate exposed or suspicious passwords, Gmail OAuth credentials, Twilio credentials and `SUPPORT_STATUS_TOKEN_SECRET`.
+3. Rotate exposed or suspicious passwords, Gmail OAuth credentials, the Arkesel API key and `SUPPORT_STATUS_TOKEN_SECRET`.
 4. Verify the production property in Google Search Console. Open **Security issues**, inspect every listed issue and sample URL, and test both desktop and mobile rendering.
 5. Fix every affected page, then request a review from the Security issues report. Google says partial cleanup is not sufficient.
 6. If Search Console reports no security issue and the warning is demonstrably incorrect, submit the exact affected URL through Google Safe Browsing's incorrect-warning form.

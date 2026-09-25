@@ -1,5 +1,15 @@
 # Changelog
 
+## 50.0.0 assigned-staff evidence, private feedback and canonical domain
+
+- Assigned staff can attach optional decision evidence when marking a complaint or request complete.
+- Decision evidence is retained with the assignment and added to the authorised officer-evidence register.
+- Assigned staff can send private feedback to their functional-unit head or administrator before or during completion.
+- Private feedback is excluded from every student tracking response.
+- Completion forms accept the public custom-domain origin when Render is acting as the upstream host, preventing the raw verification JSON error.
+- Generated staff-assignment, activation, tracking and notification links use `https://mycode360.app`.
+- Existing browser links to the former Render hostname redirect to the custom domain.
+
 ## 45.0.0 rule-based Student Support assistant
 
 - Added a non-AI chatbot to the Student Support portal with approved quick questions and typed-question matching.

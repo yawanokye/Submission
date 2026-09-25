@@ -27,6 +27,15 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use((req, res, next) => {
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim().toLowerCase();
+  const requestHost = (forwardedHost || String(req.get('host') || '')).split(':')[0].toLowerCase();
+  if (requestHost === 'submission2-2z89.onrender.com' && ['GET','HEAD'].includes(req.method) && req.path !== '/health') {
+    return res.redirect(308, `${CANONICAL_PUBLIC_BASE_URL}${req.originalUrl}`);
+  }
+  return next();
+});
+
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
@@ -175,13 +184,16 @@ const GMAIL_CLIENT_SECRET = String(process.env.GMAIL_CLIENT_SECRET || '').trim()
 const GMAIL_REFRESH_TOKEN = String(process.env.GMAIL_REFRESH_TOKEN || '').trim();
 const GMAIL_SENDER_EMAIL = String(process.env.GMAIL_SENDER_EMAIL || '').trim();
 const GMAIL_FROM_NAME = String(process.env.GMAIL_FROM_NAME || 'CoDE eServices Portal').trim();
-const TWILIO_ACCOUNT_SID = String(process.env.TWILIO_ACCOUNT_SID || '').trim();
-const TWILIO_AUTH_TOKEN = String(process.env.TWILIO_AUTH_TOKEN || '').trim();
-const TWILIO_SMS_FROM = String(process.env.TWILIO_SMS_FROM || '').trim();
-const TWILIO_WHATSAPP_FROM = String(process.env.TWILIO_WHATSAPP_FROM || '').trim();
 const SUPPORT_SMS_ENABLED = String(process.env.SUPPORT_SMS_ENABLED || 'false').trim().toLowerCase() === 'true';
-const SUPPORT_WHATSAPP_ENABLED = String(process.env.SUPPORT_WHATSAPP_ENABLED || 'false').trim().toLowerCase() === 'true';
-const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/$/, '');
+const ARKESEL_API_KEY = String(process.env.ARKESEL_API_KEY || '').trim();
+const ARKESEL_SENDER_ID = String(process.env.ARKESEL_SENDER_ID || 'UCC-CoDE').trim();
+const ARKESEL_CALLBACK_SECRET = String(process.env.ARKESEL_CALLBACK_SECRET || '').trim();
+const ARKESEL_API_BASE_URL = String(process.env.ARKESEL_API_BASE_URL || 'https://sms.arkesel.com/api/v2').trim().replace(/\/$/, '');
+const CANONICAL_PUBLIC_BASE_URL = 'https://mycode360.app';
+const configuredPublicBaseUrl = String(process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/$/, '');
+const PUBLIC_BASE_URL = /(^|\.)submission2-2z89\.onrender\.com$/i.test((()=>{try{return new URL(configuredPublicBaseUrl).hostname;}catch{return '';}})())
+  ? CANONICAL_PUBLIC_BASE_URL
+  : (configuredPublicBaseUrl || CANONICAL_PUBLIC_BASE_URL);
 const ASSIGNMENT_EXPIRY_DAYS = Math.min(60, Math.max(1, Number(process.env.ASSIGNMENT_EXPIRY_DAYS || 14) || 14));
 const DEVELOPER_ADMIN_USER = String(process.env.DEVELOPER_ADMIN_USER || 'developer').trim();
 const DEVELOPER_ADMIN_PASSWORD = String(process.env.DEVELOPER_ADMIN_PASSWORD || 'change-this-password');
@@ -2332,10 +2344,17 @@ function supportAssignmentSummary(ticket, unitIds = []) {
         ? assignmentState
         : { key:'resolved', label:'Case resolved', colour:'green' }
     : assignmentState;
-  return { ...state, id:assignment?.id || '', unitId:assignment?.unitId || ticket?.ownerUnitId || '', unitLabel:assignment?.unitLabel || ticket?.ownerUnit || '', officerFirstName:assignment?.officerFirstName || '', officerMiddleName:assignment?.officerMiddleName || '', officerLastName:assignment?.officerLastName || '', officerName:assignment?.officerName || '', officerEmail:assignment?.officerEmail || '', assignedAt:assignment?.assignedAt || null, openedAt:assignment?.openedAt || null, resolvedAt:assignment?.resolvedAt || decision?.at || null, emailStatus:assignment?.emailStatus || '', resolutionNote:assignment?.resolutionNote || decision?.narrative || '', resolvedBy:assignment?.resolvedBy || decision?.by || '', completionSource:assignment?.completionSource || decision?.source || '', stateHistory:Array.isArray(assignment?.stateHistory)?assignment.stateHistory:[] };
+  return { ...state, id:assignment?.id || '', unitId:assignment?.unitId || ticket?.ownerUnitId || '', unitLabel:assignment?.unitLabel || ticket?.ownerUnit || '', officerFirstName:assignment?.officerFirstName || '', officerMiddleName:assignment?.officerMiddleName || '', officerLastName:assignment?.officerLastName || '', officerName:assignment?.officerName || '', officerEmail:assignment?.officerEmail || '', assignedAt:assignment?.assignedAt || null, openedAt:assignment?.openedAt || null, resolvedAt:assignment?.resolvedAt || decision?.at || null, emailStatus:assignment?.emailStatus || '', resolutionNote:assignment?.resolutionNote || decision?.narrative || '', resolvedBy:assignment?.resolvedBy || decision?.by || '', completionSource:assignment?.completionSource || decision?.source || '', decisionEvidence:Array.isArray(assignment?.decisionEvidence)?assignment.decisionEvidence:[], stateHistory:Array.isArray(assignment?.stateHistory)?assignment.stateHistory:[] };
 }
 function supportAssignmentList(ticket) {
-  return (Array.isArray(ticket?.staffAssignments)?ticket.staffAssignments:[]).map(item=>({id:item.id,unitId:item.unitId,unitLabel:item.unitLabel,officerFirstName:item.officerFirstName||'',officerMiddleName:item.officerMiddleName||'',officerLastName:item.officerLastName||'',officerName:item.officerName,officerEmail:item.officerEmail,assignedBy:item.assignedBy,assignedAt:item.assignedAt,expiresAt:item.expiresAt,state:supportAssignmentState(item),openedAt:item.openedAt||null,resolvedAt:item.resolvedAt||null,resolvedBy:item.resolvedBy||'',emailStatus:item.emailStatus||'',resolutionNote:item.resolutionNote||'',completionSource:item.completionSource||'',stateHistory:Array.isArray(item.stateHistory)?item.stateHistory:[],supersededAt:item.supersededAt||null,supersededBy:item.supersededBy||''}));
+  return (Array.isArray(ticket?.staffAssignments)?ticket.staffAssignments:[]).map(item=>({id:item.id,unitId:item.unitId,unitLabel:item.unitLabel,officerFirstName:item.officerFirstName||'',officerMiddleName:item.officerMiddleName||'',officerLastName:item.officerLastName||'',officerName:item.officerName,officerEmail:item.officerEmail,assignedBy:item.assignedBy,assignedAt:item.assignedAt,expiresAt:item.expiresAt,state:supportAssignmentState(item),openedAt:item.openedAt||null,resolvedAt:item.resolvedAt||null,resolvedBy:item.resolvedBy||'',emailStatus:item.emailStatus||'',resolutionNote:item.resolutionNote||'',completionSource:item.completionSource||'',decisionEvidence:Array.isArray(item.decisionEvidence)?item.decisionEvidence:[],stateHistory:Array.isArray(item.stateHistory)?item.stateHistory:[],supersededAt:item.supersededAt||null,supersededBy:item.supersededBy||''}));
+}
+
+function supportInternalFeedbackForIdentity(ticket, identity) {
+  if (identity?.developer) return Array.isArray(ticket?.internalFeedback) ? ticket.internalFeedback : [];
+  if (identity?.role !== 'administrator') return [];
+  const units = new Set(normalizeStaffUnits(identity.units));
+  return (Array.isArray(ticket?.internalFeedback) ? ticket.internalFeedback : []).filter(item => units.has(item.unitId));
 }
 function supportAssignmentForToken(tickets, token) {
   const tokenHash = hashOneTimeToken(token);
@@ -2399,7 +2418,7 @@ function supportTicketPayload(req) {
   const studentNumber = cleanHumanText(req.body?.studentNumber).slice(0, 100);
   const phone = cleanHumanText(req.body?.phone).slice(0, 40);
   const language = Object.prototype.hasOwnProperty.call(SUPPORT_LANGUAGES, String(req.body?.language || '').trim()) ? String(req.body.language).trim() : 'en';
-  const notificationPreference = ['email','email-sms','email-whatsapp'].includes(String(req.body?.notificationPreference || '').trim()) ? String(req.body.notificationPreference).trim() : 'email';
+  const notificationPreference = supportMobileChannelConfigured('sms') ? 'email-sms' : 'email';
   const programme = cleanHumanText(req.body?.programme).slice(0, 180);
   const academicDepartment = ['education','business','arts-social-sciences','science-mathematics'].includes(String(req.body?.academicDepartment || '').trim()) ? String(req.body.academicDepartment).trim() : '';
   const studyLevelKey = Object.prototype.hasOwnProperty.call(SUPPORT_STUDY_LEVELS, String(req.body?.studyLevel || '').trim())
@@ -2408,21 +2427,17 @@ function supportTicketPayload(req) {
   return { type, categoryKey, category, priorityKey, priority, firstName, middleName, lastName, name, email, subject, description, studyCentres, studyCentre, studentNumber, phone, language, notificationPreference, programme, academicDepartment, studyLevelKey, studyLevelLabel: SUPPORT_STUDY_LEVELS[studyLevelKey], sensitive };
 }
 function supportNormaliseMobile(value) {
-  const raw = String(value || '').trim().replace(/^whatsapp:/i, '');
+  const raw = String(value || '').trim();
   if (!raw) return '';
   const compact = raw.replace(/[\s().-]/g, '');
   const candidate = compact.startsWith('+') ? compact : compact.startsWith('0') && compact.length === 10 ? `+233${compact.slice(1)}` : compact.startsWith('233') ? `+${compact}` : `+${compact}`;
   return /^\+[1-9]\d{7,14}$/.test(candidate) ? candidate : '';
 }
 function supportMobileChannelConfigured(channel) {
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) return false;
-  return channel === 'sms' ? SUPPORT_SMS_ENABLED && Boolean(TWILIO_SMS_FROM) : channel === 'whatsapp' ? SUPPORT_WHATSAPP_ENABLED && Boolean(TWILIO_WHATSAPP_FROM) : false;
+  return channel === 'sms' && SUPPORT_SMS_ENABLED && Boolean(ARKESEL_API_KEY) && Boolean(ARKESEL_SENDER_ID) && ARKESEL_SENDER_ID.length <= 11;
 }
-function supportMobileChannels(ticket) {
-  if (ticket.notificationPreference === 'email-sms') return ['sms'];
-  if (ticket.notificationPreference === 'email-whatsapp') return ['whatsapp'];
-  return [];
-}
+const SUPPORT_SMS_NOTIFICATION_KINDS = new Set(['acknowledgement','information-request','final-decision']);
+function supportNotificationUsesSms(kind) { return SUPPORT_SMS_NOTIFICATION_KINDS.has(String(kind || '')); }
 function supportNotificationText(ticket, kind, statusUrl) {
   const reference = ticket.reference;
   const status = SUPPORT_STATUS_LABELS[ticket.status] || ticket.status;
@@ -2430,46 +2445,46 @@ function supportNotificationText(ticket, kind, statusUrl) {
   const messages = {
     en: {
       acknowledgement:`CoDE: Ticket ${reference} has been received. Track it at ${statusUrl}`,
-      reminder:`CoDE: Information is still required for ticket ${reference}. Respond at ${statusUrl}`,
+      'information-request':`CoDE: More information is required for ticket ${reference}. Respond at ${statusUrl}`,
+      'final-decision':`CoDE: A final decision has been recorded for ticket ${reference}. View it at ${statusUrl}`,
       update:`CoDE: Ticket ${reference} is now ${status}. View or respond at ${statusUrl}`
     },
     tw: {
       acknowledgement:`CoDE: Yɛagye wo asɛm ${reference}. Hwɛ ne tebea wɔ ${statusUrl}`,
-      reminder:`CoDE: Yɛda so hia nsɛm ma ${reference}. Fa mmuae no kɔ ${statusUrl}`,
+      'information-request':`CoDE: Yɛda so hia nsɛm ma ${reference}. Fa mmuae no kɔ ${statusUrl}`,
+      'final-decision':`CoDE: Wɔasi ${reference} ho gyinae awie. Hwɛ wɔ ${statusUrl}`,
       update:`CoDE: Wɔayɛ ${reference} ho nsakrae. Hwɛ wɔ ${statusUrl}`
     },
     fr: {
       acknowledgement:`CoDE : dossier ${reference} reçu. Suivi : ${statusUrl}`,
-      reminder:`CoDE : informations requises pour ${reference}. Répondez : ${statusUrl}`,
+      'information-request':`CoDE : informations requises pour ${reference}. Répondez : ${statusUrl}`,
+      'final-decision':`CoDE : décision finale enregistrée pour ${reference}. Consultez : ${statusUrl}`,
       update:`CoDE : dossier ${reference}, statut ${status}. Consultez : ${statusUrl}`
     }
   };
   return (messages[language] || messages.en)[kind] || messages.en.update;
 }
-async function sendTwilioSupportMessage(channel, phone, body) {
-  if (!supportMobileChannelConfigured(channel)) throw new Error(`${channel === 'sms' ? 'SMS' : 'WhatsApp'} notifications are not configured.`);
+async function sendArkeselSupportSms(phone, body) {
+  if (!supportMobileChannelConfigured('sms')) throw new Error('Arkesel SMS notifications are not configured.');
   const mobile = supportNormaliseMobile(phone);
   if (!mobile) throw new Error('A valid international mobile number is required.');
-  const prefix = channel === 'whatsapp' ? 'whatsapp:' : '';
-  const from = channel === 'whatsapp' ? TWILIO_WHATSAPP_FROM : TWILIO_SMS_FROM;
-  const fromAddress = channel === 'whatsapp' ? supportNormaliseMobile(from) : (supportNormaliseMobile(from) || String(from).trim());
-  if (!fromAddress) throw new Error('The sender address is not configured.');
-  const form = new URLSearchParams({ To:`${prefix}${mobile}`, From:`${prefix}${fromAddress}`, Body:String(body || '').slice(0, 1400) });
-  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(TWILIO_ACCOUNT_SID)}/Messages.json`, {
-    method:'POST', headers:{ authorization:`Basic ${Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64')}`, 'content-type':'application/x-www-form-urlencoded' }, body:form
+  const payload = { sender:ARKESEL_SENDER_ID, message:String(body || '').slice(0, 480), recipients:[mobile] };
+  if (PUBLIC_BASE_URL && ARKESEL_CALLBACK_SECRET) payload.callback_url = `${PUBLIC_BASE_URL}/api/support/sms/arkesel/callback?token=${encodeURIComponent(ARKESEL_CALLBACK_SECRET)}`;
+  const response = await fetch(`${ARKESEL_API_BASE_URL}/sms/send`, {
+    method:'POST', headers:{ 'api-key':ARKESEL_API_KEY, 'content-type':'application/json' }, body:JSON.stringify(payload)
   });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(String(result.message || `Twilio returned ${response.status}`).slice(0, 300));
-  return result.sid || '';
+  const providerStatus = String(result.status || '').toLowerCase();
+  if (!response.ok || ['error','failed'].includes(providerStatus)) throw new Error(String(result.message || `Arkesel returned ${response.status}`).slice(0, 300));
+  const delivery = Array.isArray(result.data) ? result.data.find(item => item?.id) : result.data;
+  return { id:String(delivery?.id || result.id || ''), provider:'arkesel' };
 }
 async function dispatchSupportStudentNotification(ticket, { kind='update', subject, html, req }) {
   const baseUrl = req ? baseUrlFor(req) : PUBLIC_BASE_URL;
   const statusUrl = baseUrl ? `${baseUrl}/support-track.html?token=${encodeURIComponent(supportStatusToken(ticket))}` : '';
   const operations = [];
   if (gmailConfigured() && isEmail(ticket.email)) operations.push({ channel:'email', send:() => sendGmailHtmlEmail({ to:ticket.email, subject, html }) });
-  for (const channel of supportMobileChannels(ticket)) {
-    if (supportMobileChannelConfigured(channel)) operations.push({ channel, send:() => sendTwilioSupportMessage(channel, ticket.phone, supportNotificationText(ticket, kind, statusUrl)) });
-  }
+  if (supportNotificationUsesSms(kind) && supportMobileChannelConfigured('sms')) operations.push({ channel:'sms', provider:'arkesel', send:() => sendArkeselSupportSms(ticket.phone, supportNotificationText(ticket, kind, statusUrl)) });
   if (!operations.length) return;
   const results = await Promise.allSettled(operations.map(operation => operation.send()));
   const at = new Date().toISOString();
@@ -2477,7 +2492,7 @@ async function dispatchSupportStudentNotification(ticket, { kind='update', subje
     const stored = tickets.find(item => item.id === ticket.id);
     if (!stored) return tickets;
     stored.notificationHistory = Array.isArray(stored.notificationHistory) ? stored.notificationHistory : [];
-    results.forEach((result, index) => stored.notificationHistory.push({ type:kind, channel:operations[index].channel, status:result.status === 'fulfilled' ? 'sent' : 'failed', providerMessageId:result.status === 'fulfilled' ? String(result.value?.id || result.value || '') : '', error:result.status === 'rejected' ? String(result.reason?.message || result.reason || 'Delivery failed').slice(0, 300) : '', at }));
+    results.forEach((result, index) => stored.notificationHistory.push({ type:kind, channel:operations[index].channel, provider:operations[index].provider || (operations[index].channel === 'email' ? 'gmail' : ''), status:result.status === 'fulfilled' ? 'sent' : 'failed', deliveryStatus:result.status === 'fulfilled' && operations[index].channel === 'sms' ? 'submitted' : '', providerMessageId:result.status === 'fulfilled' ? String(result.value?.id || result.value || '') : '', error:result.status === 'rejected' ? String(result.reason?.message || result.reason || 'Delivery failed').slice(0, 300) : '', at }));
     if (stored.notificationHistory.length > 100) stored.notificationHistory = stored.notificationHistory.slice(-100);
     return tickets;
   });
@@ -2491,11 +2506,13 @@ async function sendSupportAcknowledgementEmail(ticket, req) {
 }
 async function sendSupportStudentUpdateEmail(ticket, update, req) {
   const statusUrl = `${baseUrlFor(req)}/support-track.html?token=${encodeURIComponent(supportStatusToken(ticket))}`;
-  const final = ['resolved','closed','final-decision'].includes(ticket.status);
-  const subject = final ? `Final decision on your support ticket - ${ticket.reference}` : `Update on your support ticket - ${ticket.reference}`;
-  const heading = final ? 'Final decision recorded' : 'Your support ticket has been updated';
+  const final = ticket.status === 'final-decision';
+  const informationRequested = ['evidence-requested','lacks-evidence','awaiting-student'].includes(ticket.status);
+  const notificationKind = final ? 'final-decision' : informationRequested ? 'information-request' : 'update';
+  const subject = final ? `Final decision on your support ticket - ${ticket.reference}` : informationRequested ? `Additional information required - ${ticket.reference}` : `Update on your support ticket - ${ticket.reference}`;
+  const heading = final ? 'Final decision recorded' : informationRequested ? 'Additional information required' : ticket.status === 'resolved' ? 'Resolution proposed' : 'Your support ticket has been updated';
   const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${heading}</h2><p>Dear ${htmlEscape(ticket.name || 'Student')},</p><p>Student Support Services has updated your ${ticket.type === 'service-request' ? 'service request' : 'complaint'}.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #d4a72c"><strong>Reference:</strong> ${htmlEscape(ticket.reference)}<br><strong>Current stage:</strong> ${htmlEscape(SUPPORT_STATUS_LABELS[ticket.status] || ticket.status)}<br><strong>Responsible unit:</strong> ${htmlEscape(ticket.ownerUnit)}</div><p><strong>Update</strong><br>${htmlEscape(update.message || update.label || 'Your case has been updated.').replace(/\n/g,'<br>')}</p><p><a href="${htmlEscape(statusUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Track your case or respond</a></p><p>${final?'This is the final decision recorded for this case. You may use the tracking page if you need to review the decision or submit an authorised reopening request.':'Please use the tracking page to review the update. If more evidence is requested, upload it there.'}</p><p>Regards,<br>Student Support Services<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
-  await dispatchSupportStudentNotification(ticket, { kind:'update', subject, html, req });
+  await dispatchSupportStudentNotification(ticket, { kind:notificationKind, subject, html, req });
 }
 async function sendSupportRegistrationEmails(ticket, req) {
   if (!gmailConfigured()) return;
@@ -2531,9 +2548,18 @@ function supportSameOrigin(req, res, next) {
   const origin = String(req.headers.origin || '').trim();
   if (!origin) return next();
   try {
-    if (new URL(origin).host === req.get('host')) return next();
+    const allowedOrigins = new Set();
+    const addOrigin = value => { try { if (value) allowedOrigins.add(new URL(value).origin); } catch {} };
+    addOrigin(PUBLIC_BASE_URL);
+    const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+    const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || req.protocol || 'https';
+    if (forwardedHost) addOrigin(`${forwardedProto}://${forwardedHost}`);
+    if (req.get('host')) addOrigin(`${req.protocol || forwardedProto}://${req.get('host')}`);
+    if (allowedOrigins.has(new URL(origin).origin)) return next();
   } catch {}
-  return res.status(403).json({ error: 'This request could not be verified.' });
+  const message = 'This request could not be verified. Refresh the page on mycode360.app and try again.';
+  if (req.path.startsWith('/secure/')) return res.status(403).type('html').send(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:32px"><h1>Action not completed</h1><p>${htmlEscape(message)}</p><p><a href="${htmlEscape(req.originalUrl.replace(/\/resolve$|\/internal-feedback$/,''))}">Return to the assigned case</a></p></body></html>`);
+  return res.status(403).json({ error: message });
 }
 function supportTicketCredentials(req, reference) {
   const tokenIdentity = supportStatusIdentity(req.body?.accessToken || req.query?.token);
@@ -2549,13 +2575,29 @@ app.get('/api/support/config', async (_req, res) => {
   const units = Object.entries(STAFF_UNITS).filter(([id]) => !['payroll','auditor'].includes(id)).map(([id, unit]) => ({ id, label: unit.label }));
   const categories = Object.entries(SUPPORT_CATEGORIES).map(([id, category]) => ({ id, label: category.label, suggestedUnit: category.suggestedUnit || 'student-support', responsibleUnit: category.owner, workingDays: category.days, evidenceGuidance: SUPPORT_CATEGORY_GUIDANCE[id]?.evidence || SUPPORT_CATEGORY_GUIDANCE.general.evidence, beforeSubmitting: SUPPORT_CATEGORY_GUIDANCE[id]?.before || SUPPORT_CATEGORY_GUIDANCE.general.before }));
   const departments = Object.entries(DEPARTMENTS).map(([id, department]) => ({ id, label: department.name }));
-  const notificationChannels = [
-    { id:'email', label:'Email only', available:true },
-    { id:'email-sms', label:'Email and SMS', available:supportMobileChannelConfigured('sms') },
-    { id:'email-whatsapp', label:'Email and WhatsApp', available:supportMobileChannelConfigured('whatsapp') }
-  ];
+  const notificationChannels = supportMobileChannelConfigured('sms')
+    ? [{ id:'email-sms', label:'Email and SMS', available:true }]
+    : [{ id:'email', label:'Email only', available:true }];
   const languages = Object.entries(SUPPORT_LANGUAGES).map(([id, label]) => ({ id, label }));
   res.json({ ok: true, units, categories, departments, studyCentres: [...new Set(directory)], languages, notificationChannels });
+});
+app.all('/api/support/sms/arkesel/callback', async(req, res) => {
+  if (!ARKESEL_CALLBACK_SECRET || String(req.query.token || '') !== ARKESEL_CALLBACK_SECRET) return res.status(403).send('Forbidden');
+  const report = { ...(req.query || {}), ...(req.body || {}) };
+  const smsId = String(report.sms_id || report.message_id || report.messageId || report.id || '').trim();
+  const status = cleanHumanText(report.status || report.delivery_status || report.deliveryStatus).slice(0, 100).toLowerCase();
+  if (!smsId || !status) return res.status(400).send('Missing delivery status');
+  await mutateSupportTickets(tickets => {
+    for (const ticket of tickets) {
+      const notification = [...(ticket.notificationHistory || [])].reverse().find(item => item.channel === 'sms' && String(item.providerMessageId || '') === smsId);
+      if (!notification) continue;
+      notification.deliveryStatus = status;
+      notification.deliveryUpdatedAt = new Date().toISOString();
+      break;
+    }
+    return tickets;
+  });
+  res.status(200).send('OK');
 });
 app.get('/api/support/chatbot/bootstrap', supportRateLimit(80), async(req,res)=>{
   const language=CHATBOT_LANGUAGES.has(String(req.query?.language||''))?String(req.query.language):'en';
@@ -2601,9 +2643,7 @@ app.post('/api/support/tickets', supportRateLimit(12), supportUpload.array('evid
     }
     if (payload.studyCentres.length > 1) return res.status(400).json({ error: 'Select only one study centre for a student complaint or request.' });
     if (!isEmail(payload.email)) return res.status(400).json({ error: 'Enter a valid email address.' });
-    const requestedMobile = payload.notificationPreference === 'email-sms' ? 'sms' : payload.notificationPreference === 'email-whatsapp' ? 'whatsapp' : '';
-    if (requestedMobile && !supportMobileChannelConfigured(requestedMobile)) return res.status(400).json({ error: `${requestedMobile === 'sms' ? 'SMS' : 'WhatsApp'} notifications are not available. Choose email notifications.` });
-    if (requestedMobile && !supportNormaliseMobile(payload.phone)) return res.status(400).json({ error: 'Enter a valid mobile number for SMS or WhatsApp notifications.' });
+    if (payload.notificationPreference === 'email-sms' && !supportNormaliseMobile(payload.phone)) return res.status(400).json({ error: 'Enter a valid mobile number for email and SMS notifications.' });
     if (payload.description.length < 20) return res.status(400).json({ error: 'Please provide at least 20 characters describing the matter.' });
     const now = new Date().toISOString();
     const duplicate = (await readSupportTickets()).find(item =>
@@ -2648,7 +2688,10 @@ app.post('/api/support/tickets', supportRateLimit(12), supportUpload.array('evid
     await mutateSupportTickets(tickets => { tickets.push(ticket); return ticket; });
     sendSupportAcknowledgementEmail(ticket, req).catch(error => console.error('Support acknowledgement email failed:', error.message));
     sendSupportRegistrationEmails(ticket, req).catch(error => console.error('Support unit registration email failed:', error.message));
-    res.status(201).json({ ok: true, ticket: supportPublicTicket(ticket), emailNotice: isEmail(ticket.email) && gmailConfigured() ? 'An acknowledgement email is being sent.' : 'Save the reference number to track this ticket.' });
+    const emailReady = isEmail(ticket.email) && gmailConfigured();
+    const smsReady = supportMobileChannelConfigured('sms') && Boolean(supportNormaliseMobile(ticket.phone));
+    const notificationNotice = emailReady && smsReady ? 'Acknowledgement email and SMS are being sent.' : emailReady ? 'An acknowledgement email is being sent.' : smsReady ? 'An acknowledgement SMS is being sent.' : 'Save the reference number to track this ticket.';
+    res.status(201).json({ ok: true, ticket: supportPublicTicket(ticket), emailNotice:notificationNotice, notificationNotice });
   } catch (error) {
     console.error('Support ticket creation failed:', error);
     await removeUploaded(req).catch(() => {});
@@ -2886,8 +2929,8 @@ app.get('/api/support/admin/tickets', supportWorkspaceAuth, async (req, res) => 
     categoryKey: ticket.categoryKey, category: ticket.categoryLabel, priority: ticket.priorityLabel, status: ticket.status, statusLabel: SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,
     priorityKey: ticket.priorityKey, ownerUnit: ticket.ownerUnit, ownerUnitId: ticket.ownerUnitId || '', assignedCaseOwner: ticket.assignedCaseOwner || '', intendedUnit: ticket.intendedUnit || '', supportUnit: ticket.supportUnit, studyCentre: ticket.studyCentre, programme: ticket.programme || '', academicDepartment: ticket.academicDepartment || '', subject: ticket.subject,
     description: ticket.description, originRole: ticket.originRole, sensitive: ticket.sensitive, createdAt: ticket.createdAt,
-    dueAt: ticket.dueAt, assignmentDueAt: ticket.assignmentDueAt || null, lastUpdatedAt: ticket.lastUpdatedAt, resolution: ticket.resolution || '', finalDecision:supportDecisionSummary(ticket), decisionHistory:ticket.decisionHistory || [], feedback: ticket.feedback || null, sla: supportSlaSummary(ticket), assignment:supportAssignmentSummary(ticket,[ticket.ownerUnitId]), assignments:supportAssignmentList(ticket), auditTrail: ticket.auditTrail || [], studentUpdates:ticket.studentUpdates||[],
-    evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [], officerEvidence: Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [], forwardHistory: ticket.forwardHistory || [], referrals: ticket.referrals || [], registrations: ticket.registrations || [], routingHistory:ticket.routingHistory || [], routingState:supportRegistrationSummary(ticket,['student-support']), interUnitMessages: ticket.interUnitMessages || []
+    dueAt: ticket.dueAt, assignmentDueAt: ticket.assignmentDueAt || null, lastUpdatedAt: ticket.lastUpdatedAt, resolution: ticket.resolution || '', finalDecision:supportDecisionSummary(ticket), decisionHistory:ticket.decisionHistory || [], feedback: ticket.feedback || null, sla: supportSlaSummary(ticket), assignment:supportAssignmentSummary(ticket,[ticket.ownerUnitId]), assignments:supportAssignmentList(ticket), auditTrail: ticket.auditTrail || [], studentUpdates:ticket.studentUpdates||[], notificationHistory:ticket.notificationHistory || [],
+    evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [], officerEvidence: Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [], internalFeedback:supportInternalFeedbackForIdentity(ticket,req.supportIdentity), forwardHistory: ticket.forwardHistory || [], referrals: ticket.referrals || [], registrations: ticket.registrations || [], routingHistory:ticket.routingHistory || [], routingState:supportRegistrationSummary(ticket,['student-support']), interUnitMessages: ticket.interUnitMessages || []
   })) });
 });
 function supportCsvValue(value) {
@@ -3052,6 +3095,19 @@ async function supportUnitNotificationRecipients(unitId) {
   const accounts = await readAdminUsers();
   return [...new Set(accounts.filter(account => account.active !== false && normalizeStaffUnits(account.units).includes(unitId) && (ROLE_RANK[account.role] || 0) >= ROLE_RANK.officer && isEmail(account.email)).map(account => String(account.email).trim().toLowerCase()))];
 }
+async function supportUnitAdministratorRecipients(unitId) {
+  const accounts = await readAdminUsers();
+  return [...new Set(accounts.filter(account => account.active !== false && account.role === 'administrator' && normalizeStaffUnits(account.units).includes(unitId) && isEmail(account.email)).map(account => String(account.email).trim().toLowerCase()))];
+}
+async function sendSupportInternalFeedbackEmail(ticket, assignment, feedback, req) {
+  if (!gmailConfigured()) return { skipped:true, reason:'gmail-not-configured' };
+  const recipients = (await supportUnitAdministratorRecipients(assignment.unitId)).filter(email => supportEmailsAreInstitutional([email]));
+  if (!recipients.length) return { skipped:true, reason:'no-unit-administrator-email' };
+  const portalUrl = `${baseUrlFor(req)}${assignment.unitId === 'student-support' ? '/support-admin' : '/staff'}`;
+  const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Private feedback from assigned staff</h2><p><strong>Reference:</strong> ${htmlEscape(ticket.reference)}<br><strong>Functional unit:</strong> ${htmlEscape(assignment.unitLabel)}<br><strong>Assigned staff:</strong> ${htmlEscape(feedback.fromName)} (${htmlEscape(feedback.fromEmail)})</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #082b4c;white-space:pre-wrap">${htmlEscape(feedback.message)}</div><p><a href="${htmlEscape(portalUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Open unit register</a></p><p>This is an internal message. It is not displayed to the student.</p></div></body></html>`;
+  await Promise.all(recipients.map(to => sendGmailHtmlEmail({to,subject:`Private staff feedback - ${ticket.reference}`,html})));
+  return { sent:true, recipients:recipients.length };
+}
 function supportEmailsAreInstitutional(emails) {
   return emails.every(email => {
     const domain = String(email).split('@').pop().toLowerCase();
@@ -3112,7 +3168,7 @@ async function createSupportStaffAssignment(req, res, { identity, allowedUnits }
         assignment.supersededBy = actor;
       }
     }
-    ticket.staffAssignments.push({ id:assignmentId, unitId, unitLabel:STAFF_UNITS[unitId].label, officerFirstName, officerMiddleName, officerLastName, officerName:officerName || accountSetup.account.name || officerEmail.split('@')[0], officerEmail, staffAccountId:accountSetup.account.id, accountCreated:Boolean(accountSetup.created), activationRequired:accountSetup.state==='pending', assignedBy:actor, assignedAt:now, expiresAt, tokenHash:hashOneTimeToken(rawToken), state:'unopened', emailStatus:'pending', checks:{}, openedAt:null, resolvedAt:null, resolutionNote:'', stateHistory:[{ colour:'red', label:'Assigned, not yet opened', narrative:`Assigned to ${officerName || accountSetup.account.name || officerEmail}.`, at:now, by:actor, source:'staff-assignment' }] });
+    ticket.staffAssignments.push({ id:assignmentId, unitId, unitLabel:STAFF_UNITS[unitId].label, officerFirstName, officerMiddleName, officerLastName, officerName:officerName || accountSetup.account.name || officerEmail.split('@')[0], officerEmail, staffAccountId:accountSetup.account.id, accountCreated:Boolean(accountSetup.created), activationRequired:accountSetup.state==='pending', assignedBy:actor, assignedAt:now, expiresAt, tokenHash:hashOneTimeToken(rawToken), state:'unopened', emailStatus:'pending', checks:{}, openedAt:null, resolvedAt:null, resolutionNote:'', decisionEvidence:[], stateHistory:[{ colour:'red', label:'Assigned, not yet opened', narrative:`Assigned to ${officerName || accountSetup.account.name || officerEmail}.`, at:now, by:actor, source:'staff-assignment' }] });
     ticket.assignedCaseOwner = officerName || officerEmail;
     ticket.assignedCaseEmail = officerEmail;
     ticket.assignmentDueAt = supportMoveWorkingDays(now, 2);
@@ -3418,13 +3474,24 @@ app.post('/api/support/admin/tickets/:id/reassign', supportWorkspaceAuth, requir
 });
 
 function secureSupportAssignmentPage(ticket, assignment, token, notice = '') {
-  const state=supportAssignmentState(assignment);
-  const framedEvidence=(files,collection,emptyText)=>Array.isArray(files)&&files.length
-    ? `<div class="assignment-evidence">${files.map((file,index)=>{const url=`/secure/support-assignment/${encodeURIComponent(token)}/${collection}/${index}`;const name=htmlEscape(file.originalName||`Evidence ${index+1}`);return `<section><strong>${name}</strong><iframe src="${url}" title="${name}"></iframe><a href="${url}?download=1">Download original</a></section>`;}).join('')}</div>`
-    : `<p>${emptyText}</p>`;
-  const resolved=assignment.state==='resolved';
-  const checklist=SUPPORT_ASSIGNMENT_CHECKS.map(item=>`<label class="resolution-check"><input type="checkbox" name="${item.id}" value="yes" ${resolved?'checked disabled':'required'}><span>${htmlEscape(item.label)}</span></label>`).join('');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${htmlEscape(ticket.reference)} Staff Assignment</title><style>:root{--navy:#082b4c;--gold:#d4a72c;--green:#238154;--red:#c6404d;--yellow:#d79a00;--line:#d9e3ea}*{box-sizing:border-box}body{margin:0;background:#f4f7fa;color:#172431;font:16px/1.55 Arial,sans-serif}.wrap{max-width:960px;margin:32px auto;padding:0 18px 50px}.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:24px;box-shadow:0 10px 28px rgba(15,38,61,.08);margin-bottom:18px}h1,h2{color:var(--navy)}h1{font-size:28px;margin:4px 0}.eyebrow{color:#956f00;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.state{display:inline-flex;padding:7px 11px;border-radius:999px;font-weight:800;font-size:14px}.state-red{background:#fde8ea;color:#982b38}.state-yellow{background:#fff1c9;color:#795400}.state-green{background:#def3e7;color:#11683a}.meta{display:grid;grid-template-columns:180px 1fr;gap:8px 14px;padding:15px;background:#f4f8fb;border-radius:9px}.copy{white-space:pre-wrap}.assignment-evidence{display:grid;gap:16px}.assignment-evidence section{display:grid;gap:8px}.assignment-evidence iframe{width:100%;height:430px;border:1px solid var(--line);border-radius:8px}.assignment-evidence a{color:var(--navy);font-weight:800}.resolution-form{display:grid;gap:12px}.resolution-check{display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--line);border-radius:9px}.resolution-check input{width:20px;height:20px;accent-color:var(--green)}textarea{width:100%;min-height:120px;padding:11px;border:1px solid #b9c7d1;border-radius:8px;font:inherit}.button{border:0;border-radius:8px;background:var(--green);color:#fff;padding:12px 17px;font:inherit;font-weight:800;cursor:pointer}.notice{padding:12px 14px;border-left:4px solid var(--green);background:#eaf7ef;color:#145f38;margin-bottom:16px}@media(max-width:650px){.meta{grid-template-columns:1fr}.assignment-evidence iframe{height:320px}}</style></head><body><main class="wrap">${notice?`<div class="notice">${htmlEscape(notice)}</div>`:''}<section class="card"><span class="eyebrow">Assigned staff workspace</span><h1>${htmlEscape(ticket.reference)}</h1><p><span class="state state-${state.colour}">${htmlEscape(state.label)}</span></p><div class="meta"><b>Functional unit</b><span>${htmlEscape(assignment.unitLabel)}</span><b>Assigned staff</b><span>${htmlEscape(assignment.officerName)} · ${htmlEscape(assignment.officerEmail)}</span><b>Type</b><span>${htmlEscape(ticket.type==='service-request'?'Service request':'Complaint')}</span><b>Category</b><span>${htmlEscape(ticket.categoryLabel)}</span><b>Student</b><span>${htmlEscape(ticket.name)} · ${htmlEscape(ticket.studentNumber||'Number not stated')}</span><b>Study centre</b><span>${htmlEscape(ticket.studyCentre||'Not stated')}</span><b>Subject</b><span>${htmlEscape(ticket.subject)}</span></div><h2>Student submission</h2><p class="copy">${htmlEscape(ticket.description)}</p></section><section class="card"><h2>Student evidence</h2>${framedEvidence(ticket.evidence,'evidence','No student evidence was attached.')}<h2>Officer evidence</h2>${framedEvidence(ticket.officerEvidence,'officer-evidence','No officer evidence has been added.')}</section><section class="card"><h2>${resolved?'Resolution completed':'Complete this assignment'}</h2>${resolved?`<p><strong>Resolved:</strong> ${htmlEscape(new Date(assignment.resolvedAt).toLocaleString('en-GB'))}</p><p class="copy">${htmlEscape(assignment.resolutionNote)}</p>`:`<p>All three confirmations and a clear resolution note are required. Completing this form changes the assignment indicator from yellow to green in every authorised register.</p><form class="resolution-form" method="post" action="/secure/support-assignment/${encodeURIComponent(token)}/resolve">${checklist}<label><strong>Resolution provided to the student and oversight units</strong><textarea name="resolutionNote" minlength="10" maxlength="4000" required></textarea></label><button class="button" type="submit">Mark complaint or request resolved</button></form>`}</section></main></body></html>`;
+  const state = supportAssignmentState(assignment);
+  const assignmentUrl = `/secure/support-assignment/${encodeURIComponent(token)}`;
+  const framedEvidence = (files, collection, emptyText) => Array.isArray(files) && files.length
+    ? `<div class="assignment-evidence">${files.map((file,index)=>{const url=`${assignmentUrl}/${collection}/${index}`;const name=htmlEscape(file.originalName||`Evidence ${index+1}`);return `<section><strong>${name}</strong>${file.note?`<small>${htmlEscape(file.note)}</small>`:''}<iframe src="${url}" title="${name}"></iframe><a href="${url}?download=1">Download original</a></section>`;}).join('')}</div>`
+    : `<p>${htmlEscape(emptyText)}</p>`;
+  const resolved = assignment.state === 'resolved';
+  const checklist = SUPPORT_ASSIGNMENT_CHECKS.map(item=>`<label class="resolution-check"><input type="checkbox" name="${item.id}" value="yes" ${resolved?'checked disabled':'required'}><span>${htmlEscape(item.label)}</span></label>`).join('');
+  const privateFeedback = (ticket.internalFeedback || []).filter(item => item.assignmentId === assignment.id);
+  const feedbackHistory = privateFeedback.length
+    ? `<ul class="feedback-history">${privateFeedback.slice().reverse().map(item=>`<li><strong>${htmlEscape(item.fromName||item.fromEmail||'Assigned staff')}</strong><span>${htmlEscape(new Date(item.at).toLocaleString('en-GB'))}</span><p>${htmlEscape(item.message)}</p></li>`).join('')}</ul>`
+    : '<p>No private feedback has been sent for this assignment.</p>';
+  const decisionEvidence = framedEvidence(assignment.decisionEvidence,'decision-evidence','No decision evidence was attached.');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="/favicon.ico"><title>${htmlEscape(ticket.reference)} Staff Assignment</title><style>:root{--navy:#082b4c;--gold:#d4a72c;--green:#238154;--red:#c6404d;--yellow:#d79a00;--line:#d9e3ea}*{box-sizing:border-box}body{margin:0;background:#f4f7fa;color:#172431;font:16px/1.55 Arial,sans-serif}.wrap{max-width:960px;margin:32px auto;padding:0 18px 50px}.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:24px;box-shadow:0 10px 28px rgba(15,38,61,.08);margin-bottom:18px}h1,h2{color:var(--navy)}h1{font-size:28px;margin:4px 0}.eyebrow{color:#956f00;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.state{display:inline-flex;padding:7px 11px;border-radius:999px;font-weight:800;font-size:14px}.state-red{background:#fde8ea;color:#982b38}.state-yellow{background:#fff1c9;color:#795400}.state-green{background:#def3e7;color:#11683a}.meta{display:grid;grid-template-columns:180px 1fr;gap:8px 14px;padding:15px;background:#f4f8fb;border-radius:9px}.copy{white-space:pre-wrap}.assignment-evidence{display:grid;gap:16px}.assignment-evidence section{display:grid;gap:8px}.assignment-evidence iframe{width:100%;height:430px;border:1px solid var(--line);border-radius:8px}.assignment-evidence a{color:var(--navy);font-weight:800}.resolution-form{display:grid;gap:12px}.resolution-check{display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--line);border-radius:9px}.resolution-check input{width:20px;height:20px;accent-color:var(--green)}label{display:grid;gap:7px}textarea,input[type=file]{width:100%;padding:11px;border:1px solid #b9c7d1;border-radius:8px;font:inherit}textarea{min-height:120px}.button{border:0;border-radius:8px;background:var(--green);color:#fff;padding:12px 17px;font:inherit;font-weight:800;cursor:pointer}.button.secondary{background:var(--navy)}.privacy{padding:10px 12px;background:#edf4f8;border-left:4px solid var(--navy);font-size:13px}.feedback-history{list-style:none;padding:0;display:grid;gap:10px}.feedback-history li{padding:12px;background:#f5f8fb;border:1px solid var(--line);border-radius:8px}.feedback-history span{display:block;color:#526878;font-size:12px}.feedback-history p{white-space:pre-wrap}.notice{padding:12px 14px;border-left:4px solid var(--green);background:#eaf7ef;color:#145f38;margin-bottom:16px}@media(max-width:650px){.meta{grid-template-columns:1fr}.assignment-evidence iframe{height:320px}}</style></head><body><main class="wrap">${notice?`<div class="notice">${htmlEscape(notice)}</div>`:''}
+  <section class="card"><span class="eyebrow">Assigned staff workspace</span><h1>${htmlEscape(ticket.reference)}</h1><p><span class="state state-${state.colour}">${htmlEscape(state.label)}</span></p><div class="meta"><b>Functional unit</b><span>${htmlEscape(assignment.unitLabel)}</span><b>Assigned staff</b><span>${htmlEscape(assignment.officerName)} · ${htmlEscape(assignment.officerEmail)}</span><b>Type</b><span>${htmlEscape(ticket.type==='service-request'?'Service request':'Complaint')}</span><b>Category</b><span>${htmlEscape(ticket.categoryLabel)}</span><b>Student</b><span>${htmlEscape(ticket.name)} · ${htmlEscape(ticket.studentNumber||'Number not stated')}</span><b>Study centre</b><span>${htmlEscape(ticket.studyCentre||'Not stated')}</span><b>Subject</b><span>${htmlEscape(ticket.subject)}</span></div><h2>Student submission</h2><p class="copy">${htmlEscape(ticket.description)}</p></section>
+  <section class="card"><h2>Student evidence</h2>${framedEvidence(ticket.evidence,'evidence','No student evidence was attached.')}<h2>Officer evidence</h2>${framedEvidence(ticket.officerEvidence,'officer-evidence','No officer evidence has been added.')}</section>
+  <section class="card"><h2>Private feedback to unit head or administrator</h2><p class="privacy"><strong>Private:</strong> This message is visible only to administrators of ${htmlEscape(assignment.unitLabel)} and authorised system administrators. It is not shown to the student.</p><form class="resolution-form" method="post" action="${assignmentUrl}/internal-feedback"><label><strong>Feedback</strong><textarea name="message" minlength="5" maxlength="4000" required placeholder="Report findings, difficulties, recommendations, or assistance needed from the unit head."></textarea></label><button class="button secondary" type="submit">Send private feedback</button></form>${feedbackHistory}</section>
+  <section class="card"><h2>${resolved?'Resolution completed':'Complete this assignment'}</h2>${resolved?`<p><strong>Resolved:</strong> ${htmlEscape(new Date(assignment.resolvedAt).toLocaleString('en-GB'))}</p><p class="copy">${htmlEscape(assignment.resolutionNote)}</p><h2>Decision evidence</h2>${decisionEvidence}`:`<p>All three confirmations and a clear resolution note are required. Completing this form changes the assignment indicator from yellow to green in every authorised register.</p><form class="resolution-form" method="post" enctype="multipart/form-data" action="${assignmentUrl}/resolve">${checklist}<label><strong>Resolution provided to the student and oversight units</strong><textarea name="resolutionNote" minlength="10" maxlength="4000" required></textarea></label><label><strong>Decision evidence <small>(optional)</small></strong><input name="decisionEvidence" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.txt"><small>Attach records supporting the documented decision. Maximum 10 files, 15 MB each.</small></label><label><strong>Private feedback to the unit head <small>(optional)</small></strong><textarea name="internalFeedback" maxlength="4000" placeholder="This is not shown to the student."></textarea></label><button class="button" type="submit">Mark complete and request resolved</button></form>`}</section>
+  </main></body></html>`;
 }
 
 async function secureSupportAssignmentAuth(req, res, next) {
@@ -3453,27 +3520,61 @@ app.get('/secure/support-assignment/:token', secureSupportAssignmentAuth, async(
   res.setHeader('X-Robots-Tag','noindex, nofollow, noarchive');
   return res.send(secureSupportAssignmentPage(match.ticket,match.assignment,req.params.token));
 });
-app.post('/secure/support-assignment/:token/resolve', secureSupportAssignmentAuth, supportSameOrigin, async(req,res)=>{
-  const checks=Object.fromEntries(SUPPORT_ASSIGNMENT_CHECKS.map(item=>[item.id,String(req.body?.[item.id]||'')==='yes']));
-  const resolutionNote=String(req.body?.resolutionNote||'').trim().slice(0,4000);
-  if(Object.values(checks).some(value=>!value)||resolutionNote.length<10)return res.status(400).send('Complete all resolution checkboxes and provide a clear resolution note of at least 10 characters.');
-  const found=supportAssignmentForToken(await readSupportTickets(),req.params.token);
-  if(!found||found.assignment.state==='superseded')return res.status(404).send('This staff assignment link is unavailable.');
-  if(new Date(found.assignment.expiresAt).getTime()<=Date.now()&&found.assignment.state!=='resolved')return res.status(410).send('This staff assignment link has expired.');
-  const now=new Date().toISOString();let updated=null,isResponsible=false;
-  await mutateSupportTickets(tickets=>{const ticket=tickets.find(item=>item.id===found.ticket.id),assignment=ticket?.staffAssignments?.find(item=>item.id===found.assignment.id);if(!ticket||!assignment)return tickets;const actor=assignment.officerName||assignment.officerEmail;assignment.state='resolved';assignment.resolvedAt=assignment.resolvedAt||now;assignment.resolvedBy=actor;assignment.checks=checks;assignment.resolutionNote=resolutionNote;assignment.completionSource='secure-assignment-checklist';supportAppendAssignmentTransition(assignment,{colour:'green',label:'Resolution checklist completed',narrative:resolutionNote,at:now,by:actor,source:'secure-assignment-checklist'});ticket.lastUpdatedAt=now;isResponsible=ticket.ownerUnitId===assignment.unitId;if(isResponsible){ticket.status='resolved';ticket.resolution=resolutionNote;ticket.resolvedAt=now;ticket.resolvedBy=actor;ticket.studentResponseDueAt=supportMoveWorkingDays(now,5);ticket.studentUpdates=Array.isArray(ticket.studentUpdates)?ticket.studentUpdates:[];ticket.studentUpdates.push({label:'Resolution proposed',message:resolutionNote,at:now});}const referral=[...(ticket.referrals||[])].reverse().find(item=>item.targetUnit===assignment.unitId&&!['reassigned','closed'].includes(item.status));if(referral){referral.status='resolved';referral.resolvedAt=now;referral.resolvedBy=actor;referral.resolutionNarrative=resolutionNote;}ticket.auditTrail=Array.isArray(ticket.auditTrail)?ticket.auditTrail:[];ticket.auditTrail.push({action:`Assignment resolved by ${assignment.officerEmail}`,note:`Register indicator changed to green. ${resolutionNote}`,at:now,by:actor,indicatorColour:'green'});updated=JSON.parse(JSON.stringify(ticket));return tickets;});
+app.post('/secure/support-assignment/:token/internal-feedback', secureSupportAssignmentAuth, supportSameOrigin, async(req,res)=>{
+  const message = String(req.body?.message || '').trim().slice(0,4000);
+  if (message.length < 5) return res.status(400).send('Enter private feedback of at least 5 characters.');
+  const found = supportAssignmentForToken(await readSupportTickets(),req.params.token);
+  if (!found || found.assignment.state === 'superseded') return res.status(404).send('This staff assignment link is unavailable.');
+  const now = new Date().toISOString();
+  let updated = null;
+  let savedFeedback = null;
+  await mutateSupportTickets(tickets=>{
+    const ticket=tickets.find(item=>item.id===found.ticket.id),assignment=ticket?.staffAssignments?.find(item=>item.id===found.assignment.id);
+    if(!ticket||!assignment)return tickets;
+    const actor=assignment.officerName||assignment.officerEmail;
+    savedFeedback={id:crypto.randomUUID(),assignmentId:assignment.id,unitId:assignment.unitId,unitLabel:assignment.unitLabel,fromName:actor,fromEmail:assignment.officerEmail,message,at:now,visibility:'unit-administrators-only'};
+    ticket.internalFeedback=Array.isArray(ticket.internalFeedback)?ticket.internalFeedback:[];
+    ticket.internalFeedback.push(savedFeedback);
+    if(ticket.internalFeedback.length>100)ticket.internalFeedback=ticket.internalFeedback.slice(-100);
+    ticket.auditTrail=Array.isArray(ticket.auditTrail)?ticket.auditTrail:[];
+    ticket.auditTrail.push({action:`Private feedback sent by ${assignment.officerEmail}`,note:'Private feedback was sent to the functional-unit head or administrator. The message is not student-facing.',at:now,by:actor,indicatorColour:supportAssignmentState(assignment).colour});
+    ticket.lastUpdatedAt=now;
+    updated=JSON.parse(JSON.stringify(ticket));
+    return tickets;
+  });
   if(!updated)return res.status(404).send('This staff assignment link is unavailable.');
-  if(isResponsible)sendSupportStudentUpdateEmail(updated,{label:'Resolution proposed',message:resolutionNote},req).catch(error=>console.error('Assigned-staff resolution email failed:',error.message));
+  sendSupportInternalFeedbackEmail(updated,found.assignment,savedFeedback,req).catch(error=>console.error('Assigned-staff feedback email failed:',error.message));
   const assignment=updated.staffAssignments.find(item=>item.id===found.assignment.id);
   res.setHeader('Cache-Control','no-store');
-  return res.send(secureSupportAssignmentPage(updated,assignment,req.params.token,'Resolution recorded. The assignment indicator is now green in every authorised register.'));
+  return res.send(secureSupportAssignmentPage(updated,assignment,req.params.token,'Private feedback sent to the unit head or administrator. It is not visible to the student.'));
+});
+
+app.post('/secure/support-assignment/:token/resolve', secureSupportAssignmentAuth, supportSameOrigin, supportUpload.array('decisionEvidence',10), async(req,res)=>{
+  const checks=Object.fromEntries(SUPPORT_ASSIGNMENT_CHECKS.map(item=>[item.id,String(req.body?.[item.id]||'')==='yes']));
+  const resolutionNote=String(req.body?.resolutionNote||'').trim().slice(0,4000);
+  const internalFeedback=String(req.body?.internalFeedback||'').trim().slice(0,4000);
+  if(Object.values(checks).some(value=>!value)||resolutionNote.length<10){await removeUploaded(req).catch(()=>{});return res.status(400).send('Complete all resolution checkboxes and provide a clear resolution note of at least 10 characters.');}
+  const found=supportAssignmentForToken(await readSupportTickets(),req.params.token);
+  if(!found||found.assignment.state==='superseded'){await removeUploaded(req).catch(()=>{});return res.status(404).send('This staff assignment link is unavailable.');}
+  if(new Date(found.assignment.expiresAt).getTime()<=Date.now()&&found.assignment.state!=='resolved'){await removeUploaded(req).catch(()=>{});return res.status(410).send('This staff assignment link has expired.');}
+  const now=new Date().toISOString();let updated=null,isResponsible=false,savedFeedback=null;
+  const decisionEvidence=(Array.isArray(req.files)?req.files:[]).map(file=>({...fileRecord(file),uploadedAt:now,uploadedBy:found.assignment.officerName||found.assignment.officerEmail,note:'Evidence supporting the assigned staff decision',assignmentId:found.assignment.id,decisionEvidence:true}));
+  await mutateSupportTickets(tickets=>{const ticket=tickets.find(item=>item.id===found.ticket.id),assignment=ticket?.staffAssignments?.find(item=>item.id===found.assignment.id);if(!ticket||!assignment)return tickets;const actor=assignment.officerName||assignment.officerEmail;assignment.state='resolved';assignment.resolvedAt=assignment.resolvedAt||now;assignment.resolvedBy=actor;assignment.checks=checks;assignment.resolutionNote=resolutionNote;assignment.completionSource='secure-assignment-checklist';assignment.decisionEvidence=Array.isArray(assignment.decisionEvidence)?assignment.decisionEvidence:[];assignment.decisionEvidence.push(...decisionEvidence);ticket.officerEvidence=Array.isArray(ticket.officerEvidence)?ticket.officerEvidence:[];ticket.officerEvidence.push(...decisionEvidence);if(internalFeedback.length>=5){savedFeedback={id:crypto.randomUUID(),assignmentId:assignment.id,unitId:assignment.unitId,unitLabel:assignment.unitLabel,fromName:actor,fromEmail:assignment.officerEmail,message:internalFeedback,at:now,visibility:'unit-administrators-only'};ticket.internalFeedback=Array.isArray(ticket.internalFeedback)?ticket.internalFeedback:[];ticket.internalFeedback.push(savedFeedback);}supportAppendAssignmentTransition(assignment,{colour:'green',label:'Resolution checklist completed',narrative:resolutionNote,at:now,by:actor,source:'secure-assignment-checklist'});ticket.lastUpdatedAt=now;isResponsible=ticket.ownerUnitId===assignment.unitId;if(isResponsible){ticket.status='resolved';ticket.resolution=resolutionNote;ticket.resolvedAt=now;ticket.resolvedBy=actor;ticket.studentResponseDueAt=supportMoveWorkingDays(now,5);ticket.studentUpdates=Array.isArray(ticket.studentUpdates)?ticket.studentUpdates:[];ticket.studentUpdates.push({label:'Resolution proposed',message:resolutionNote,at:now});}const referral=[...(ticket.referrals||[])].reverse().find(item=>item.targetUnit===assignment.unitId&&!['reassigned','closed'].includes(item.status));if(referral){referral.status='resolved';referral.resolvedAt=now;referral.resolvedBy=actor;referral.resolutionNarrative=resolutionNote;}ticket.auditTrail=Array.isArray(ticket.auditTrail)?ticket.auditTrail:[];ticket.auditTrail.push({action:`Assignment resolved by ${assignment.officerEmail}`,note:`Register indicator changed to green. ${decisionEvidence.length} decision evidence file${decisionEvidence.length===1?'':'s'} attached. ${resolutionNote}`,at:now,by:actor,indicatorColour:'green'});if(savedFeedback)ticket.auditTrail.push({action:`Private feedback sent by ${assignment.officerEmail}`,note:'Private feedback was sent to the functional-unit head or administrator. The message is not student-facing.',at:now,by:actor,indicatorColour:'green'});updated=JSON.parse(JSON.stringify(ticket));return tickets;});
+  if(!updated){await removeUploaded(req).catch(()=>{});return res.status(404).send('This staff assignment link is unavailable.');}
+  if(isResponsible)sendSupportStudentUpdateEmail(updated,{label:'Resolution proposed',message:resolutionNote},req).catch(error=>console.error('Assigned-staff resolution email failed:',error.message));
+  if(savedFeedback)sendSupportInternalFeedbackEmail(updated,found.assignment,savedFeedback,req).catch(error=>console.error('Assigned-staff feedback email failed:',error.message));
+  const assignment=updated.staffAssignments.find(item=>item.id===found.assignment.id);
+  res.setHeader('Cache-Control','no-store');
+  return res.send(secureSupportAssignmentPage(updated,assignment,req.params.token,`Resolution recorded. The assignment indicator is now green in every authorised register.${decisionEvidence.length?` ${decisionEvidence.length} decision evidence file${decisionEvidence.length===1?' was':'s were'} attached.`:''}`));
 });
 app.get('/secure/support-assignment/:token/:collection/:index', secureSupportAssignmentAuth, async(req,res)=>{
   const match=req.supportAssignmentMatch;
   if(new Date(match.assignment.expiresAt).getTime()<=Date.now()&&match.assignment.state!=='resolved')return res.status(410).send('This staff assignment link has expired.');
-  const collection=req.params.collection==='officer-evidence'?'officerEvidence':req.params.collection==='evidence'?'evidence':'';
+  const collection=req.params.collection==='officer-evidence'?'officerEvidence':req.params.collection==='evidence'?'evidence':req.params.collection==='decision-evidence'?'decisionEvidence':'';
   if(!collection)return res.status(404).send('Evidence file not found.');
-  const evidence=supportEvidenceFor(match.ticket,req.params.index,collection);
+  const evidence=collection==='decisionEvidence'
+    ? supportEvidenceFor({decisionEvidence:match.assignment.decisionEvidence},req.params.index,'decisionEvidence')
+    : supportEvidenceFor(match.ticket,req.params.index,collection);
   if(!evidence)return res.status(404).send('Evidence file not found.');
   res.setHeader('X-Robots-Tag','noindex, nofollow, noarchive');
   return sendSupportEvidence(req,res,evidence);
@@ -5619,15 +5720,16 @@ app.get('/api/staff/support-performance.xlsx', staffAuth, async(req,res)=>{
   const tickets=filterSupportReportTickets(supportTicketsForStaffIdentity(await readSupportTickets(),req.staffIdentity),req.query);
   sendSupportWorkbook(res,tickets,`support-performance-${supportDateKey(new Date())}.xlsx`,true);
 });
-function staffReferralTicket(ticket, unitIds = []) {
-  const activeUnitIds = normalizeStaffUnits(unitIds).filter(unitId => ticket.ownerUnitId === unitId || Boolean(activeReferralForUnits(ticket,[unitId])));
+function staffReferralTicket(ticket, identity = {}) {
+  const unitIds = normalizeStaffUnits(identity.units);
+  const activeUnitIds = unitIds.filter(unitId => ticket.ownerUnitId === unitId || Boolean(activeReferralForUnits(ticket,[unitId])));
   return {
     id: ticket.id, reference: ticket.reference, name: ticket.name, firstName:ticket.firstName || '', middleName:ticket.middleName || '', lastName:ticket.lastName || '', email: ticket.email, type: ticket.type,
     studyLevel: ticket.studyLevelLabel || '', category: ticket.categoryLabel, priority: ticket.priorityLabel,
     status: ticket.status, statusLabel: SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,
     ownerUnit: ticket.ownerUnit, subject: ticket.subject, description: ticket.description, studyCentre: ticket.studyCentre,
     lastUpdatedAt: ticket.lastUpdatedAt, dueAt: ticket.dueAt || null, assignedCaseOwner: ticket.assignedCaseOwner || '', sensitive: Boolean(ticket.sensitive), sla: supportSlaSummary(ticket), evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [],
-    officerEvidence: Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [], referrals: ticket.referrals || [], registrations:ticket.registrations || [], routingHistory:ticket.routingHistory || [], routingState:supportRegistrationSummary(ticket,unitIds),
+    officerEvidence: Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [], internalFeedback:supportInternalFeedbackForIdentity(ticket,identity), referrals: ticket.referrals || [], registrations:ticket.registrations || [], routingHistory:ticket.routingHistory || [], routingState:supportRegistrationSummary(ticket,unitIds),
     assignment:supportAssignmentSummary(ticket,unitIds), assignments:supportAssignmentList(ticket), activeUnitIds,
     interUnitMessages: ticket.interUnitMessages || [], studentUpdates: ticket.studentUpdates || [], auditTrail: ticket.auditTrail || [], resolution:ticket.resolution || '', finalDecision:supportDecisionSummary(ticket), decisionHistory:ticket.decisionHistory || [], feedback:ticket.feedback || null,
     notificationPreference:ticket.notificationPreference || 'email', language:ticket.language || 'en'
@@ -5639,7 +5741,7 @@ app.get('/api/staff/referrals', staffAuth, async(req, res) => {
   const tickets = await readSupportTickets();
   const referrals = tickets.filter(ticket => (!ticket.sensitive || unitIds.some(unit => ['confidential-handler','provost'].includes(unit))) && ((ticket.referrals || []).some(referral => unitIds.includes(referral.targetUnit) || unitIds.includes(referral.sourceUnit)) || (ticket.interUnitMessages || []).some(message => unitIds.includes(message.targetUnit) || unitIds.includes(message.sourceUnit))))
     .sort((a,b) => String(b.lastUpdatedAt || b.createdAt).localeCompare(String(a.lastUpdatedAt || a.createdAt)))
-    .map(ticket => staffReferralTicket(ticket, unitIds));
+    .map(ticket => staffReferralTicket(ticket, req.staffIdentity));
   res.json({ ok: true, referrals });
 });
 app.post('/api/staff/referrals/:id/staff-assignments', staffAuth, async(req,res)=>{
@@ -6543,12 +6645,17 @@ app.get('/api/admin/:department/summary',departmentAuth,async(req,res)=>{
   });
 });
 
-app.get('/health',async(_req,res)=>{const admins=await readAdminUsers(),centreCatalogue=await readStudyCentreCatalogue(),centreDirectory=await readStudyCentreDirectory(),supportTickets=await readSupportTickets();const centreCount=Object.values(centreCatalogue).reduce((n,list)=>n+(Array.isArray(list)?list.length:0),0);res.json({ok:true,appName:'UCC-CoDE eServices',departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',smsConfigured:supportMobileChannelConfigured('sms'),whatsappConfigured:supportMobileChannelConfigured('whatsapp'),resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:admins.length,pendingAdminInvitations:admins.filter(a=>!a.passwordHash&&a.invitationTokenHash).length,studyCentres:centreCount,studyCentreDirectory:centreDirectory.length,supportTickets:supportTickets.length,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'});});
+app.get('/health',async(_req,res)=>{const admins=await readAdminUsers(),centreCatalogue=await readStudyCentreCatalogue(),centreDirectory=await readStudyCentreDirectory(),supportTickets=await readSupportTickets();const centreCount=Object.values(centreCatalogue).reduce((n,list)=>n+(Array.isArray(list)?list.length:0),0);res.json({ok:true,appName:'UCC-CoDE eServices',departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',smsConfigured:supportMobileChannelConfigured('sms'),smsProvider:supportMobileChannelConfigured('sms')?'arkesel':'',resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:admins.length,pendingAdminInvitations:admins.filter(a=>!a.passwordHash&&a.invitationTokenHash).length,studyCentres:centreCount,studyCentreDirectory:centreDirectory.length,supportTickets:supportTickets.length,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'});});
 app.get('/vendor/xlsx.full.min.js', (_req,res)=>res.sendFile(path.join(__dirname,'node_modules','xlsx','dist','xlsx.full.min.js')));
 app.use(express.static(path.join(__dirname,'public'),{extensions:['html']}));
 app.use((err,req,res,_next)=>{
   console.error(err);
-  if(err instanceof multer.MulterError)return res.status(400).json({error:err.code==='LIMIT_FILE_SIZE'?'A file exceeds the 100 MB server limit.':err.message});
+  if(err instanceof multer.MulterError){
+    const secureAssignment=req.path.startsWith('/secure/support-assignment/');
+    const message=err.code==='LIMIT_FILE_SIZE'?(secureAssignment?'An uploaded evidence file exceeds the 15 MB limit.':'A file exceeds the 100 MB server limit.'):err.code==='LIMIT_FILE_COUNT'?(secureAssignment?'No more than 10 evidence files may be uploaded.':'Too many files were uploaded.'):err.message;
+    if(secureAssignment)return res.status(400).type('html').send(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:32px"><h1>Upload not completed</h1><p>${htmlEscape(message)}</p><p><a href="${htmlEscape(req.originalUrl.replace(/\/resolve$/,''))}">Return to the assigned case</a></p></body></html>`);
+    return res.status(400).json({error:message});
+  }
   res.status(500).json({error:'Unexpected server error.'});
 });
 
@@ -6570,14 +6677,14 @@ function supportLifecycleEmail(ticket, type) {
   return { subject:`${isBreach ? 'Overdue' : 'Due soon'}: ${ticket.reference}`, html:`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${heading}</h2><p><strong>Reference:</strong> ${htmlEscape(ticket.reference)}<br><strong>Category:</strong> ${htmlEscape(ticket.categoryLabel)}<br><strong>Responsible unit:</strong> ${htmlEscape(ticket.ownerUnit)}<br><strong>Target:</strong> ${htmlEscape(new Date(ticket.dueAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'}))} UTC</p><p>${action}</p>${portalLink}<p>Do not forward case details outside authorised institutional channels.</p></div></body></html>` };
 }
 async function dispatchSupportLifecycleNotifications() {
-  if (!gmailConfigured() && !supportMobileChannelConfigured('sms') && !supportMobileChannelConfigured('whatsapp')) return;
+  if (!gmailConfigured() && !supportMobileChannelConfigured('sms')) return;
   const tickets = await readSupportTickets();
   const candidates = [];
   for (const ticket of tickets) {
     const eligible = type => { const state=ticket.notificationState?.[type]; return !state?.sentAt && Number(state?.attempts || 0) < 3 && (!state?.lastAttemptAt || Date.now() - new Date(state.lastAttemptAt).getTime() >= 60 * 60 * 1000); };
     if (gmailConfigured() && ticket.slaWarningAt && eligible('sla-warning')) candidates.push({ ticketId:ticket.id, type:'sla-warning' });
     if (gmailConfigured() && ticket.slaBreachedAt && eligible('sla-breach')) candidates.push({ ticketId:ticket.id, type:'sla-breach' });
-    const reminderChannelAvailable=gmailConfigured() || supportMobileChannels(ticket).some(supportMobileChannelConfigured);
+    const reminderChannelAvailable=gmailConfigured() || (supportMobileChannelConfigured('sms') && Boolean(supportNormaliseMobile(ticket.phone)));
     if (reminderChannelAvailable && ticket.slaPausedAt && supportElapsedWorkingDays(ticket.slaPausedAt) >= SUPPORT_EVIDENCE_REMINDER_WORKING_DAYS && eligible('evidence-reminder')) candidates.push({ ticketId:ticket.id, type:'evidence-reminder' });
   }
   for (const candidate of candidates) {
@@ -6602,7 +6709,7 @@ async function dispatchSupportLifecycleNotifications() {
         if (!isEmail(claimed.email)) throw new Error('Student email is unavailable.');
         const statusUrl = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/support-track.html?token=${encodeURIComponent(supportStatusToken(claimed))}` : '';
         const link = statusUrl ? `<p><a href="${htmlEscape(statusUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:11px 16px;border-radius:7px;font-weight:bold">Respond to this ticket</a></p>` : '';
-        await dispatchSupportStudentNotification(claimed, { kind:'reminder', subject:`Information still required - ${claimed.reference}`, html:`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Your response is still needed</h2><p>Dear ${htmlEscape(claimed.name || 'Student')},</p><p>The responsible unit is waiting for the information requested on ticket <strong>${htmlEscape(claimed.reference)}</strong>.</p><p>${htmlEscape(claimed.slaPauseReason || 'Please review the ticket and provide the requested evidence.')}</p>${link}<p>The service target remains paused until your response is received.</p></div></body></html>` });
+        await dispatchSupportStudentNotification(claimed, { kind:'information-request', subject:`Information still required - ${claimed.reference}`, html:`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Your response is still needed</h2><p>Dear ${htmlEscape(claimed.name || 'Student')},</p><p>The responsible unit is waiting for the information requested on ticket <strong>${htmlEscape(claimed.reference)}</strong>.</p><p>${htmlEscape(claimed.slaPauseReason || 'Please review the ticket and provide the requested evidence.')}</p>${link}<p>The service target remains paused until your response is received.</p></div></body></html>` });
       } else {
         const recipients = await supportLifecycleRecipients(claimed);
         if (!recipients.length) throw new Error('No eligible institutional escalation recipient is assigned.');
@@ -6661,6 +6768,8 @@ app.listen(PORT,'0.0.0.0',()=>{
   }
   if (DEVELOPER_ADMIN_PASSWORD === 'change-this-password') console.warn('WARNING: Set DEVELOPER_ADMIN_PASSWORD before using the developer resource portal.');
   if (SUPPORT_STATUS_TOKEN_SECRET === DEVELOPER_ADMIN_PASSWORD) console.warn('WARNING: Set SUPPORT_STATUS_TOKEN_SECRET to a separate long random value.');
-  if ((SUPPORT_SMS_ENABLED || SUPPORT_WHATSAPP_ENABLED) && (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN)) console.warn('WARNING: Mobile notifications are enabled but Twilio credentials are incomplete.');
-  if ((supportMobileChannelConfigured('sms') || supportMobileChannelConfigured('whatsapp')) && !PUBLIC_BASE_URL) console.warn('WARNING: Set PUBLIC_BASE_URL before enabling mobile notifications so tracking links are complete.');
+  if (SUPPORT_SMS_ENABLED && (!ARKESEL_API_KEY || !ARKESEL_SENDER_ID)) console.warn('WARNING: SMS notifications are enabled but Arkesel credentials are incomplete.');
+  if (ARKESEL_SENDER_ID.length > 11) console.warn('WARNING: ARKESEL_SENDER_ID must not exceed 11 characters.');
+  if (supportMobileChannelConfigured('sms') && !PUBLIC_BASE_URL) console.warn('WARNING: Set PUBLIC_BASE_URL before enabling SMS notifications so tracking links and delivery callbacks are complete.');
+  if (supportMobileChannelConfigured('sms') && !ARKESEL_CALLBACK_SECRET) console.warn('WARNING: Set ARKESEL_CALLBACK_SECRET to record Arkesel delivery-status callbacks.');
 });

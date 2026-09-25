@@ -1,0 +1,30 @@
+UCC-CoDE eServices v50
+Assigned-staff completion, private feedback and custom-domain update
+
+WHAT CHANGED
+
+1. Assigned staff may attach up to 10 optional decision-evidence files when completing a complaint or request. Each file may be up to 15 MB.
+2. Decision evidence is linked to the staff assignment and is also listed in the authorised officer-evidence register.
+3. Assigned staff may send private feedback to the head or administrator of their functional unit without resolving the case.
+4. A second optional private-feedback field is available during completion.
+5. Private feedback is visible only to authorised administrators of the same functional unit and system administrators. It is never included in student tracking responses or student notifications.
+6. The completion origin check now recognises the custom domain and trusted proxy host. Invalid submissions receive a readable page instead of raw JSON.
+7. Generated assignment, account-activation, tracking, email and SMS links now use https://mycode360.app.
+8. Old browser links opened on submission2-2z89.onrender.com redirect to https://mycode360.app while preserving the path and query string.
+
+DEPLOYMENT
+
+Set this exact Render environment variable:
+
+PUBLIC_BASE_URL=https://mycode360.app
+
+Keep the Namecheap DNS record and Render custom-domain record active. Deploy this version, then use Render's manual deploy option if the service does not restart automatically.
+
+VERIFICATION
+
+Run:
+
+npm run check
+npm run test:portals
+
+The portal integration test verifies the custom-domain assignment and activation links, custom-domain completion request, optional decision-evidence upload, green register state, unit-administrator feedback visibility, and exclusion of private feedback from student tracking.
