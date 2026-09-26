@@ -1,5 +1,19 @@
 # Changelog
 
+## 55.0.0 Centre/group reconciliation warning correction
+
+- Narrows the non-blocking warning policy to Project Work centre/group reconciliation.
+- Accepts the illustrated 10 claimed, 10 attached and 11 detected group-combination case when every index number has a score.
+- Keeps the claim-versus-attachment count and missing index-score checks as blockers.
+- Removes the additional row-quality warning classifications introduced in v54.
+
+## 54.0.0 Project Work submission gate and warning policy
+
+- Accepts a Project Work submission when the claimed group count matches the attached completed works and every index number has a score.
+- Changes group, centre, row-quality, sequence, duplicate and score-range inconsistencies into departmental warnings at submission.
+- Keeps missing index scores and claimed-group versus attachment-count differences as submission blockers.
+- Reports the warning count to the claimant after successful submission and preserves all v53 administrator reconciliation controls.
+
 ## 53.0.0 Project Work predominant-centre grouping
 
 - Keeps genuine same-number groups at different study centres distinct.

@@ -3782,16 +3782,20 @@ app.post('/api/project-work', upload.fields([
     try { scoreResult = parseScoreWorkbook(filesFor(req,'scoresFile')[0].path); }
     catch (e) { await removeUploaded(req); return res.status(400).json({ error: e.message }); }
     const claimedGroupCount=parseFlexiblePositiveCount(text(req,'groupCount'));
-    const provisionalRecord={studyCentres:selectedCentres,studentStream,projectStream:studentStream},groupAnalysis=projectGroupAnalysis(provisionalRecord,{rows:scoreResult.rows}),groupUnits=groupAnalysis.groupUnits,groupNumbers=groupUnits.map(unit=>unit.label);
     const completedProjectWorkCount=filesFor(req,'completedWork').length;
     if(!claimedGroupCount){await removeUploaded(req);return res.status(400).json({error:'Enter Total Number of Groups Submitting as a number or words, for example 8, eight, eight (8), or eight(8).'});}
-    const possibleGroupCounts=new Set(groupAnalysis.possibleScoreSheetGroupCounts||[groupNumbers.length]);
-    if(!possibleGroupCounts.has(claimedGroupCount) || completedProjectWorkCount!==claimedGroupCount){
-      const parts=[`Claim form/portal total: ${claimedGroupCount}`,`Distinct programme-centre-group combinations in score sheet: ${groupNumbers.length}`,possibleGroupCounts.size>1?`Possible total after administrator centre review: ${[...possibleGroupCounts].sort((a,b)=>a-b).join(' or ')}`:'',`Completed project works attached: ${completedProjectWorkCount}`].filter(Boolean);
+    if(completedProjectWorkCount!==claimedGroupCount){
+      const parts=[`Claim form/portal total: ${claimedGroupCount}`,`Completed project works attached: ${completedProjectWorkCount}`];
       await removeUploaded(req);
-      return res.status(400).json({error:`The number being claimed cannot be different from the completed supervised project works. ${parts.join(' · ')}. Correct the Total Number of Groups Submitting, GROUP NO. entries, or project-work attachments before submitting.`});
+      return res.status(400).json({error:`The number of groups stated in the claim must equal the number of completed project works attached. ${parts.join(' · ')}. Correct the group total or attachments before submitting.`});
     }
-    if(groupUnits.some(unit=>!unit.classified)&&selectedCentres.length>1){await removeUploaded(req);return res.status(400).json({error:'Every group must be identifiable by programme and study-centre code when multiple centres are selected.'});}
+    const rowsWithIndex=scoreResult.rows.filter(row=>cleanHumanText(row?.registrationNo));
+    const indexesWithoutScore=rowsWithIndex.filter(row=>!cleanHumanText(row?.totalScore));
+    if(!rowsWithIndex.length){await removeUploaded(req);return res.status(400).json({error:'The score sheet must contain at least one registration or index number with a score.'});}
+    if(indexesWithoutScore.length){
+      const sample=indexesWithoutScore.slice(0,8).map(row=>cleanHumanText(row.registrationNo)).join(', ');
+      await removeUploaded(req);return res.status(400).json({error:`Every registration or index number must have a score. Add the missing score${indexesWithoutScore.length===1?'':'s'} for ${sample}${indexesWithoutScore.length>8?' and the remaining affected rows':''}, then submit again.`});
+    }
     const claimantName=buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'middleName'),text(req,'lastName')),claimantCertification=newClaimantCertification({name:claimantName,email:text(req,'email'),staffId:text(req,'staffId')});
     const record = {
       id: crypto.randomUUID(), portalType: 'project-work', department, departmentName: DEPARTMENTS[department].name,
@@ -3810,8 +3814,9 @@ app.post('/api/project-work', upload.fields([
     };
     record.groupValidation={...projectGroupValidation(record),validatedAt:new Date().toISOString()};
     await saveRecord(record);
+    const submissionWarnings=projectSubmissionWarnings(record,await readDb()),reconciliationWarnings=record.groupValidation.valid?[]:record.groupValidation.issues;
     const certificationDelivery=await dispatchClaimantCertification(record,claimantCertification.token,req);
-    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, scoreRowsIncluded:scoreResult.rows.length, studentStream:record.studentStream, projectStream:record.projectStream, reviewStatus:'pending', reviewStatusLabel:'Pending Verification',claimantCertificationStatus:'pending',certificationEmailSent:certificationDelivery.emailSent,certificationEmailError:certificationDelivery.emailError||null });
+    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, scoreRowsIncluded:scoreResult.rows.length, studentStream:record.studentStream, projectStream:record.projectStream, reviewStatus:'pending', reviewStatusLabel:'Pending Verification',reconciliationWarningCount:reconciliationWarnings.length,reconciliationWarnings,warningCount:submissionWarnings.length,warnings:submissionWarnings.map(item=>item.message),claimantCertificationStatus:'pending',certificationEmailSent:certificationDelivery.emailSent,certificationEmailError:certificationDelivery.emailError||null });
   } catch (e) { console.error(e); await removeUploaded(req).catch(()=>{}); res.status(500).json({ error:'The project work submission could not be saved.' }); }
 });
 

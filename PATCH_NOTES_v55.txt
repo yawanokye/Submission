@@ -1,0 +1,43 @@
+UCC-CoDE eServices v55
+Centre/group reconciliation warning correction
+
+CORRECTED REQUIREMENT
+
+The non-blocking warning applies specifically to Project Work centre and group reconciliation.
+
+Example now accepted:
+
+- groups stated in the claim/portal: 10;
+- completed project works attached: 10;
+- programme-centre-group combinations detected in the score sheet: 11;
+- every registration or index number has a score.
+
+The submission is saved as Pending Verification. The difference between 10 claimed groups and 11 detected programme-centre-group combinations is displayed to the departmental administrator as a reconciliation warning. It no longer rejects the submission.
+
+SUBMISSION BLOCKERS
+
+- groups stated in the claim/portal do not equal completed project works attached;
+- a registration or index number has no score;
+- no registration or index number with a score is present;
+- the required claim form, report, score sheet or completed project work is missing;
+- required claimant, department, category, centre-selection, email or declaration information is invalid;
+- the score sheet lacks one or more of the five required headings.
+
+SCOPE CORRECTION FROM v54
+
+v55 narrows the new warning rule to centre/group reconciliation. It removes the additional row-quality warning classifications introduced in v54 for missing names, missing group numbers, S/N variations, duplicate indexes within one sheet and unusual score values. Those matters retain the system behaviour that existed before v54.
+
+USER DISPLAY
+
+After a successful submission with a centre/group difference, the claimant sees that the reconciliation was recorded as a warning and the submission was accepted. The departmental portal shows the detailed group-reconciliation issue for review.
+
+VERIFICATION
+
+- npm run check
+- npm run test:submission-gate
+- npm run test:project-centres
+- the submission regression includes the 10 claimed, 10 attached and 11 detected case shown in the supplied image.
+
+DEPLOYMENT
+
+Deploy this folder as the replacement application. No new environment variable or database migration is required.

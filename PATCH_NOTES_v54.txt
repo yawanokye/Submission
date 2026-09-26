@@ -1,0 +1,52 @@
+UCC-CoDE eServices v54
+Project Work submission gate and warning policy
+
+SUBMISSION IS ACCEPTED WHEN
+
+1. The number of groups stated in the portal claim field is a valid positive number.
+2. That number equals the number of completed project-work files attached.
+3. Every registration or index number found in the score sheet has a score.
+4. The required claim form, supervisor report, score sheet and completed project-work files are attached.
+5. The required claimant details, declaration, department and student category are supplied.
+
+WHAT NO LONGER BLOCKS SUBMISSION
+
+The following variations are saved as warnings for departmental review rather than rejecting the submission:
+
+- score-sheet group count differs from the number claimed;
+- centre codes differ within a group;
+- the programme, centre or group combination is unclear;
+- student name, index number or group number is missing on an extracted row;
+- S/N entries are out of sequence;
+- a score is non-numeric or outside 0–100;
+- an index number is repeated within the score sheet;
+- the supervisor, centre or index number appears in an earlier submission;
+- a centre pattern needs administrator reconciliation.
+
+WHAT STILL BLOCKS SUBMISSION
+
+- claimed group total and attached completed project-work count do not match;
+- a registration or index number has no score;
+- no registration or index number with a score is present;
+- a required file or required claimant field is missing;
+- the score sheet does not contain the five required headings;
+- an invalid department, category, centre selection, email address or claimant declaration is supplied.
+
+USER AND ADMIN DISPLAY
+
+- The score-sheet check now confirms that every index number has a score.
+- The successful submission message states how many variations were recorded as warnings.
+- The departmental portal continues to display each warning under Verification Warnings.
+- Scores still enter consolidated and master reports only after departmental approval.
+- The v53 reporting-centre, transfer reconciliation, audit history and immutable processing-batch rules remain active.
+
+VERIFICATION
+
+- npm run check
+- npm run test:submission-gate
+- npm run test:project-centres
+- Full payment, duplicate, batch, notification, session and portal regression tests remain available.
+
+DEPLOYMENT
+
+Deploy this folder as the replacement application. No new environment variable or database migration is required.
