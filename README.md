@@ -82,7 +82,7 @@ See `PATCH_NOTES_v39.txt` and `DEPLOYMENT.md` before deploying.
 - Protected service-performance reports compare study centres and functional units using caseload, SLA, satisfaction and resolution indicators.
 - Downloadable complaint and request registers are available to Student Support, functional units, centre and regional staff, monitoring roles and leadership, with existing confidentiality controls preserved.
 
-See `PATCH_NOTES_v52.txt` for trusted-origin recovery and legacy upload protection. `PATCH_NOTES_v51.txt` contains the persistent staff-session update.
+See `PATCH_NOTES_v53.txt` for Project Work predominant-centre grouping and transfer reconciliation. `PATCH_NOTES_v52.txt` contains trusted-origin recovery and legacy upload protection.
 
 # v34 update: Priority 2 Student Support service quality
 

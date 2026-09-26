@@ -1784,29 +1784,90 @@ function parseFlexiblePositiveCount(value) {
   return found&&total>0?total:null;
 }
 function normalizeProjectGroupNumber(value){return cleanHumanText(value).toUpperCase().replace(/\s+/g,' ');}
-function projectGroupUnitsFromRows(rows,record={}){
-  const seen=new Map(),selectedCentres=projectStudyCentres(record);
-  for(const row of rows||[]){
-    const rawGroup=cleanHumanText(row?.groupNo),groupKey=normalizeProjectGroupNumber(rawGroup);if(!groupKey)continue;
-    const parts=String(row?.registrationNo||'').split('/').map(value=>value.trim()).filter(Boolean),programme=cleanHumanText(parts[0]||record?.programme||'').toUpperCase()||'UNCLASSIFIED';
-    let centre=studentStream(record)==='non-residential'?'NON-RESIDENTIAL':(parts.length>=3?normalizeCentreCode(`${parts[1]}/${parts[2]}`):''),classified=Boolean(centre);
-    if(!centre&&selectedCentres.length===1){centre=cleanHumanText(selectedCentres[0]).toUpperCase();classified=Boolean(centre);}if(!centre)centre='UNCLASSIFIED';
-    const key=`${programme}|${centre}|${groupKey}`;if(!seen.has(key))seen.set(key,{key,programme,centre,groupNumber:rawGroup,label:`${programme} · ${centre} · Group ${rawGroup}`,classified,registrationNo:cleanHumanText(row?.registrationNo)});
-  }
-  return [...seen.values()];
+function projectRowProgrammeCentre(row,record={}){
+  const parts=String(row?.registrationNo||'').split('/').map(value=>value.trim()).filter(Boolean);
+  const programme=cleanHumanText(parts[0]||record?.programme||'').toUpperCase()||'UNCLASSIFIED';
+  const selectedCentres=projectStudyCentres(record);
+  let centre=studentStream(record)==='non-residential'?'NON-RESIDENTIAL':(parts.length>=3?normalizeCentreCode(`${parts[1]}/${parts[2]}`):'');
+  let classified=Boolean(centre);
+  if(!centre&&selectedCentres.length===1){centre=normalizeCentreCode(selectedCentres[0]);classified=Boolean(centre);}
+  if(!centre)centre='UNCLASSIFIED';
+  return {programme,centre,classified};
 }
+function projectCentreDecisionMap(record){
+  const map=new Map();
+  for(const decision of Array.isArray(record?.projectCentreDecisions)?record.projectCentreDecisions:[]){
+    const caseKey=String(decision?.caseKey||'');if(caseKey)map.set(caseKey,decision);
+  }
+  return map;
+}
+function projectGroupAnalysis(record={},options={}){
+  const suppliedRows=Array.isArray(options.rows)?options.rows:null;
+  const sourceRows=(suppliedRows||validScoreRowsWithMeta(record).filter(row=>row.included!==false)).map((row,index)=>({...row,sourceIndex:Number.isInteger(row?.sourceIndex)?row.sourceIndex:index}));
+  const buckets=new Map(),decisions=projectCentreDecisionMap(record);
+  for(const row of sourceRows){
+    const rawGroup=cleanHumanText(row?.groupNo),groupKey=normalizeProjectGroupNumber(rawGroup);if(!groupKey)continue;
+    const identity=projectRowProgrammeCentre(row,record),caseKey=`${identity.programme}|${groupKey}`;
+    if(!buckets.has(caseKey))buckets.set(caseKey,{caseKey,programme:identity.programme,groupKey,groupNumber:rawGroup,rows:[]});
+    buckets.get(caseKey).rows.push({...row,indexCentreCode:identity.centre,classified:identity.classified});
+  }
+  const groupUnits=[],rowAssignments=[],transferExceptions=[],centreReviewCases=[];
+  const addUnit=(bucket,centre,rows,resolution,sourceCentres)=>{
+    const key=`${bucket.programme}|${centre}|${bucket.groupKey}`,classified=centre!=='UNCLASSIFIED'&&rows.every(row=>row.classified!==false);
+    groupUnits.push({key,programme:bucket.programme,centre,reportingCentreCode:centre,groupNumber:bucket.groupNumber,label:`${bucket.programme} · ${centre} · Group ${bucket.groupNumber}`,classified,studentCount:rows.length,sourceCentres:[...new Set(sourceCentres||rows.map(row=>row.indexCentreCode))],resolution});
+    for(const row of rows)rowAssignments.push({sourceIndex:row.sourceIndex,registrationNo:row.registrationNo||'',name:row.name||'',programme:bucket.programme,groupNumber:bucket.groupNumber,indexCentreCode:row.indexCentreCode,reportingCentreCode:centre,resolution});
+  };
+  for(const bucket of buckets.values()){
+    const clusters=new Map();for(const row of bucket.rows){if(!clusters.has(row.indexCentreCode))clusters.set(row.indexCentreCode,[]);clusters.get(row.indexCentreCode).push(row);}
+    const clusterList=[...clusters.entries()].map(([centre,rows])=>({centre,rows,count:rows.length})).sort((a,b)=>b.count-a.count||a.centre.localeCompare(b.centre));
+    const centreSignature=clusterList.map(cluster=>`${cluster.centre}:${cluster.count}`).sort().join('|');
+    if(clusterList.length===1){addUnit(bucket,clusterList[0].centre,clusterList[0].rows,'index-centre',[clusterList[0].centre]);continue;}
+    const decision=decisions.get(bucket.caseKey),decisionCurrent=decision&&decision.centreSignature===centreSignature;
+    const dominant=clusterList[0],runnerUp=clusterList[1],uniqueDominant=dominant.count>runnerUp.count;
+    const minorityCount=bucket.rows.length-dominant.count;
+    const mergeSizeAllowed=bucket.rows.length>=3&&bucket.rows.length<=6;
+    const safePredominant=uniqueDominant&&dominant.count>=3&&minorityCount>=1&&minorityCount<=2&&mergeSizeAllowed&&dominant.centre!=='UNCLASSIFIED';
+    const allNormalGroups=clusterList.every(cluster=>cluster.count>=3&&cluster.count<=6&&cluster.centre!=='UNCLASSIFIED');
+    if(decisionCurrent&&decision.action==='keep-distinct'){
+      for(const cluster of clusterList)addUnit(bucket,cluster.centre,cluster.rows,'admin-kept-distinct',[cluster.centre]);
+      continue;
+    }
+    const requestedReportingCentre=normalizeCentreCode(decision?.reportingCentreCode),adminMergeAllowed=decisionCurrent&&decision.action==='merge-predominant'&&mergeSizeAllowed&&clusterList.some(cluster=>cluster.centre===requestedReportingCentre)&&requestedReportingCentre!=='UNCLASSIFIED';
+    if(adminMergeAllowed||(!decisionCurrent&&safePredominant)){
+      const reportingCentre=adminMergeAllowed?requestedReportingCentre:dominant.centre,resolution=adminMergeAllowed?'admin-confirmed-predominant':'automatic-predominant';
+      addUnit(bucket,reportingCentre,bucket.rows,resolution,clusterList.map(cluster=>cluster.centre));
+      const moved=bucket.rows.filter(row=>row.indexCentreCode!==reportingCentre);
+      transferExceptions.push({caseKey:bucket.caseKey,programme:bucket.programme,groupNumber:bucket.groupNumber,centreSignature,reportingCentreCode:reportingCentre,sourceCentres:clusterList.map(cluster=>cluster.centre),minorityStudentCount:moved.length,resolution,canMergePredominant:true,students:moved.map(row=>({sourceIndex:row.sourceIndex,name:row.name||'',registrationNo:row.registrationNo||'',indexCentreCode:row.indexCentreCode,reportingCentreCode:reportingCentre}))});
+      continue;
+    }
+    if(allNormalGroups){for(const cluster of clusterList)addUnit(bucket,cluster.centre,cluster.rows,'distinct-centre-groups',[cluster.centre]);continue;}
+    for(const cluster of clusterList)addUnit(bucket,cluster.centre,cluster.rows,'pending-admin-review',[cluster.centre]);
+    centreReviewCases.push({caseKey:bucket.caseKey,programme:bucket.programme,groupNumber:bucket.groupNumber,centreSignature,clusters:clusterList.map(cluster=>({centre:cluster.centre,count:cluster.count,students:cluster.rows.map(row=>({sourceIndex:row.sourceIndex,name:row.name||'',registrationNo:row.registrationNo||''}))})),reportingCentreOptions:clusterList.filter(cluster=>cluster.centre!=='UNCLASSIFIED').map(cluster=>cluster.centre),suggestedReportingCentreCode:safePredominant?dominant.centre:'',canMergePredominant:safePredominant,canAdminMerge:mergeSizeAllowed&&clusterList.some(cluster=>cluster.centre!=='UNCLASSIFIED'),reason:!uniqueDominant?'No centre has a unique majority.':dominant.count<3?'The largest centre cluster contains fewer than three students.':minorityCount>2?'More than two students have minority centre codes.':bucket.rows.length>6?'Merging would create a group larger than six students.':'The centre pattern requires administrator confirmation.'});
+  }
+  const possibleScoreSheetGroupCounts=new Set([groupUnits.length]);
+  for(const transfer of transferExceptions.filter(item=>item.resolution==='automatic-predominant')){
+    const increase=Math.max(0,(transfer.sourceCentres||[]).length-1);for(const count of [...possibleScoreSheetGroupCounts])possibleScoreSheetGroupCounts.add(count+increase);
+  }
+  for(const review of centreReviewCases.filter(item=>item.canAdminMerge)){
+    const reduction=Math.max(0,(review.clusters||[]).length-1);for(const count of [...possibleScoreSheetGroupCounts])possibleScoreSheetGroupCounts.add(count-reduction);
+  }
+  return {groupUnits,rowAssignments,transferExceptions,centreReviewCases,requiresCentreReview:centreReviewCases.length>0,possibleScoreSheetGroupCounts:[...possibleScoreSheetGroupCounts].filter(count=>count>=0).sort((a,b)=>a-b)};
+}
+function projectGroupUnitsFromRows(rows,record={}){return projectGroupAnalysis(record,{rows}).groupUnits;}
 function projectUniqueGroupNumbersFromRows(rows,record={}){return projectGroupUnitsFromRows(rows,record).map(unit=>unit.label);}
 function projectGroupValidation(record,{approved=false}={}){
-  const rows=approved?approvedProjectScoreRows(record):validScoreRows(record),groupUnits=projectGroupUnitsFromRows(rows,record),groups=groupUnits.map(unit=>unit.label);
+  const analysis=projectGroupAnalysis(record,{approved}),groupUnits=analysis.groupUnits,groups=groupUnits.map(unit=>unit.label);
   const claimed=parseFlexiblePositiveCount(record?.groupCount);
   const works=Array.isArray(record?.files?.completedWork)?record.files.completedWork.length:(record?.files?.completedWork?1:0);
   const issues=[];
   if(!claimed) issues.push('The Total Number of Groups Submitting could not be interpreted as a positive number.');
   if(groupUnits.some(unit=>!unit.classified))issues.push('One or more groups could not be linked to a study centre. Use a registration number containing the programme and centre code, or submit only one selected centre.');
+  const centreDecisionNeeded=analysis.requiresCentreReview||Boolean(claimed&&groups.length!==claimed&&analysis.possibleScoreSheetGroupCounts.includes(claimed));
+  if(centreDecisionNeeded)issues.push('A reporting-centre decision is required before approval so the score-sheet groups reconcile with the claimed total.');
   if(claimed&&groups.length!==claimed) issues.push(`Claimed groups (${claimed}) differ from the ${groups.length} distinct programme-centre-group combination${groups.length===1?'':'s'} in the score sheet.`);
   if(claimed&&works!==claimed) issues.push(`Claimed groups (${claimed}) differ from the ${works} completed project work file${works===1?'':'s'} attached.`);
   if(groups.length&&works!==groups.length) issues.push(`The score sheet contains ${groups.length} distinct group${groups.length===1?'':'s'}, but ${works} completed project work file${works===1?'':'s'} ${works===1?'was':'were'} attached.`);
-  return {claimedGroupCount:claimed,scoreSheetGroupCount:groups.length,groupNumbers:groups,groupKeys:groupUnits.map(unit=>unit.key),groupUnits,completedProjectWorkCount:works,valid:issues.length===0,issues,countingRule:'Programme Code + Study Centre Code + Group Number'};
+  return {claimedGroupCount:claimed,scoreSheetGroupCount:groups.length,possibleScoreSheetGroupCounts:analysis.possibleScoreSheetGroupCounts,groupNumbers:groups,groupKeys:groupUnits.map(unit=>unit.key),groupUnits,rowAssignments:analysis.rowAssignments,transferExceptions:analysis.transferExceptions,centreReviewCases:analysis.centreReviewCases,requiresCentreReview:centreDecisionNeeded,completedProjectWorkCount:works,valid:issues.length===0,issues,countingRule:'Programme Code + Reporting Centre + Group Number'};
 }
 function numericSn(v) { return /^\d+(?:\.0+)?$/.test(String(v || '').trim()); }
 
@@ -3721,11 +3782,12 @@ app.post('/api/project-work', upload.fields([
     try { scoreResult = parseScoreWorkbook(filesFor(req,'scoresFile')[0].path); }
     catch (e) { await removeUploaded(req); return res.status(400).json({ error: e.message }); }
     const claimedGroupCount=parseFlexiblePositiveCount(text(req,'groupCount'));
-    const groupUnits=projectGroupUnitsFromRows(scoreResult.rows,{studyCentres:selectedCentres,studentStream,projectStream:studentStream}),groupNumbers=groupUnits.map(unit=>unit.label);
+    const provisionalRecord={studyCentres:selectedCentres,studentStream,projectStream:studentStream},groupAnalysis=projectGroupAnalysis(provisionalRecord,{rows:scoreResult.rows}),groupUnits=groupAnalysis.groupUnits,groupNumbers=groupUnits.map(unit=>unit.label);
     const completedProjectWorkCount=filesFor(req,'completedWork').length;
     if(!claimedGroupCount){await removeUploaded(req);return res.status(400).json({error:'Enter Total Number of Groups Submitting as a number or words, for example 8, eight, eight (8), or eight(8).'});}
-    if(groupNumbers.length!==claimedGroupCount || completedProjectWorkCount!==claimedGroupCount){
-      const parts=[`Claim form/portal total: ${claimedGroupCount}`,`Distinct programme-centre-group combinations in score sheet: ${groupNumbers.length}`,`Completed project works attached: ${completedProjectWorkCount}`];
+    const possibleGroupCounts=new Set(groupAnalysis.possibleScoreSheetGroupCounts||[groupNumbers.length]);
+    if(!possibleGroupCounts.has(claimedGroupCount) || completedProjectWorkCount!==claimedGroupCount){
+      const parts=[`Claim form/portal total: ${claimedGroupCount}`,`Distinct programme-centre-group combinations in score sheet: ${groupNumbers.length}`,possibleGroupCounts.size>1?`Possible total after administrator centre review: ${[...possibleGroupCounts].sort((a,b)=>a-b).join(' or ')}`:'',`Completed project works attached: ${completedProjectWorkCount}`].filter(Boolean);
       await removeUploaded(req);
       return res.status(400).json({error:`The number being claimed cannot be different from the completed supervised project works. ${parts.join(' · ')}. Correct the Total Number of Groups Submitting, GROUP NO. entries, or project-work attachments before submitting.`});
     }
@@ -3739,13 +3801,14 @@ app.post('/api/project-work', upload.fields([
       phone: text(req,'phone'), email: text(req,'email'), staffId:text(req,'staffId'), claimantCertification:claimantCertification.certification, groupCount: text(req,'groupCount'), claimedGroupCount, studyCentres:selectedCentres, studyCentre:selectedCentres.join(' | '),
       studentStream, projectStream:studentStream, classificationVersion:0, classificationHistory:[],
       scoreSheet: { worksheet: scoreResult.sheetName, headerRow: scoreResult.headerRow, rowCount: scoreResult.rows.length, rows: scoreResult.rows },
-      groupValidation:{claimedGroupCount,scoreSheetGroupCount:groupNumbers.length,groupNumbers,groupKeys:groupUnits.map(unit=>unit.key),countingRule:'Programme Code + Study Centre Code + Group Number',completedProjectWorkCount,valid:true,validatedAt:new Date().toISOString()},
+      projectCentreDecisions:[],projectCentreDecisionHistory:[],
       reviewStatus:'pending', reviewNote:'', reviewedAt:null, reviewedBy:'', reviewHistory:[],
       files: {
         claimForm: fileRecord(filesFor(req,'claimForm')[0]), reportFile: fileRecord(filesFor(req,'reportFile')[0]),
         scoresFile: fileRecord(filesFor(req,'scoresFile')[0]), completedWork: filesFor(req,'completedWork').map(fileRecord)
       }
     };
+    record.groupValidation={...projectGroupValidation(record),validatedAt:new Date().toISOString()};
     await saveRecord(record);
     const certificationDelivery=await dispatchClaimantCertification(record,claimantCertification.token,req);
     res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, scoreRowsIncluded:scoreResult.rows.length, studentStream:record.studentStream, projectStream:record.projectStream, reviewStatus:'pending', reviewStatusLabel:'Pending Verification',claimantCertificationStatus:'pending',certificationEmailSent:certificationDelivery.emailSent,certificationEmailError:certificationDelivery.emailError||null });
@@ -4371,6 +4434,9 @@ function validScoreRows(record) {
 function approvedProjectScoreRows(record) {
   return validScoreRowsWithMeta(record).filter(row=>row.included).map(({sourceIndex,included,...row})=>row);
 }
+function approvedProjectScoreRowsWithMeta(record) {
+  return validScoreRowsWithMeta(record).filter(row=>row.included);
+}
 function registrationSortValue(value) {
   return String(value||'').trim().toUpperCase();
 }
@@ -4384,10 +4450,13 @@ const PROJECT_EXPORT_HEADERS=['S/N','STUDY CENTRE','NAME','REGISTRATION NO.','GR
 function projectScoreRowsForStream(records, stream='distance') {
   const out=[];const seenExact=new Set();const directory=studyCentreDirectoryMapSync();
   projectRecords(records).filter(record=>projectStream(record)===stream && projectReviewStatus(record)==='approved').sort(approvedRecordOrder).forEach(record => {
-    for (const row of approvedProjectScoreRows(record)) {
+    const analysis=projectGroupAnalysis(record,{approved:true}),assignments=new Map(analysis.rowAssignments.map(item=>[item.sourceIndex,item]));
+    for (const row of approvedProjectScoreRowsWithMeta(record)) {
       const signature=exactDuplicateOutputKey(row,projectDuplicateSignature);if(signature&&seenExact.has(signature))continue;if(signature)seenExact.add(signature);
-      const centre=stream==='non-residential'?{name:'Non-Residential',code:'NON-RESIDENTIAL'}:studyCentreInfoFromRegistration(row.registrationNo,directory);
-      out.push({'S/N':0,'STUDY CENTRE':centre.name,'CENTRE CODE':centre.code,'NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
+      const assignment=assignments.get(row.sourceIndex),indexCentre=stream==='non-residential'?{name:'Non-Residential',code:'NON-RESIDENTIAL'}:studyCentreInfoFromRegistration(row.registrationNo,directory);
+      const reportingCode=assignment?.reportingCentreCode||indexCentre.code;
+      const reportingCentre=reportingCode==='NON-RESIDENTIAL'?{name:'Non-Residential',code:reportingCode}:(directory.get(reportingCode)||{name:reportingCode==='UNCLASSIFIED'?'UNCLASSIFIED STUDY CENTRE':`UNKNOWN STUDY CENTRE (${reportingCode})`,code:reportingCode});
+      out.push({'S/N':0,'STUDY CENTRE':reportingCentre.name,'CENTRE CODE':reportingCentre.code,'INDEX CENTRE CODE':assignment?.indexCentreCode||indexCentre.code,'CENTRE RESOLUTION':assignment?.resolution||'index-centre','NAME':row.name||'','REGISTRATION NO.':row.registrationNo||'','GROUP NO.':row.groupNo||'','TOTAL SCORE':row.totalScore||''});
     }
   });
   out.sort((a,b)=>String(a['STUDY CENTRE']||'').localeCompare(String(b['STUDY CENTRE']||''),undefined,{numeric:true,sensitivity:'base'})||compareRegistrationValues(a['REGISTRATION NO.'],b['REGISTRATION NO.'])||String(a.NAME||'').localeCompare(String(b.NAME||''),undefined,{sensitivity:'base'}));
@@ -4527,8 +4596,8 @@ function paymentApprovalView(record){const approval=record?.paymentApproval||{},
 function invalidateDepartmentPaymentApproval(record,actor,now,reason,action='source-change-invalidated'){const approval=record?.paymentApproval;if(!approval||!paymentApprovalDocuments(record).length)return false;approval.status='invalidated';approval.invalidatedAt=now;approval.invalidatedBy=actor;approval.invalidationReason=reason;const current=paymentApprovalDocuments(record).find(document=>document.id===approval.currentDocumentId);if(current&&current.status==='current')current.status='invalidated';approval.history=Array.isArray(approval.history)?approval.history:[];approval.history.push({action,status:'invalidated',note:reason,at:now,by:actor,documentId:approval.currentDocumentId||null});if(approval.history.length>200)approval.history=approval.history.slice(-200);return true;}
 function claimSourceFiles(record){const out=[];const visit=(value,key)=>{if(!value)return;if(Array.isArray(value)){value.forEach((item,index)=>visit(item,`${key}[${index}]`));return;}if(typeof value==='object'){if(value.storedName){out.push({key,storedName:path.basename(value.storedName),originalName:value.originalName||'',size:Number(value.size||0)});return;}Object.entries(value).forEach(([childKey,child])=>visit(child,`${key}.${childKey}`));}};visit(record?.files,'files');return out;}
 async function sha256File(filePath){return new Promise(resolve=>{const hash=crypto.createHash('sha256'),stream=fs.createReadStream(filePath);stream.on('data',chunk=>hash.update(chunk));stream.on('error',()=>resolve('MISSING'));stream.on('end',()=>resolve(hash.digest('hex')));});}
-async function claimSourceFingerprint(record){const files=[];for(const file of claimSourceFiles(record))files.push({...file,sha256:await sha256File(path.join(FILES_DIR,file.storedName))});const source={id:record.id,reference:record.reference,portalType:record.portalType||'project-work',submittedAt:record.submittedAt,claimant:record.fullName||record.assessorName||'',email:record.email||'',staffId:record.staffId||'',groupCount:record.groupCount||'',claimedGroupCount:record.claimedGroupCount||null,claimedCandidateCount:record.claimedCandidateCount||null,workCount:record.workCount||null,studyCentres:projectStudyCentres(record),scoreSheet:record.scoreSheet||null,works:(record.works||[]).map(work=>({workNo:work.workNo,studentName:work.studentName,indexNumber:work.indexNumber,programme:work.programme})),scoreReviewExcludedRows:record.scoreReviewExcludedRows||[],fieldScoreReviewExcludedRows:record.fieldScoreReviewExcludedRows||[],reviewStatus:projectReviewStatus(record),claimReviewStatus:assessorClaimReviewStatus(record),claimantCertification:claimantCertificationView(record),files};return crypto.createHash('sha256').update(JSON.stringify(source)).digest('hex');}
-function claimAuditView(record){const events=[];for(const item of record?.reviewHistory||[])events.push({stage:'Consolidation review',action:projectReviewLabel(item.status),note:item.note||'',at:item.reviewedAt||item.at||null,by:item.reviewedBy||item.by||''});for(const item of record?.registrationCorrectionHistory||[])events.push({stage:'Duplicate reconciliation',action:'Registration/index number corrected',note:`Row ${Number(item.sourceIndex)+1}: ${item.oldRegistrationNo||'blank'} → ${item.newRegistrationNo||'blank'}${item.reason?` · ${item.reason}`:''}`,at:item.correctedAt||null,by:item.correctedBy||''});for(const item of record?.duplicateRowRemovalHistory||[])events.push({stage:'Duplicate reconciliation',action:'Row removed from approved records',note:`${item.registrationNo||'No registration'} · ${item.name||'Name unavailable'}${item.reason?` · ${item.reason}`:''}`,at:item.removedAt||null,by:item.removedBy||''});for(const item of record?.claimReviewHistory||[])events.push({stage:'Claim verification',action:projectReviewLabel(item.status),note:item.note||'',at:item.reviewedAt||item.at||null,by:item.reviewedBy||item.by||''});for(const item of record?.claimantCertification?.history||[])events.push({stage:'Claimant certification',action:item.action||'Certification update',note:item.note||'',at:item.at||null,by:record?.claimantCertification?.claimantEmail||record?.email||''});for(const item of record?.paymentApproval?.history||[])events.push({stage:'Department payment approval',action:item.action||item.status||'Approval update',note:item.note||'',at:item.at||item.approvedAt||null,by:item.by||item.approvedBy||''});for(const item of record?.payroll?.history||[])events.push({stage:'Payroll',action:payrollStatusLabel({payroll:{status:item.status}}),note:item.note||'',at:item.updatedAt||item.at||null,by:item.updatedBy||item.by||''});return events.sort((a,b)=>String(a.at||'').localeCompare(String(b.at||'')));}
+async function claimSourceFingerprint(record){const files=[];for(const file of claimSourceFiles(record))files.push({...file,sha256:await sha256File(path.join(FILES_DIR,file.storedName))});const source={id:record.id,reference:record.reference,portalType:record.portalType||'project-work',submittedAt:record.submittedAt,claimant:record.fullName||record.assessorName||'',email:record.email||'',staffId:record.staffId||'',groupCount:record.groupCount||'',claimedGroupCount:record.claimedGroupCount||null,claimedCandidateCount:record.claimedCandidateCount||null,workCount:record.workCount||null,studyCentres:projectStudyCentres(record),scoreSheet:record.scoreSheet||null,works:(record.works||[]).map(work=>({workNo:work.workNo,studentName:work.studentName,indexNumber:work.indexNumber,programme:work.programme})),scoreReviewExcludedRows:record.scoreReviewExcludedRows||[],fieldScoreReviewExcludedRows:record.fieldScoreReviewExcludedRows||[],projectCentreDecisions:record.projectCentreDecisions||[],reviewStatus:projectReviewStatus(record),claimReviewStatus:assessorClaimReviewStatus(record),claimantCertification:claimantCertificationView(record),files};return crypto.createHash('sha256').update(JSON.stringify(source)).digest('hex');}
+function claimAuditView(record){const events=[];if((record?.portalType||'project-work')==='project-work'){for(const item of projectGroupAnalysis(record,{approved:true}).transferExceptions.filter(entry=>entry.resolution==='automatic-predominant'))events.push({stage:'Project Work centre reconciliation',action:`Automatic predominant reporting centre ${item.reportingCentreCode}`,note:`${item.caseKey} · ${item.minorityStudentCount} minority-code student${item.minorityStudentCount===1?'':'s'} retained with the group; original index numbers unchanged.`,at:record.submittedAt||null,by:'System rule'});}for(const item of record?.reviewHistory||[])events.push({stage:'Consolidation review',action:projectReviewLabel(item.status),note:item.note||'',at:item.reviewedAt||item.at||null,by:item.reviewedBy||item.by||''});for(const item of record?.projectCentreDecisionHistory||[])events.push({stage:'Project Work centre reconciliation',action:item.action==='keep-distinct'?'Centre groups kept distinct':`Predominant reporting centre ${item.reportingCentreCode||''}`.trim(),note:`${item.caseKey||'Programme/group'}${item.reason?` · ${item.reason}`:''}`,at:item.decidedAt||item.at||null,by:item.decidedBy||item.by||''});for(const item of record?.registrationCorrectionHistory||[])events.push({stage:'Duplicate reconciliation',action:'Registration/index number corrected',note:`Row ${Number(item.sourceIndex)+1}: ${item.oldRegistrationNo||'blank'} → ${item.newRegistrationNo||'blank'}${item.reason?` · ${item.reason}`:''}`,at:item.correctedAt||null,by:item.correctedBy||''});for(const item of record?.duplicateRowRemovalHistory||[])events.push({stage:'Duplicate reconciliation',action:'Row removed from approved records',note:`${item.registrationNo||'No registration'} · ${item.name||'Name unavailable'}${item.reason?` · ${item.reason}`:''}`,at:item.removedAt||null,by:item.removedBy||''});for(const item of record?.claimReviewHistory||[])events.push({stage:'Claim verification',action:projectReviewLabel(item.status),note:item.note||'',at:item.reviewedAt||item.at||null,by:item.reviewedBy||item.by||''});for(const item of record?.claimantCertification?.history||[])events.push({stage:'Claimant certification',action:item.action||'Certification update',note:item.note||'',at:item.at||null,by:record?.claimantCertification?.claimantEmail||record?.email||''});for(const item of record?.paymentApproval?.history||[])events.push({stage:'Department payment approval',action:item.action||item.status||'Approval update',note:item.note||'',at:item.at||item.approvedAt||null,by:item.by||item.approvedBy||''});for(const item of record?.payroll?.history||[])events.push({stage:'Payroll',action:payrollStatusLabel({payroll:{status:item.status}}),note:item.note||'',at:item.updatedAt||item.at||null,by:item.updatedBy||item.by||''});return events.sort((a,b)=>String(a.at||'').localeCompare(String(b.at||'')));}
 async function hodAccountForRequest(req){if(req.adminIdentity?.master)return {error:'HoD approval requires an individual staff account. Department master credentials cannot sign claims.'};if(req.adminIdentity?.developerPreview)return {error:'Developer Preview cannot upload or apply a HoD signature.'};const account=(await readAdminUsers()).find(item=>item.id===req.adminIdentity?.id&&item.active!==false);if(!account)return {error:'Your individual staff account could not be verified.'};if(account.role!=='administrator'||!normalizeHodDepartments(account.hodDepartments,account.departments).includes(req.adminDepartment))return {error:'This account is not an authorised HoD payment approver for this department.'};return {account};}
 function payrollStatusLabel(record){return {pending:'Pending Payroll Verification',verified:'Verified','approved-for-payment':'Approved for Payment',paid:'Paid',queried:'Queried / On Hold','returned-to-department':'Returned to Department'}[String(record?.payroll?.status||'pending')]||'Pending Payroll Verification';}
 function approvedPaymentClaimRecords(records){return records.filter(record=>['project-work','field-experience','assessor'].includes(record.portalType||'project-work')&&paymentApprovalDocuments(record).length>0).slice().sort((a,b)=>String(departmentPaymentApprovedAt(a)||a.submittedAt||'').localeCompare(String(departmentPaymentApprovedAt(b)||b.submittedAt||''))||String(a.reference||'').localeCompare(String(b.reference||'')));}
@@ -6097,6 +6166,40 @@ app.get('/api/admin/:department/project-student-search', departmentAuth, require
   results.sort((a,b)=>String(a.studentName||a.registrationNo).localeCompare(String(b.studentName||b.registrationNo),undefined,{numeric:true,sensitivity:'base'}));
   res.json({ok:true,query,total:results.length,truncated:results.length>200,results:results.slice(0,200)});
 });
+app.post('/api/admin/:department/project-work/:id/centre-decision',departmentAuth,requireAdminAccess('project-work','administrator'),async(req,res)=>{
+  const all=await readDb(),record=all.find(item=>item.id===req.params.id&&item.department===req.adminDepartment&&(item.portalType==='project-work'||!item.portalType));
+  if(!record)return res.status(404).json({error:'Project work submission not found in this department.'});
+  const caseKey=cleanHumanText(req.body?.caseKey),action=String(req.body?.action||'').trim().toLowerCase(),reason=cleanHumanText(req.body?.reason).slice(0,500);
+  if(!caseKey||!['keep-distinct','merge-predominant'].includes(action))return res.status(400).json({error:'Choose a valid centre decision.'});
+  if(!reason)return res.status(400).json({error:'Enter the reason or evidence for this centre decision.'});
+  const before=projectGroupAnalysis(record,{approved:true}),reviewCase=before.centreReviewCases.find(item=>item.caseKey===caseKey),automaticCase=before.transferExceptions.find(item=>item.caseKey===caseKey),sourceCase=reviewCase||automaticCase;
+  if(!sourceCase)return res.status(409).json({error:'This centre pattern has changed or no longer requires a decision. Refresh the record and review it again.'});
+  if(action==='merge-predominant'&&!sourceCase.canMergePredominant&&!sourceCase.canAdminMerge)return res.status(400).json({error:'This group cannot be merged: the final group must contain three to six students and use one of the identified centre codes.'});
+  const requestedCentre=normalizeCentreCode(req.body?.reportingCentreCode),reportingCentreCode=action==='merge-predominant'?(requestedCentre||sourceCase.suggestedReportingCentreCode||sourceCase.reportingCentreCode):'';
+  const allowedReportingCentres=new Set(sourceCase.reportingCentreOptions||sourceCase.sourceCentres||[sourceCase.reportingCentreCode].filter(Boolean));
+  if(action==='merge-predominant'&&(!reportingCentreCode||!allowedReportingCentres.has(reportingCentreCode)))return res.status(400).json({error:'Choose one of the identified study-centre codes as the reporting centre.'});
+  const now=new Date().toISOString(),by=adminActorLabel(req,'Department administrator'),oldVersion=batchVersion(record),oldStatus=projectReviewStatus(record);
+  record.projectCentreDecisions=Array.isArray(record.projectCentreDecisions)?record.projectCentreDecisions:[];
+  record.projectCentreDecisions=record.projectCentreDecisions.filter(item=>item.caseKey!==caseKey);
+  const decision={caseKey,centreSignature:sourceCase.centreSignature,action,reportingCentreCode,reason,decidedAt:now,decidedBy:by};record.projectCentreDecisions.push(decision);
+  record.projectCentreDecisionHistory=Array.isArray(record.projectCentreDecisionHistory)?record.projectCentreDecisionHistory:[];record.projectCentreDecisionHistory.push(decision);if(record.projectCentreDecisionHistory.length>200)record.projectCentreDecisionHistory=record.projectCentreDecisionHistory.slice(-200);
+  record.classificationVersion=oldVersion+1;
+  const validation=projectGroupValidation(record,{approved:true});record.groupValidation={...validation,validatedAt:now};
+  if(!validation.valid)return res.status(409).json({error:`That centre decision does not reconcile the claim and attached project works. ${validation.issues.join(' ')}`});
+  let newSnapshotRows=[];if(oldStatus==='approved')newSnapshotRows=projectScoreRowsForStream([record],projectStream(record));
+  if(oldStatus==='approved'){
+    record.reviewStatus='pending';record.reviewNote='Reporting-centre decision requires renewed consolidation approval.';record.reviewedAt=now;record.reviewedBy=by;record.reviewHistory=Array.isArray(record.reviewHistory)?record.reviewHistory:[];record.reviewHistory.push({status:'pending',note:record.reviewNote,reviewedAt:now,reviewedBy:by});
+  }
+  resetPayrollAfterDepartmentChange(record,by,now,'Project Work reporting-centre decision changed.');await writeDb(all);
+  const batches=await readScoreBatches();let affectedBatches=0;
+  for(const batch of batches){
+    if(batch.department!==req.adminDepartment||batch.portalType!=='project-work')continue;
+    const item=(batch.items||[]).find(candidate=>candidate.submissionId===record.id&&Number(candidate.classificationVersion||0)===oldVersion);if(!item)continue;
+    batch.corrections=Array.isArray(batch.corrections)?batch.corrections:[];batch.corrections.push({submissionId:record.id,reference:record.reference,fromLabel:'Previous Project Work centre allocation',toLabel:action==='keep-distinct'?'Keep centre groups distinct':`Report under predominant centre ${reportingCentreCode}`,reason,at:now,by,oldSnapshotRows:item.snapshotRows||[],newSnapshotRows});affectedBatches++;
+  }
+  if(affectedBatches)await writeScoreBatches(batches);
+  res.json({ok:true,decision,groupValidation:record.groupValidation,reviewStatus:projectReviewStatus(record),classificationVersion:record.classificationVersion,affectedBatches});
+});
 app.post('/api/admin/:department/project-work/:id/review', departmentAuth, requireAdminAccess('project-work','administrator'), async(req,res)=>{
   const status=String(req.body?.status||'').trim().toLowerCase();
   if(!PROJECT_REVIEW_STATUSES.has(status)) return res.status(400).json({error:'Choose Pending, Approved, Rejected or Returned for Correction.'});
@@ -6110,6 +6213,8 @@ app.post('/api/admin/:department/project-work/:id/review', departmentAuth, requi
     target.scoreReviewExcludedRows=[...new Set(req.body.excludedRowIndexes.map(Number).filter(i=>Number.isInteger(i)&&validIndexes.has(i)))].sort((a,b)=>a-b);
   }
   if(status==='approved'&&!approvedProjectScoreRows(target).length)return res.status(400).json({error:'At least one score row must remain included before this submission can be approved.'});
+  const groupValidation=projectGroupValidation(target,{approved:true});target.groupValidation={...groupValidation,validatedAt:new Date().toISOString()};
+  if(status==='approved'&&groupValidation.requiresCentreReview)return res.status(409).json({error:'Resolve every programme/group centre-review case before approving this submission for consolidation.'});
   const now=new Date().toISOString();
   const reviewer=adminActorLabel(req,'Department administrator');
   resetPayrollAfterDepartmentChange(target,reviewer,now,'Departmental Project Work review changed.');

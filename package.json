@@ -1,6 +1,6 @@
 {
   "name": "ucc-code-eservices",
-  "version": "52.0.0",
+  "version": "53.0.0",
   "private": true,
   "description": "UCC-CoDE eServices portal for submissions, claims, student support and centre coordination",
   "main": "server.js",
@@ -13,7 +13,8 @@
     "test:chatbot": "node scripts/test-v45-chatbot.js",
     "test:batches": "node scripts/test-v47-processing-batches.js",
     "test:sms": "node scripts/test-v49-arkesel-notifications.js",
-    "test:sessions": "node scripts/test-v52-origin-recovery.js"
+    "test:sessions": "node scripts/test-v52-origin-recovery.js",
+    "test:project-centres": "node scripts/test-v53-project-centre-grouping.js"
   },
   "engines": {
     "node": ">=24.14.1 <25"

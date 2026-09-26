@@ -1,5 +1,12 @@
 # Changelog
 
+## 53.0.0 Project Work predominant-centre grouping
+
+- Keeps genuine same-number groups at different study centres distinct.
+- Retains up to two transferred/minority-code students with a clear predominant group when the combined group remains three to six students.
+- Preserves original index numbers while using an auditable reporting centre in consolidated outputs.
+- Adds administrator review, approval blocking, audit history and processing-batch correction records for ambiguous centre patterns.
+
 ## 52.0.0 trusted-origin recovery and legacy upload protection
 
 - Added a browser-confirmed same-origin recovery path for trusted custom-domain requests whose Origin value is opaque or changed by an intermediary.

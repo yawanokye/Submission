@@ -1,0 +1,32 @@
+UCC-CoDE eServices v53
+Project Work predominant-centre grouping and transfer reconciliation
+
+WHAT CHANGED
+
+1. Project Work groups are still identified by Programme Code + Centre + Group Number.
+2. The programme code is read from the first registration/index-number segment.
+3. The original registration/index number and its centre code are never rewritten by this rule.
+4. If the same programme and group number contains a unique predominant centre with at least three students, no more than two minority-centre students, and a final combined size of three to six, the minority students remain with that group under the predominant reporting centre.
+5. If two centre clusters both contain normal groups of three to six students, they remain separate groups even when their group numbers are the same.
+6. Tied, unclear, unclassified, or oversized centre patterns are shown to the Project Work administrator and cannot be approved until an administrator records a decision.
+7. Administrators can confirm that centre groups are separate and must provide a reason/evidence. A safe automatic predominant-centre result can also be overridden and kept separate.
+8. Consolidated, master, centre-by-centre, processing-batch and payment-unit outputs use the reporting centre. The uploaded score workbook remains unchanged.
+9. Every manual centre decision is recorded in the claim audit history. Automatic predominant-centre applications are also visible in the audit history.
+10. A centre decision made after approval returns the submission to Pending Verification, invalidates later payment approval where applicable, increments its processing version, and adds correction rows to affected immutable processing batches.
+
+RULE EXAMPLES
+
+- Programme BEP, Group 1: AS/01 has 4 students and AS/02 has 2 students. The six students are one group reported under AS/01; both AS/02 index numbers remain unchanged.
+- Programme BEP, Group 1: AS/01 has 3 students and AS/02 has 3 students. These are two distinct centre groups.
+- Programme BEP, Group 1: AS/01 has 2 students and AS/02 has 2 students. Approval is blocked until the administrator confirms the centre treatment.
+- Programme BEP, Group 1: AS/01 has 6 students and AS/02 has 1 student. The system does not merge them because the final group would exceed six; administrator review is required.
+
+VERIFICATION
+
+- npm run check
+- npm run test:project-centres
+- Existing payment, duplicate, processing-batch, notification, session and portal tests remain available in package.json.
+
+DEPLOYMENT
+
+Deploy this folder as the replacement application. No new environment variable or database migration is required. Existing uploaded workbooks and completed processing-batch snapshots remain unchanged.
