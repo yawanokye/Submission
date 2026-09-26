@@ -14,8 +14,9 @@ async function submitForm(form, endpoint, statusEl, submitBtn){
     const destination=data.departmentName?` Destination: ${data.departmentName}.`:'';
     const validation=data.titleValidated?' Dissertation title validated against the uploaded work.':'';
     const review=data.reviewStatusLabel?` Status: ${data.reviewStatusLabel}. Scores will enter consolidated outputs only after departmental approval.`:'';
+    const warnings=Number(data.reconciliationWarningCount||0)>0?' The centre/group reconciliation differs from the claimed total and was recorded as a warning for departmental review. Your submission was accepted.':'';
     const certification=data.claimantCertificationStatus?` Claim certification: ${data.claimantCertificationStatus}. ${data.certificationEmailSent?'Open the verification link sent to your email.':'If the verification email was not delivered, ask the department to resend it.'}`:'';
-    setStatus(statusEl,true,`Submission received successfully. Reference: ${data.reference}.${destination}${validation}${review}${certification}`);
+    setStatus(statusEl,true,`Submission received successfully. Reference: ${data.reference}.${destination}${validation}${review}${warnings}${certification}`);
     form.reset();
     return data;
   }catch(err){
