@@ -1,3 +1,15 @@
+# v56 update: administrator reconciliation and numeric group output
+
+- The Project Work administrator receives a suggested resolution for each unresolved centre/group case.
+- A 2-to-1 centre pattern can be confirmed as a transferred-student case and reported under the majority centre.
+- A malformed registration/index number such as `BCH/ER04/22/0022` can be corrected to the suggested `BCH/ER/04/22/0022` after the administrator records a comment.
+- Decisions are saved one at a time. Earlier decisions remain in force while the administrator resolves the remaining cases.
+- When the final decision makes the claimed groups, reporting-centre groups and completed works agree, the warning clears and the record becomes valid for consolidation and claim processing.
+- Consolidated and centre-by-centre Project Work outputs show only the number in the `GROUP NO.` column. For example, `Group1`, `Group 1`, `Procurement 1` and `HRM G1` are exported as `1`.
+- The original uploaded workbook and all administrator comments remain available in the audit history.
+
+See `PATCH_NOTES_v56.txt` for the implementation and verification details.
+
 # v45 update: non-AI Student Support chatbot
 
 - The Student Support portal now includes a guided chatbot that works without an AI service or external AI charges.

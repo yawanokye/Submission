@@ -1,0 +1,43 @@
+UCC-CoDE eServices v56
+Administrator reconciliation decisions and numeric group output
+
+1. Suggested administrator resolutions
+
+The Group / Claim Reconciliation panel now distinguishes likely transferred-student cases from registration/index formatting mistakes. It recommends the safest available action while retaining the existing manual alternatives.
+
+Examples:
+
+- A three-student group with two ER/04 records and one BA/01 record is suggested for reporting under ER/04 as a transferred-student case.
+- BCH/ER04/22/0022 is suggested as BCH/ER/04/22/0022 when the corrected centre code matches the other students in the same programme and group.
+
+2. Comments and sequential decisions
+
+Every accepted suggestion or manual centre decision requires an administrator comment. A decision is saved even when another case in the same submission is still waiting. This corrects the earlier behaviour where the first decision could fail because a second unresolved case remained.
+
+The portal shows the saved decision comments, administrator and date. The full history is also available in the claim audit.
+
+3. Warning clearance and downstream validity
+
+After every decision, the system recalculates the claim, reporting-centre groups and attached project works. When they agree:
+
+- the reconciliation warning is removed;
+- the panel turns to the resolved state;
+- the record is marked valid for further processing;
+- consolidation approval, processing batches, claims and later payment stages use the resolved data.
+
+The ordinary consolidation approval, claimant certification and HoD approval controls remain in force.
+
+4. Group number output
+
+Project Work consolidated, master, programme-by-centre and centre-by-centre outputs now write only the numeric group identifier in GROUP NO.
+
+- Group1 becomes 1.
+- Group 1 becomes 1.
+- Procurement 1 becomes 1.
+- HRM G1 becomes 1.
+
+The original group text remains unchanged in the uploaded source workbook.
+
+5. Verification
+
+The v56 automated test covers a submission with eight claimed groups, eight completed works, a 2-to-1 transferred-student centre pattern and a malformed centre code. It verifies partial decision persistence, suggested correction, warning clearance, downstream payment units and numeric group values in the exported consolidated workbook.

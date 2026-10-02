@@ -1,5 +1,15 @@
 # Changelog
 
+## 56.0.0 Administrator reconciliation decisions and clean group numbers
+
+- Gives each unresolved Project Work centre/group case a clear suggested resolution.
+- Lets administrators apply a suggested index-format correction, accept a transferred-student reporting centre, or confirm separate groups with a required comment.
+- Saves each decision independently so several issues in one submission can be resolved in sequence.
+- Clears the warning and records the submission as valid for consolidation and claim processing after the last issue is resolved.
+- Retains all comments, corrections, administrators and dates in the claim audit history.
+- Writes only the numeric group identifier in consolidated, master, programme-by-centre and centre-by-centre score outputs.
+- Preserves the original uploaded workbook and its original group descriptions.
+
 ## 55.0.0 Centre/group reconciliation warning correction
 
 - Narrows the non-blocking warning policy to Project Work centre/group reconciliation.
