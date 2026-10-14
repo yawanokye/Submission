@@ -1,7 +1,7 @@
 (function () {
   const esc = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[character]));
   const date = value => value ? new Date(value).toLocaleString('en-GB', { dateStyle:'medium', timeStyle:'short' }) : 'Not available';
-  const functionalUnits = { 'student-support':'Student Support Services Unit', 'confidential-handler':'Confidential Case Handler', 'general-office':'General Office', 'student-records':'Student Records Management Unit', 'college-registrar':'College Registrar', provost:'Provost', 'directorate-education-business':'Directorate of Education and Business Studies', 'directorate-arts-stem':'Directorate of Arts and STEM Studies', 'academic-departments':'Academic Departments', examinations:'Examinations Unit', payroll:'Payroll Portal', auditor:"Auditor's Portal", 'regional-administrator':'Regional Administrators', coordinator:'Centre Coordinators', 'quality-assurance':'Quality Assurance Unit', 'college-finance':'College Finance Officer', admissions:'Admissions Unit', stores:'Stores Unit' };
+  const functionalUnits = { 'student-support':'Student Support Services Unit', 'confidential-handler':'Confidential Case Handler', 'general-office':'General Office', 'student-records':'Student Records Management Unit', 'college-registrar':'College Registrar', hod:'Head of Department (HoD) Portal', provost:'Provost', 'directorate-education-business':'Directorate of Education and Business Studies', 'directorate-arts-stem':'Directorate of Arts and STEM Studies', 'academic-departments':'Academic Departments', examinations:'Examinations Unit', payroll:'Payroll Portal', auditor:"Auditor's Portal", 'regional-administrator':'Regional Administrators', coordinator:'Centre Coordinators', 'quality-assurance':'Quality Assurance Unit', 'college-finance':'College Finance Officer', admissions:'Admissions Unit', stores:'Stores Unit' };
   const roleLabels = { viewer:'Viewer · read-only', officer:'Officer · operational actions', administrator:'Administrator · full assigned-unit control' };
   functionalUnits['registration-officer'] = 'Registration Officer Portal';
   let currentStaff = null;
@@ -54,11 +54,18 @@
   function unitCard(unit, staff) {
     let action = '<span class="staff-restricted">Cases assigned to this unit appear in Shared referrals below.</span>';
     if (unit.id === 'student-support') action = '<a class="btn" href="/support-admin">Open Student Support queue</a>';
+    else if(unit.id === 'hod' && staff.departments.length) action = `<div class="quick-service-links">${staff.departments.map(department=>`<a href="/admin/${encodeURIComponent(department)}">Open ${esc(department.replaceAll('-',' '))} HoD approval portal</a>`).join('')}<a href="#claim-approvals">View consolidated HoD register</a></div>`;
+    else if(['directorate-education-business','directorate-arts-stem','provost','college-finance','payroll','auditor'].includes(unit.id)) action = '<a class="btn" href="#claim-approvals">Open claims approval register</a>';
     else if (['coordinator','regional-administrator'].includes(unit.id) && staff.role !== 'viewer') action = '<a class="btn" href="/centre-coordinators.html">Open assisted submission</a>';
-    else if (unit.id === 'payroll' && staff.departments.length && staff.sections.includes('payroll')) action = `<a class="btn" href="/payroll/${encodeURIComponent(staff.departments[0])}">Open Payroll Portal</a>`;
-    else if (unit.id === 'auditor' && staff.departments.length && staff.sections.includes('auditor')) action = `<a class="btn" href="/auditor/${encodeURIComponent(staff.departments[0])}">Open Auditor's Portal</a>`;
     return `<article class="staff-unit-card"><span class="service-tag">${esc(roleLabels[staff.role] || staff.role)}</span><h3>${esc(unit.label)}</h3><p>${esc(unit.summary)}</p>${action}</article>`;
   }
+  function claimTable(rows,consolidated=false){
+    if(!rows?.length)return '<p class="admin-ticket-empty">No claims have reached this approval register.</p>';
+    if(consolidated)return `<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>Department</th><th>Supervisor / Examiner</th><th>Email</th><th>Claim records</th><th>Total approved / attached claims</th><th>Activities</th><th>Stages</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.departmentName)}</td><td><strong>${esc(row.supervisorName)}</strong></td><td>${esc(row.email)}</td><td>${esc(row.claimCount)}</td><td><strong>${esc(row.totalClaims)}</strong></td><td>${esc((row.activities||[]).join(', '))}</td><td>${esc((row.stages||[]).join(', '))}</td></tr>`).join('')}</tbody></table></div>`;
+    return `<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>Reference</th><th>Department</th><th>Activity</th><th>Supervisor / Examiner</th><th>Stated</th><th>Actual attached</th><th>Stage</th><th>Action</th></tr></thead><tbody>${rows.map(row=>`<tr><td><strong>${esc(row.reference)}</strong></td><td>${esc(row.departmentName)}</td><td>${esc(row.workType)}</td><td>${esc(row.supervisorName)}<br><small>${esc(row.email)}</small></td><td>${esc(row.statedClaimQuantity)}</td><td><strong>${esc(row.actualAttachedQuantity)}</strong></td><td>${esc(row.stageLabel)}</td><td>${row.canAct?`<div class="button-row"><button class="btn small approve claim-decision" data-id="${esc(row.id)}" data-decision="approve" type="button">Approve &amp; forward</button><button class="btn small secondary claim-decision" data-id="${esc(row.id)}" data-decision="return" type="button">Return to department</button></div>`:`<span class="staff-restricted">Recorded in this register</span>`}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  function renderClaimApprovals(data){const section=document.getElementById('claim-approvals'),claims=data.claims||[],summary=data.consolidated||[],hasUnit=currentStaff?.units?.some(unit=>['hod','directorate-education-business','directorate-arts-stem','provost','college-finance','payroll','auditor'].includes(unit.id));section.hidden=!hasUnit&&!claims.length;if(section.hidden)return;document.getElementById('claimConsolidatedRegister').innerHTML=claimTable(summary,true);document.getElementById('claimApprovalRegister').innerHTML=claimTable(claims,false);section.querySelectorAll('.claim-decision').forEach(button=>button.addEventListener('click',decideClaim));}
+  async function decideClaim(event){const button=event.currentTarget,decision=button.dataset.decision;let note='';if(decision==='return'){note=prompt('Enter the reason for returning this claim to the department:','')||'';if(!note.trim())return;}else note=prompt('Optional approval note:','Approved after reviewing the attached-work quantity and claim record.')||'';if(!confirm(decision==='approve'?'Approve and forward this claim to the next officer?':'Return this claim to the department?'))return;button.disabled=true;try{const response=await fetch(`/api/staff/payment-claims/${encodeURIComponent(button.dataset.id)}/decision`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision,note})}),data=await apiResponse(response,'The claim decision could not be recorded.');show(`Claim ${data.claim.reference} was ${decision==='approve'?'approved and forwarded':'returned to the department'}.`,true);await load();}catch(error){show(error.message,false);button.disabled=false;}}
   function breakdown(items) {
     return items?.length ? `<ul class="dashboard-breakdown">${items.map(item => `<li><span>${esc(item.label)}</span><strong>${esc(item.count)}</strong></li>`).join('')}</ul>` : '<p class="admin-ticket-empty">No cases recorded.</p>';
   }
@@ -203,12 +210,13 @@
   }
   async function load() {
     try {
-      const [meResponse, referralResponse, optionsResponse] = await Promise.all([fetch('/api/staff/me'), fetch('/api/staff/referrals'), fetch('/api/staff/support-report-options')]);
+      const [meResponse, referralResponse, optionsResponse, claimResponse] = await Promise.all([fetch('/api/staff/me'), fetch('/api/staff/referrals'), fetch('/api/staff/support-report-options'), fetch('/api/staff/payment-claims')]);
       requireAuthentication(meResponse); requireAuthentication(referralResponse); requireAuthentication(optionsResponse);
       const meData = await meResponse.json().catch(() => ({}));
       const referralData = await referralResponse.json().catch(() => ({}));
       const optionsData = await optionsResponse.json().catch(() => ({}));
-      if (!meResponse.ok || !referralResponse.ok || !optionsResponse.ok) throw new Error(meData.error || referralData.error || optionsData.error || 'Could not load the staff workspace.');
+      const claimData = await claimResponse.json().catch(() => ({}));
+      if (!meResponse.ok || !referralResponse.ok || !optionsResponse.ok || !claimResponse.ok) throw new Error(meData.error || referralData.error || optionsData.error || claimData.error || 'Could not load the staff workspace.');
       currentStaff = meData.staff;
       showDeveloperPreviewBanner(currentStaff);
       referrals = referralData.referrals || [];
@@ -223,6 +231,7 @@
         reportOptionsLoaded=true;
       }
       document.getElementById('unitCards').innerHTML = currentStaff.units.map(unit => unitCard(unit, currentStaff)).join('') || '<div class="resource-section">No functional-unit access is assigned.</div>';
+      renderClaimApprovals(claimData);
       renderReferrals();
       await loadReport();
     } catch (error) { show(error.message, false); }
@@ -286,5 +295,6 @@
   document.getElementById('downloadRegisterExcel').addEventListener('click',()=>{ const query=reportQueryString(); window.location.href=`/api/staff/support-register.xlsx${query?`?${query}`:''}`; });
   document.getElementById('downloadRegisterCsv').addEventListener('click',()=>{ const query=reportQueryString(); window.location.href=`/api/staff/support-register.csv${query?`?${query}`:''}`; });
   document.getElementById('downloadPerformance').addEventListener('click',()=>{ const query=reportQueryString(); window.location.href=`/api/staff/support-performance.xlsx${query?`?${query}`:''}`; });
+  document.getElementById('downloadClaimRegister').addEventListener('click',()=>{ window.location.href='/api/staff/payment-claims/register.xlsx'; });
   load();
 })();
