@@ -1,0 +1,33 @@
+UCC-CoDE eServices v61
+Unique Consolidated Claims and Duplicate-Payment Protection
+
+HoD consolidated register
+
+1. Multiple unique approved submissions from the same claimant are grouped under one consolidated claim number.
+2. The grouping key uses the department, calendar year, student category and claimant identity.
+3. Distance and Non-Residential claims never share a consolidated claim number.
+4. The department portal displays separate Distance and Non-Residential consolidated registers.
+5. The downloadable workbook contains separate HoD Distance Claims and HoD Non-Residential worksheets, plus source-submission details.
+
+Duplicate-payment reconciliation
+
+1. Project Work comparison uses the approved student registration or index number, group and score.
+2. Field Experience and Teaching Practice comparison uses the approved student registration or index number, assessment category and score values.
+3. If the same student results are submitted twice, the earliest valid approved submission remains payable.
+4. A later exact repeat is labelled Duplicate student results and cannot be forwarded to the HoD.
+5. If the same students are submitted again with different scores, the later submission is labelled as a conflicting repeat and is also blocked.
+6. For Project Work and Field Experience, the comparison works across claimants to prevent the same student results from being claimed by another person.
+7. Assessor and vetting claims remain claimant-specific because the same dissertation may legitimately be assigned to more than one assessor.
+8. HoD payment approval repeats the duplicate check. A claim that was approved for consolidation before this update cannot bypass the control.
+
+Audit and source protection
+
+The original submissions remain unchanged. The consolidated register lists every included source reference. Duplicate submissions remain visible with the earlier payable reference and a clear reason for exclusion.
+
+Verification
+
+- JavaScript syntax and DOM-contract checks pass.
+- The claim-routing test verifies two unique Distance submissions consolidate under one number.
+- It verifies the same claimant receives a separate Non-Residential consolidated number.
+- It verifies an exact repeat of the same student results is excluded from totals, blocked from HoD forwarding and rejected at HoD payment approval.
+- Existing claim-routing and payment-workflow tests continue to pass.

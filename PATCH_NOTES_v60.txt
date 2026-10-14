@@ -1,0 +1,27 @@
+UCC-CoDE eServices v60
+HoD or Assigned Administrator Certification-Waiver Confirmation
+
+What changed
+
+1. A claimant-certification waiver may now be confirmed by either:
+   - an individual authorised HoD for the department; or
+   - an individual departmental administrator assigned to the claim's functional section.
+
+2. The confirming person must enter their own account password. Shared department master credentials and Developer Preview cannot confirm a waiver.
+
+3. The permission applies to both single-claim and bulk certification waivers. For a bulk action, the account must be authorised for every selected claim.
+
+4. Each waiver records the confirming officer's name, email address and authority role, together with the selected reasons, evidence source, optional details, date and time.
+
+5. The authority role appears in department views, downstream functional-unit views, Payroll views, approved claim PDFs and downloadable registers.
+
+Important authority boundary
+
+This change does not delegate HoD payment approval. Uploading the protected HoD signature and approving a claim for payment remain restricted to an individual account configured as the authorised HoD for that department.
+
+Verification
+
+- JavaScript syntax and DOM-contract checks are included in npm run check.
+- The claim-routing test verifies that an assigned departmental administrator can complete a bulk certification waiver.
+- The same test verifies that the assigned administrator is still rejected from the HoD payment-approval action.
+- Existing claim-routing and payment-workflow tests verify the remaining approval chain.

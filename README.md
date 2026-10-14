@@ -1,3 +1,25 @@
+# v61 update: unique consolidated claims and duplicate-payment protection
+
+- Multiple unique submissions from the same claimant are grouped under one consolidated claim number for the HoD register.
+- Distance and Non-Residential claims are kept in separate on-screen registers and separate Excel worksheets.
+- Project Work and Field Experience reconciliation compares the approved student-result rows before HoD forwarding.
+- An exact repeat of the same registration or index numbers and scores is marked as duplicate student results. The earliest valid submission remains payable and the later repeat is blocked.
+- If the same students are submitted again with different scores, the later claim is marked as a conflicting repeat and is also blocked from payment review.
+- The safeguard runs again during HoD payment approval, so an earlier approval status cannot bypass duplicate detection.
+- Source submissions, references and audit histories remain visible under the consolidated claim.
+
+See `PATCH_NOTES_v61.txt` for implementation and verification details.
+
+# v60 update: HoD or assigned administrator waiver confirmation
+
+- Claimant-certification waivers can now be confirmed by either an authorised HoD or an individually assigned departmental administrator with access to the claim's functional section.
+- The person making the waiver confirms with their own account password. Department master credentials and Developer Preview cannot perform the action.
+- Single and bulk waivers record the account holder's name, email, authority role, selected reasons, evidence source, date and time in the audit trail.
+- Department, functional-unit, Payroll and downloadable registers show whether the waiver was confirmed by the HoD or by an assigned departmental administrator.
+- HoD signature upload and final HoD payment approval remain restricted to an authorised HoD account.
+
+See `PATCH_NOTES_v60.txt` for implementation and verification details.
+
 # v59 update: certification waiver and checkbox approval reasons
 
 - An authorised HoD can formally waive missing claimant electronic certification after confirming their account password, ticking approved reasons and identifying the supporting evidence.

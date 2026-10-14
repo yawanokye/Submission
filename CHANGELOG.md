@@ -1,5 +1,23 @@
 # Changelog
 
+## 61.0.0 Unique consolidated claims and duplicate-payment protection
+
+- Assigns one stable consolidated claim number to a claimant's unique approved submissions within each department, year and category.
+- Separates Distance and Non-Residential consolidated claims in the department view and downloadable HoD workbook.
+- Detects exact repeated student results using approved registration or index numbers and scores.
+- Flags the same students submitted with changed scores as a conflicting repeat.
+- Keeps the earliest valid submission payable and blocks later repeats from HoD forwarding and payment approval.
+- Detects repeated Project Work and Field Experience results even when another claimant submits them.
+- Retains each source reference and audit history under the consolidated claim.
+
+## 60.0.0 HoD or assigned administrator waiver confirmation
+
+- Allows an individual authorised HoD or assigned departmental administrator to confirm claimant-certification waivers with their own password.
+- Verifies the administrator's department, role and claim-section assignment before accepting either a single or bulk waiver.
+- Excludes department master credentials and Developer Preview from waiver confirmation.
+- Records the confirming officer's authority role in the claim, audit history, approved PDF and operational registers.
+- Keeps HoD signature upload and HoD payment approval restricted to authorised HoD accounts.
+
 ## 59.0.0 Controlled certification waiver and selectable approval reasons
 
 - Adds single-claim and bulk claimant-certification waiver actions restricted to individual authorised HoD accounts.
