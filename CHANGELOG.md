@@ -1,5 +1,15 @@
 # Changelog
 
+## 58.0.0 Consolidated HoD forwarding and strict attachment reconciliation
+
+- Adds an admin-level Approved Claims for HoD register with ready and reconciliation-needed status.
+- Consolidates ready claims by unique supervisor or examiner and totals completed-work attachments.
+- Adds selection and batch forwarding of reconciled approved claims to the HoD portal.
+- Adds a two-sheet Excel copy for HoD, containing consolidated totals and detailed reconciliation records.
+- Requires Field Experience and Teaching Practice completed-work uploads to equal the quantity stated at submission.
+- Applies the same quantity check again before department forwarding and HoD approval.
+- Preserves all approval routing, notification and audit-history controls from v57.
+
 ## 57.0.0 Field Experience transfer reconciliation and routed claim approvals
 
 - Extends predominant-centre transfer-student reconciliation to Field Experience and Teaching Practice.

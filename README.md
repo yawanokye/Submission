@@ -1,9 +1,21 @@
+# v58 update: consolidated HoD forwarding and attachment reconciliation
+
+- Department administrators now have an Approved Claims for HoD register covering approved Project Work, Field Experience, Teaching Practice and assessment/vetting claims they are permitted to manage.
+- The register compares the stated claim quantity with the number of completed works attached and marks each claim Ready for HoD or Reconciliation Needed.
+- Administrators can select all ready claims and forward them together to the HoD approval register. Every claim retains its own reference, quantities, forwarding note, officer, date and notification history.
+- A downloadable Excel copy contains a consolidated sheet grouped by unique supervisor/examiner and a detailed reconciliation sheet for all approved submissions.
+- Field Experience and Teaching Practice submissions now require completed-work attachments and accept submission only when the attachment count equals the number stated in the claim.
+- Project Work keeps its existing strict claimed-group versus completed-work attachment check.
+- HoD approval also rechecks equality, protecting older or imported records from proceeding with an unresolved quantity difference.
+
+See `PATCH_NOTES_v58.txt` for implementation and verification details.
+
 # v57 update: Field Experience transfer handling and end-to-end claim approvals
 
 - Field Experience and Teaching Practice now applies the predominant-centre transfer-student rule already used for Project Work while preserving the original registration number.
 - Ambiguous centre patterns remain pending until an administrator records a keep-separate or predominant-centre decision with comments.
 - Department administrators can forward an approved, electronically certified consolidated claim to the HoD register.
-- Field Experience and Teaching Practice payment quantity is the actual number of completed-work attachments, even when it differs from the number stated on the claim.
+- Field Experience and Teaching Practice payment quantity is based on completed-work attachments. v58 now requires this quantity to match the stated claim before HoD forwarding.
 - The approval route is Department → HoD → responsible Directorate → Provost → College Finance Officer → Payroll → Audit.
 - Education and Business claims route to the Directorate of Education and Business Studies; Arts/Social Sciences and Science/Mathematics claims route to the Directorate of Arts and STEM Studies.
 - Each approval portal keeps its current and historical claim register, including consolidated unique supervisors/examiners and total attached claims.

@@ -1,0 +1,43 @@
+UCC-CoDE eServices v58
+Consolidated HoD forwarding and attachment reconciliation
+
+1. Approved Claims for HoD register
+
+The department administration portal now contains a dedicated register for approved payment claims. It includes Project Work, Field Experience, Teaching Practice and approved assessment or vetting claims that the signed-in administrator is allowed to manage.
+
+Each record shows the stated claim quantity, completed works attached, difference, current approval stage and readiness. A claim is ready only when it has departmental consolidation approval, verified claimant certification, a complete claim form, resolved centre or group review, matching stated and attached quantities, and a workflow stage that permits department forwarding.
+
+2. Consolidation and batch forwarding
+
+Ready records are consolidated by unique supervisor or examiner. The register shows the number of approved submissions and the total reconciled claims for each person. Administrators can select all ready records, clear the selection or forward selected records to the HoD approval register in one action.
+
+Batch forwarding is all or nothing. If any selected claim no longer meets the rules, the system lists its reference and the required correction without forwarding the batch. Successful forwarding records the administrator, time, note, stated quantity and attachment quantity on every claim and sends the configured HoD notification.
+
+3. Downloadable copy
+
+The Download Consolidated Copy button produces an Excel workbook with two sheets:
+
+- Consolidated for HoD, grouped by unique supervisor or examiner with total reconciled claims.
+- Approved Claim Details, showing every approved submission, quantities, difference, readiness, current stage and any action needed.
+
+4. Submission equality check
+
+Field Experience and Teaching Practice now require completed-work attachments. The browser and server both reject a submission unless the number of completed works attached equals the Number of Students / Candidates stated in the claim.
+
+Project Work keeps its existing claimed-group versus completed-project-work equality check. Score-sheet centre, group and transferred-student variations remain available for administrator reconciliation, but they do not change the required equality between the stated claim and attachments.
+
+5. HoD protection
+
+The individual Forward Claim action uses the same readiness rules as the consolidated register. HoD approval also checks the quantity equality again, preventing an older or imported record with an unresolved difference from proceeding.
+
+6. Verification
+
+The v58 automated integration test verifies:
+
+- rejection of a Field Experience submission with two stated claims and one attachment;
+- acceptance when two stated claims and two attachments agree;
+- transferred-student centre handling remains active;
+- the admin HoD register shows one ready approved claim and two reconciled units;
+- the consolidated Excel copy downloads successfully;
+- batch forwarding moves the selected claim to Pending HoD;
+- HoD signature approval and the Directorate, Provost, College Finance, Payroll and Audit route continue to work.
