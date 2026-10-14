@@ -1,0 +1,38 @@
+UCC-CoDE eServices v59
+Controlled certification waiver and selectable approval reasons
+
+1. Claimant certification waiver
+
+An individual authorised HoD can formally waive missing claimant electronic certification. The action requires the HoD account password, at least one approved reason and supporting evidence. Approved reasons are selected with checkboxes and include a signed physical claim form, legacy submission, documented claimant unavailability, formal institutional authorisation and documented email failure.
+
+The original claim remains unchanged. The waiver stores the HoD name and email, date and time, reason codes and labels, optional details, evidence source and separate uploaded evidence metadata. The complete event is added to the claim audit history.
+
+2. Bulk waiver
+
+The Approved Claims for HoD register can select every claim needing certification waiver. The HoD may apply one controlled waiver decision to as many as 200 selected claims. Already certified or waived claims cannot be mixed into the batch. Every selected record receives its own audit entry.
+
+Each claim's existing attached claim form can be used as evidence. Alternatively, common supporting evidence can be uploaded and preserved for each selected claim.
+
+3. Approval routing
+
+Both Electronically Certified and Certification Waived statuses satisfy the certification gate. A waived claim must still pass consolidation approval, claim-form, attachment-quantity, centre/group reconciliation and workflow-stage checks.
+
+Approved PDFs identify the waiver, HoD, date, reasons and evidence source. Departmental, functional-unit, Payroll and Auditor views expose the waiver status. Uploaded waiver evidence remains downloadable only by authorised users.
+
+4. Checkbox reasons
+
+The following approval actions now provide tick-box reasons:
+
+- department forwarding to HoD;
+- Project Work and Field Experience centre reconciliation;
+- submission return or rejection;
+- assessment and vetting claim return or rejection;
+- HoD part-payment adjustment;
+- Directorate, Provost, College Finance, Payroll and Audit approval or return;
+- Payroll verification, approval, query, return and payment recording.
+
+The Other details field is optional except where a payment reference is required. Selected labels are included in the human-readable audit note, and reason codes are stored where the workflow endpoint supports them.
+
+5. Verification
+
+The automated workflow test verifies that a pending claimant certification blocks HoD readiness, a password-confirmed bulk waiver with two selected reasons succeeds, the claim becomes ready, the waiver is returned through the protected API, and the complete HoD-to-Audit approval route remains operational.

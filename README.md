@@ -1,3 +1,15 @@
+# v59 update: certification waiver and checkbox approval reasons
+
+- An authorised HoD can formally waive missing claimant electronic certification after confirming their account password, ticking approved reasons and identifying the supporting evidence.
+- Departments can apply the same controlled waiver to multiple selected claims in one bulk action. Each claim receives its own waiver record, actor, date, reasons and evidence metadata.
+- Existing signed claim forms may be used as waiver evidence. A separate PDF, image or document can also be uploaded.
+- Waived claims can proceed to HoD approval, but the approved PDF, Payroll, Auditor and functional-unit registers clearly identify the waiver and its reasons.
+- Department forwarding, centre reconciliation, submission return/rejection, HoD part-payment, Directorate, Provost, College Finance, Payroll and Audit decisions now use tick-box reason lists instead of relying on free-text reasons.
+- An optional Other details field remains available for information that the standard reasons do not cover.
+- The audit history records the selected reason labels and, where supported, the stable reason codes.
+
+See `PATCH_NOTES_v59.txt` for implementation and verification details.
+
 # v58 update: consolidated HoD forwarding and attachment reconciliation
 
 - Department administrators now have an Approved Claims for HoD register covering approved Project Work, Field Experience, Teaching Practice and assessment/vetting claims they are permitted to manage.

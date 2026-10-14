@@ -41,6 +41,6 @@ async function main(){
     approval=await json('/api/admin/education/claims/project-payment-fixture/payment-approval',{method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify({password,approvedUnitKeys:keys,adjustmentReason:''})});verification=await json(`/api/claim-verification/${encodeURIComponent(approval.paymentApproval.verificationCode)}`);assert.equal(verification.valid,true);
     await json('/api/admin/education/project-work/project-payment-fixture/review',{method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify({status:'approved',note:'Source review repeated',excludedRowIndexes:[1]})});verification=await json(`/api/claim-verification/${encodeURIComponent(approval.paymentApproval.verificationCode)}`);assert.equal(verification.valid,false,'Changing approved source data must invalidate the HoD approval');
     console.log('v43 payment workflow verified');
-  }finally{child.kill('SIGTERM');await fsp.rm(storage,{recursive:true,force:true});}
+  }catch(error){console.error(output);throw error;}finally{child.kill('SIGTERM');await fsp.rm(storage,{recursive:true,force:true});}
 }
 main().catch(error=>{console.error(error);process.exitCode=1});

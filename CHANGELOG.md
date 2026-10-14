@@ -1,5 +1,15 @@
 # Changelog
 
+## 59.0.0 Controlled certification waiver and selectable approval reasons
+
+- Adds single-claim and bulk claimant-certification waiver actions restricted to individual authorised HoD accounts.
+- Requires HoD password confirmation, at least one approved waiver reason and an evidence source.
+- Supports existing claim forms and separately uploaded waiver evidence without altering the original claim.
+- Treats formally waived certification as eligible for departmental forwarding and HoD approval.
+- Shows waiver status and evidence in department, downstream functional-unit, Payroll and downloadable registers.
+- Replaces free-text-only approval reasons with checkbox reason lists across departmental review, reconciliation, forwarding, part-payment, downstream approvals and Payroll actions.
+- Preserves optional detail fields for exceptional context and records decisions in the audit history.
+
 ## 58.0.0 Consolidated HoD forwarding and strict attachment reconciliation
 
 - Adds an admin-level Approved Claims for HoD register with ready and reconciliation-needed status.
