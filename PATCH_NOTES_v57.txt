@@ -1,0 +1,52 @@
+UCC-CoDE eServices v57
+Field Experience transfer handling and end-to-end claim approvals
+
+1. Field Experience and Teaching Practice centre reconciliation
+
+Field Experience and Teaching Practice now uses the same predominant-centre principle as Project Work. Within a programme, a unique centre cluster of at least three students may retain one or two minority centre-code students as transferred students. The original registration numbers remain unchanged, while consolidated and centre-by-centre reports use the confirmed reporting centre.
+
+If the pattern is ambiguous, the submission remains pending for an administrator decision. The administrator can confirm separate centres or select the predominant reporting centre and must record a comment. The decision, officer and time are retained in the claim audit history.
+
+2. Actual attached-work payment quantity
+
+The department register shows both the stated quantity and the actual completed-work attachment count. For Field Experience and Teaching Practice claims, the actual attachment count is the payable maximum. A smaller or larger attachment count does not change the uploaded claim form; the variance is recorded in the workflow and approval history.
+
+A claim with no completed-work attachment cannot be forwarded for payment. Score rows remain the approved academic record but are not substituted for missing payment evidence.
+
+3. Approval route
+
+Approved and electronically certified claims follow this route:
+
+- Department administrator forwards the consolidated claim.
+- HoD approves with the protected individual account, password confirmation and stored signature.
+- Education and Business claims go to the Directorate of Education and Business Studies.
+- Arts/Social Sciences and Science/Mathematics claims go to the Directorate of Arts and STEM Studies.
+- Directorate approval goes to the Provost.
+- Provost approval goes to the College Finance Officer.
+- College Finance approval goes to Payroll.
+- Payroll approval goes to Audit.
+- Audit approval completes the workflow.
+
+Every stage records the decision, note, officer, time, source stage and destination stage. A downstream officer may return a claim to the department with a reason. After reconciliation, the department can forward it again and the HoD must create a fresh approval.
+
+4. Registers and portal access
+
+The Developer Portal now offers Head of Department (HoD) Portal as a functional-unit permission. The staff workspace contains a Claims Approval Register for HoD, both Directorates, Provost, College Finance, Payroll and Audit.
+
+The consolidated register groups records by department and unique supervisor/examiner identity and totals the actual attached claims. A detailed register shows the reference, activity, stated quantity, actual attached quantity and current stage. Excel download contains both consolidated and detailed sheets. Completed or forwarded claims remain in the responsible unit's historical register.
+
+5. Officer notifications
+
+The Developer Portal Settings page lets the system administrator set the officer name, email and mobile number for each HoD, Directorate, Provost, College Finance, Payroll and Audit stage. On successful forwarding, the next configured officer receives an email and, when Student Support SMS is enabled and Arkesel is configured, an SMS with the secure portal link.
+
+6. Verification
+
+The v57 automated integration test verifies:
+
+- automatic Field Experience predominant-centre handling for a transferred student;
+- preservation of the original score and registration records;
+- actual attachment quantity of two against five stated candidates;
+- consolidated HoD register totals;
+- HoD signature approval and correct Directorate routing;
+- Directorate, Provost, College Finance, Payroll and Audit decisions;
+- retention of the completed claim in the Audit register.

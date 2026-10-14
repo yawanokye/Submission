@@ -1,5 +1,16 @@
 # Changelog
 
+## 57.0.0 Field Experience transfer reconciliation and routed claim approvals
+
+- Extends predominant-centre transfer-student reconciliation to Field Experience and Teaching Practice.
+- Adds administrator decisions and audit history for ambiguous Field Experience centre patterns.
+- Uses actual completed-work attachment count as the payable Field Experience/Teaching Practice quantity.
+- Adds Department-to-HoD forwarding and the HoD functional-unit portal.
+- Routes HoD-approved claims through the responsible Directorate, Provost, College Finance, Payroll and Audit.
+- Adds current and historical functional-unit claim registers plus consolidated unique supervisor/examiner totals.
+- Adds developer-managed email and mobile contacts for every approval stage with email and optional Arkesel SMS notices.
+- Retains return-to-department, reconciliation, renewed HoD approval and complete audit history.
+
 ## 56.0.0 Administrator reconciliation decisions and clean group numbers
 
 - Gives each unresolved Project Work centre/group case a clear suggested resolution.

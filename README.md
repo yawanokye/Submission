@@ -1,3 +1,17 @@
+# v57 update: Field Experience transfer handling and end-to-end claim approvals
+
+- Field Experience and Teaching Practice now applies the predominant-centre transfer-student rule already used for Project Work while preserving the original registration number.
+- Ambiguous centre patterns remain pending until an administrator records a keep-separate or predominant-centre decision with comments.
+- Department administrators can forward an approved, electronically certified consolidated claim to the HoD register.
+- Field Experience and Teaching Practice payment quantity is the actual number of completed-work attachments, even when it differs from the number stated on the claim.
+- The approval route is Department → HoD → responsible Directorate → Provost → College Finance Officer → Payroll → Audit.
+- Education and Business claims route to the Directorate of Education and Business Studies; Arts/Social Sciences and Science/Mathematics claims route to the Directorate of Arts and STEM Studies.
+- Each approval portal keeps its current and historical claim register, including consolidated unique supervisors/examiners and total attached claims.
+- The Developer Portal can configure the name, email and mobile number for every approval officer. The next officer receives an email and, when enabled, an Arkesel SMS containing the portal link.
+- A downstream officer can return a claim to the department with a reason. The department can reconcile it, forward it again and obtain a fresh HoD approval.
+
+See `PATCH_NOTES_v57.txt` for implementation and verification details.
+
 # v56 update: administrator reconciliation and numeric group output
 
 - The Project Work administrator receives a suggested resolution for each unresolved centre/group case.

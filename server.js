@@ -250,13 +250,14 @@ const STAFF_UNITS = Object.freeze({
   'student-records': { label: 'Student Records Management Unit', summary: 'Receive and process assigned records matters. Official records remain controlled through approved UCC systems.' },
   'registration-officer': { label: 'Registration Officer Portal', summary: 'Receive and resolve student course-registration challenges while preserving approved academic records.' },
   'college-registrar': { label: 'College Registrar', summary: 'Handle registrar matters, certificates, name changes and escalated service requests.' },
-  'provost': { label: 'Provost', summary: 'Read-only oversight of service performance, sensitive escalation and institutional trends.' },
+  'hod': { label: 'Head of Department (HoD) Portal', summary: 'Review consolidated departmental claims, apply the protected HoD approval and forward approved claims to the responsible directorate.' },
+  'provost': { label: 'Provost', summary: 'Institutional oversight and approval of claims forwarded by the directorates.' },
   'directorate-education-business': { label: 'Directorate of Education and Business Studies', summary: 'Academic oversight for Education and Business programmes.' },
   'directorate-arts-stem': { label: 'Directorate of Arts and STEM Studies', summary: 'Academic oversight for Arts, Social Sciences, STEM and ICT programmes.' },
   'academic-departments': { label: 'Academic Departments', summary: 'Receive programme, assessment, project-work, teaching-practice and departmental academic matters.' },
   'examinations': { label: 'Examinations Unit', summary: 'Process examination-related matters and support controlled results workflows.' },
   'payroll': { label: 'Payroll Portal', summary: 'Process only department-approved claims for payment.' },
-  'auditor': { label: "Auditor's Portal", summary: 'Read-only verification of payroll-approved or paid claims.' },
+  'auditor': { label: "Auditor's Portal", summary: 'Final audit verification of payroll-approved claims with a retained approval history.' },
   'regional-administrator': { label: 'Regional Administrators', summary: 'Facilitate, verify and escalate centre matters without approving academic records.' },
   'coordinator': { label: 'Centre Coordinators', summary: 'Submit, verify, monitor and escalate centre matters without altering official records.' },
   'quality-assurance': { label: 'Quality Assurance Unit', summary: 'Read-only quality oversight and monitoring.' },
@@ -264,6 +265,29 @@ const STAFF_UNITS = Object.freeze({
   'admissions': { label: 'Admissions Unit', summary: 'Receive assigned admissions and applicant service matters.' },
   'stores': { label: 'Stores Unit', summary: 'Receive assigned stores and logistics service matters.' }
 });
+
+const CLAIM_APPROVAL_STAGE_UNITS = Object.freeze({
+  'pending-hod':'hod',
+  'pending-directorate-education-business':'directorate-education-business',
+  'pending-directorate-arts-stem':'directorate-arts-stem',
+  'pending-provost':'provost',
+  'pending-college-finance':'college-finance',
+  'pending-payroll':'payroll',
+  'pending-audit':'auditor'
+});
+const CLAIM_APPROVAL_STAGE_LABELS = Object.freeze({
+  'department-review':'Department review',
+  'pending-hod':'Awaiting HoD approval',
+  'pending-directorate-education-business':'Awaiting Directorate of Education and Business Studies',
+  'pending-directorate-arts-stem':'Awaiting Directorate of Arts and STEM Studies',
+  'pending-provost':'Awaiting Provost approval',
+  'pending-college-finance':'Awaiting College Finance Officer approval',
+  'pending-payroll':'Awaiting Payroll approval',
+  'pending-audit':'Awaiting Audit verification',
+  'completed':'Approval workflow completed',
+  'returned-to-department':'Returned to department'
+});
+const CLAIM_OFFICER_KEYS = Object.freeze(['hod-education','hod-business','hod-arts-social-sciences','hod-science-mathematics','directorate-education-business','directorate-arts-stem','provost','college-finance','payroll','auditor']);
 
 const BUILTIN_RESOURCES = [
   {
@@ -1070,9 +1094,15 @@ function normalizeResourcePortals(value) {
   return [...new Set(raw.map(v => String(v || '').trim()).filter(v => RESOURCE_PORTALS.has(v)))];
 }
 function normalizePortalSettings(raw) {
+  const approvalOfficers={};
+  for(const key of CLAIM_OFFICER_KEYS){
+    const item=raw?.approvalOfficers?.[key]||{};
+    approvalOfficers[key]={name:cleanHumanText(item.name).slice(0,180),email:String(item.email||'').trim().toLowerCase().slice(0,254),phone:cleanHumanText(item.phone).slice(0,40)};
+  }
   return {
-    version: 1,
-    fieldExperienceClaimFormRequired: Boolean(raw?.fieldExperienceClaimFormRequired)
+    version: 2,
+    fieldExperienceClaimFormRequired: Boolean(raw?.fieldExperienceClaimFormRequired),
+    approvalOfficers
   };
 }
 async function readPortalSettings() {
@@ -2075,13 +2105,63 @@ function fieldValidScoreRows(record) {
 function approvedFieldExperienceScoreRows(record) {
   return fieldValidScoreRowsWithMeta(record).filter(row=>row.included!==false).map(({sourceIndex,included,...row})=>row);
 }
+function fieldCentreDecisionMap(record){
+  return new Map((Array.isArray(record?.fieldCentreDecisions)?record.fieldCentreDecisions:[]).map(item=>[String(item.caseKey||''),item]).filter(([key])=>key));
+}
+function fieldCentreAnalysis(record={}){
+  const rows=fieldValidScoreRowsWithMeta(record).filter(row=>row.included!==false),directory=studyCentreDirectoryMapSync(),decisions=fieldCentreDecisionMap(record),assignments=[],transferExceptions=[],centreReviewCases=[];
+  if(studentStream(record)==='non-residential'){
+    for(const row of rows)assignments.push({sourceIndex:row.sourceIndex,programme:registrationProgrammeCentre(row.registrationNo).programme,indexCentreCode:'NON-RESIDENTIAL',reportingCentreCode:'NON-RESIDENTIAL',resolution:'non-residential'});
+    return {rowAssignments:assignments,transferExceptions,centreReviewCases,requiresCentreReview:false};
+  }
+  const buckets=new Map(),selected=projectStudyCentres(record);
+  for(const row of rows){
+    const parsed=registrationProgrammeCentre(row.registrationNo),programme=parsed.programme||'UNCLASSIFIED';
+    let centre=parsed.centre&&parsed.centre!=='UNCLASSIFIED'?parsed.centre:'';
+    if(!centre&&selected.length===1)centre=normalizeCentreCode(selected[0]);
+    if(!centre)centre='UNCLASSIFIED';
+    if(!buckets.has(programme))buckets.set(programme,[]);
+    buckets.get(programme).push({...row,programme,indexCentreCode:centre});
+  }
+  for(const [programme,bucketRows] of buckets){
+    const clusters=new Map();for(const row of bucketRows){if(!clusters.has(row.indexCentreCode))clusters.set(row.indexCentreCode,[]);clusters.get(row.indexCentreCode).push(row);}
+    const clusterList=[...clusters.entries()].map(([centre,items])=>({centre,count:items.length,rows:items})).sort((a,b)=>b.count-a.count||a.centre.localeCompare(b.centre));
+    const caseKey=programme,signature=clusterList.map(item=>`${item.centre}:${item.count}`).sort().join('|'),decision=decisions.get(caseKey),current=decision&&decision.centreSignature===signature;
+    if(clusterList.length===1){for(const row of bucketRows)assignments.push({sourceIndex:row.sourceIndex,programme,indexCentreCode:row.indexCentreCode,reportingCentreCode:row.indexCentreCode,resolution:'index-centre'});continue;}
+    const dominant=clusterList[0],runner=clusterList[1],minority=bucketRows.length-dominant.count,automatic=dominant.count>runner.count&&dominant.count>=3&&minority>=1&&minority<=2&&dominant.centre!=='UNCLASSIFIED';
+    const requested=normalizeCentreCode(decision?.reportingCentreCode),merge=current&&decision.action==='merge-predominant'&&clusterList.some(item=>item.centre===requested)&&requested!=='UNCLASSIFIED';
+    if(automatic||merge){
+      const reporting=merge?requested:dominant.centre,resolution=merge?'admin-confirmed-predominant':'automatic-predominant';
+      for(const row of bucketRows)assignments.push({sourceIndex:row.sourceIndex,programme,indexCentreCode:row.indexCentreCode,reportingCentreCode:reporting,resolution});
+      const moved=bucketRows.filter(row=>row.indexCentreCode!==reporting);
+      transferExceptions.push({caseKey,programme,centreSignature:signature,reportingCentreCode:reporting,minorityStudentCount:moved.length,resolution,students:moved.map(row=>({sourceIndex:row.sourceIndex,name:row.name,registrationNo:row.registrationNo,indexCentreCode:row.indexCentreCode}))});
+      continue;
+    }
+    if(current&&decision.action==='keep-distinct'){
+      for(const row of bucketRows)assignments.push({sourceIndex:row.sourceIndex,programme,indexCentreCode:row.indexCentreCode,reportingCentreCode:row.indexCentreCode,resolution:'admin-kept-distinct'});
+      continue;
+    }
+    for(const row of bucketRows)assignments.push({sourceIndex:row.sourceIndex,programme,indexCentreCode:row.indexCentreCode,reportingCentreCode:row.indexCentreCode,resolution:'pending-admin-review'});
+    centreReviewCases.push({caseKey,programme,centreSignature:signature,clusters:clusterList.map(item=>({centre:item.centre,count:item.count,students:item.rows.map(row=>({sourceIndex:row.sourceIndex,name:row.name,registrationNo:row.registrationNo}))})),reportingCentreOptions:clusterList.filter(item=>item.centre!=='UNCLASSIFIED').map(item=>item.centre),suggestedReportingCentreCode:dominant.count>runner.count?dominant.centre:'',recommendedAction:dominant.count>runner.count?'merge-predominant':'keep-distinct',recommendation:dominant.count>runner.count?`Confirm whether the ${minority} minority centre-code student${minority===1?' is':'s are'} transferred and should remain under ${dominant.centre}.`:'Confirm whether the centre lists are separate submissions.',reason:'The centre-code pattern needs an administrator decision.'});
+  }
+  return {rowAssignments:assignments,transferExceptions,centreReviewCases,requiresCentreReview:centreReviewCases.length>0};
+}
+function fieldReportingCentre(record,row,sourceIndex,directory=studyCentreDirectoryMapSync()){
+  if(studentStream(record)==='non-residential')return {code:'NON-RESIDENTIAL',name:'Non-Residential',resolution:'non-residential'};
+  const assignment=fieldCentreAnalysis(record).rowAssignments.find(item=>item.sourceIndex===sourceIndex),fallback=studyCentreInfoFromRegistration(row.registrationNo,directory),code=assignment?.reportingCentreCode||fallback.code;
+  const centre=directory.get(code)||{code,name:code==='UNCLASSIFIED'?'UNCLASSIFIED STUDY CENTRE':`UNKNOWN STUDY CENTRE (${code})`};
+  return {...centre,resolution:assignment?.resolution||'index-centre',indexCentreCode:assignment?.indexCentreCode||fallback.code};
+}
 function fieldClaimValidation(record) {
   const claimedCandidateCount=Number(record?.claimedCandidateCount||parseFlexiblePositiveCount(record?.groupCount)||0);
   const scoreRowCount=fieldValidScoreRows(record).length;
+  const actualAttachedWorkCount=paymentRecordFiles(record,'completedWork').length;
+  const centreAnalysis=fieldCentreAnalysis(record);
   const issues=[];
   if(!claimedCandidateCount)issues.push('The claimed candidate count is missing or invalid.');
   if(claimedCandidateCount!==scoreRowCount)issues.push(`The claimed candidate count (${claimedCandidateCount||0}) does not match the extracted score rows (${scoreRowCount}).`);
-  return {claimedCandidateCount,scoreRowCount,valid:issues.length===0,issues};
+  if(centreAnalysis.requiresCentreReview)issues.push('One or more programme centre-code patterns require an administrator decision before further processing.');
+  return {claimedCandidateCount,scoreRowCount,actualAttachedWorkCount,rowAssignments:centreAnalysis.rowAssignments,transferExceptions:centreAnalysis.transferExceptions,centreReviewCases:centreAnalysis.centreReviewCases,requiresCentreReview:centreAnalysis.requiresCentreReview,valid:issues.length===0,validForFurtherProcessing:issues.length===0,issues};
 }
 function fieldAssessmentAoA(records, assessmentType) {
   const spec=fieldAssessmentSpec(assessmentType);
@@ -2091,7 +2171,7 @@ function fieldAssessmentAoA(records, assessmentType) {
     .filter(record=>record.assessmentType===assessmentType&&projectReviewStatus(record)==='approved')
     .sort(approvedRecordOrder)
     .forEach(record=>{
-      for(const row of approvedFieldExperienceScoreRows(record)) {const signature=exactDuplicateOutputKey(row,fieldDuplicateSignature);if(signature&&seenExact.has(signature))continue;if(signature)seenExact.add(signature);rows.push({...row,studyCentre:studyCentreInfoFromRegistration(row.registrationNo,directory).name});}
+      for(const row of fieldValidScoreRowsWithMeta(record).filter(item=>item.included!==false)) {const signature=exactDuplicateOutputKey(row,fieldDuplicateSignature);if(signature&&seenExact.has(signature))continue;if(signature)seenExact.add(signature);rows.push({...row,studyCentre:fieldReportingCentre(record,row,row.sourceIndex,directory).name});}
     });
   rows.sort((a,b)=>String(a.studyCentre||'').localeCompare(String(b.studyCentre||''),undefined,{numeric:true,sensitivity:'base'})||compareRegistrationValues(a.registrationNo,b.registrationNo)||String(a.name||'').localeCompare(String(b.name||''),undefined,{sensitivity:'base'}));
   const headers=['S/N','STUDY CENTRE','REGISTRATION','NAME OF STUDENT',...spec.scoreHeaders];
@@ -2635,6 +2715,13 @@ async function sendArkeselSupportSms(phone, body) {
   if (!response.ok || ['error','failed'].includes(providerStatus)) throw new Error(String(result.message || `Arkesel returned ${response.status}`).slice(0, 300));
   const delivery = Array.isArray(result.data) ? result.data.find(item => item?.id) : result.data;
   return { id:String(delivery?.id || result.id || ''), provider:'arkesel' };
+}
+async function dispatchClaimApprovalNotification(record,stage,req){
+  const settings=await readPortalSettings(),key=approvalOfficerKeyForStage(stage,record.department),officer=settings.approvalOfficers?.[key]||{},unit=CLAIM_APPROVAL_STAGE_UNITS[stage]||'',base=baseUrlFor(req),link=stage==='pending-hod'?`${base}/admin/${encodeURIComponent(record.department)}#${record.portalType==='field-experience'?'field':record.portalType==='assessor'?'assessor':'project'}`:`${base}/staff#claim-approvals`;
+  const subject=`Approval waiting - ${record.reference}`,label=CLAIM_APPROVAL_STAGE_LABELS[stage]||'Approval waiting';
+  const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${htmlEscape(label)}</h2><p>Dear ${htmlEscape(officer.name||'Approving Officer')},</p><p>Claim <strong>${htmlEscape(record.reference)}</strong> from ${htmlEscape(record.departmentName||DEPARTMENTS[record.department]?.name||record.department)} is waiting for your review.</p><p><strong>Claimant:</strong> ${htmlEscape(record.fullName||record.assessorName||'')}<br><strong>Actual attached work quantity:</strong> ${attachedClaimQuantity(record)}<br><strong>Stated claim quantity:</strong> ${paymentClaimValidation(record).claimedQuantity||0}</p><p><a href="${htmlEscape(link)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Open Approval Register</a></p><p>The link requires the authorised individual staff account for ${htmlEscape(STAFF_UNITS[unit]?.label||label)}.</p></div></body></html>`;
+  const operations=[];if(isEmail(officer.email)&&gmailConfigured())operations.push({channel:'email',send:()=>sendGmailHtmlEmail({to:officer.email,subject,html})});if(officer.phone&&supportMobileChannelConfigured('sms'))operations.push({channel:'sms',send:()=>sendArkeselSupportSms(officer.phone,`UCC-CoDE: ${record.reference} is waiting for ${label}. ${link}`)});
+  const results=await Promise.allSettled(operations.map(item=>item.send()));return operations.map((item,index)=>({channel:item.channel,status:results[index].status==='fulfilled'?'sent':'failed',providerMessageId:results[index].status==='fulfilled'?String(results[index].value?.id||''):'',error:results[index].status==='rejected'?String(results[index].reason?.message||results[index].reason||'Delivery failed').slice(0,300):'',at:new Date().toISOString(),officerKey:key}));
 }
 async function dispatchSupportStudentNotification(ticket, { kind='update', subject, html, req }) {
   const baseUrl = req ? baseUrlFor(req) : PUBLIC_BASE_URL;
@@ -3851,7 +3938,8 @@ app.post('/api/project-work', upload.fields([
 // 1B. FIELD EXPERIENCE AND TEACHING PRACTICE SCORES
 app.post('/api/field-experience', upload.fields([
   { name: 'scoresFile', maxCount: 1 },
-  { name: 'claimForm', maxCount: 1 }
+  { name: 'claimForm', maxCount: 1 },
+  { name: 'completedWork', maxCount: 100 }
 ]), async (req, res) => {
   try {
     const department = validateDepartment(req);
@@ -3882,7 +3970,8 @@ app.post('/api/field-experience', upload.fields([
     catch (e) { await removeUploaded(req); return res.status(400).json({ error: e.message }); }
     const claimedCandidateCount=parseFlexiblePositiveCount(text(req,'groupCount'));
     if(!claimedCandidateCount){await removeUploaded(req);return res.status(400).json({error:'Enter Number of Students / Candidates as a positive number.'});}
-    if(claimedCandidateCount!==scoreResult.rows.length){await removeUploaded(req);return res.status(400).json({error:`The number being claimed cannot be different from the extracted score rows. Claim form/portal total: ${claimedCandidateCount} · Score rows extracted: ${scoreResult.rows.length}. Correct the Number of Students / Candidates or the score sheet before submitting.`});}
+    const indexesWithoutScore=scoreResult.rows.filter(row=>cleanHumanText(row?.registrationNo)&&!(row?.scoreValues||[]).some(value=>cleanHumanText(value)));
+    if(indexesWithoutScore.length){await removeUploaded(req);return res.status(400).json({error:`Every registration number must have at least one score. Add the missing score for ${indexesWithoutScore.slice(0,8).map(row=>cleanHumanText(row.registrationNo)).join(', ')} and submit again.`});}
     const claimantName=buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'middleName'),text(req,'lastName')),claimantCertification=newClaimantCertification({name:claimantName,email:text(req,'email'),staffId:text(req,'staffId')});
     const record = {
       id: crypto.randomUUID(), portalType: 'field-experience', department, departmentName: DEPARTMENTS[department].name,
@@ -3898,10 +3987,11 @@ app.post('/api/field-experience', upload.fields([
         scoreHeaders: scoreResult.scoreHeaders,
         rows: scoreResult.rows
       },
-      fieldValidation:{claimedCandidateCount,scoreRowCount:scoreResult.rows.length,valid:true,validatedAt:new Date().toISOString()},
+      fieldCentreDecisions:[],fieldCentreDecisionHistory:[],
       reviewStatus:'pending', reviewNote:'', reviewedAt:null, reviewedBy:'', reviewHistory:[],
-      files: { scoresFile: fileRecord(filesFor(req,'scoresFile')[0]), claimForm: fileRecord(filesFor(req,'claimForm')[0]) }
+      files: { scoresFile: fileRecord(filesFor(req,'scoresFile')[0]), claimForm: fileRecord(filesFor(req,'claimForm')[0]), completedWork:filesFor(req,'completedWork').map(fileRecord) }
     };
+    record.fieldValidation={...fieldClaimValidation(record),validatedAt:new Date().toISOString()};
     await saveRecord(record);
     const certificationDelivery=await dispatchClaimantCertification(record,claimantCertification.token,req);
     res.status(201).json({
@@ -3915,7 +4005,7 @@ app.post('/api/field-experience', upload.fields([
       studyCentres:selectedCentres,
       studentStream,
       reviewStatus:'pending',
-      reviewStatusLabel:'Pending Verification',claimantCertificationStatus:'pending',certificationEmailSent:certificationDelivery.emailSent,certificationEmailError:certificationDelivery.emailError||null
+      reviewStatusLabel:'Pending Verification',warningCount:record.fieldValidation.issues.length,warnings:record.fieldValidation.issues,claimantCertificationStatus:'pending',certificationEmailSent:certificationDelivery.emailSent,certificationEmailError:certificationDelivery.emailError||null
     });
   } catch (e) {
     console.error(e);
@@ -4532,7 +4622,7 @@ function fieldScoreReportRows(records, reportKey, stream='distance') {
     .filter(record=>record.assessmentType===report.assessmentType&&studentStream(record)===stream&&projectReviewStatus(record)==='approved')
     .sort(approvedRecordOrder)
     .forEach(record=>{
-      for(const row of approvedFieldExperienceScoreRows(record)) {const signature=exactDuplicateOutputKey(row,fieldDuplicateSignature);if(signature&&seenExact.has(signature))continue;if(signature)seenExact.add(signature);const centre=stream==='non-residential'?{name:'Non-Residential',code:'NON-RESIDENTIAL'}:studyCentreInfoFromRegistration(row.registrationNo,directory);out.push({registrationNo:row.registrationNo||'',name:row.name||'',score:row.scoreValues?.[report.scoreIndex]||'',centreCode:centre.code,studyCentre:centre.name});}
+      for(const row of fieldValidScoreRowsWithMeta(record).filter(item=>item.included!==false)) {const signature=exactDuplicateOutputKey(row,fieldDuplicateSignature);if(signature&&seenExact.has(signature))continue;if(signature)seenExact.add(signature);const centre=fieldReportingCentre(record,row,row.sourceIndex,directory);out.push({registrationNo:row.registrationNo||'',name:row.name||'',score:row.scoreValues?.[report.scoreIndex]||'',centreCode:centre.code,studyCentre:centre.name,indexCentreCode:centre.indexCentreCode||centre.code,centreResolution:centre.resolution});}
     });
   out.sort((a,b)=>String(a.studyCentre||'').localeCompare(String(b.studyCentre||''),undefined,{numeric:true,sensitivity:'base'})||compareRegistrationValues(a.registrationNo,b.registrationNo)||String(a.name||'').localeCompare(String(b.name||''),undefined,{sensitivity:'base'}));
   return out;
@@ -4615,27 +4705,49 @@ function projectApprovedRegisterAoA(records, stream='all') {
   return [h,...body];
 }
 function paymentConsolidationApproved(record){return record?.portalType==='assessor'?assessorClaimReviewStatus(record)==='approved':projectReviewStatus(record)==='approved';}
+function attachedClaimQuantity(record){
+  if(record?.portalType==='assessor')return (Array.isArray(record.works)?record.works:[]).filter(work=>work?.files?.reportFile||work?.files?.dissertationFile).length;
+  const attached=paymentRecordFiles(record,'completedWork').length;
+  if(attached)return attached;
+  if(record?.portalType==='field-experience')return attached;
+  return projectGroupValidation(record,{approved:true}).completedProjectWorkCount;
+}
 function paymentUnitData(record){
   if(record?.portalType==='assessor'){
     const works=Array.isArray(record.works)?record.works:[],units=works.map((work,index)=>{const ready=Boolean(work?.files?.reportFile&&work?.files?.scoreSheet&&work?.files?.claimForm);return {key:`work:${index}:${normalizeIndexNumber(work?.indexNumber)||index+1}`,label:`Work ${work?.workNo||index+1} · ${work?.studentName||work?.indexNumber||'Student'}`,eligible:ready,reason:ready?'':'Report, score sheet or claim form is missing'};}),claimedQuantity=Math.max(0,Number(record.workCount||works.length||0));return {units,claimedQuantity,maxPayable:Math.min(claimedQuantity,units.filter(unit=>unit.eligible).length),validation:paymentClaimValidation(record)};
   }
   if(record?.portalType==='field-experience'){
-    const rows=fieldValidScoreRowsWithMeta(record).filter(row=>row.included!==false),units=rows.map((row,index)=>({key:`candidate:${row.sourceIndex}:${normalizeIndexNumber(row.registrationNo)||index+1}`,label:`${row.registrationNo||`Candidate ${index+1}`} · ${row.name||'Name not recorded'}`,eligible:true})),claimedQuantity=Number(record?.claimedCandidateCount||parseFlexiblePositiveCount(record?.groupCount)||0);return {units,claimedQuantity,maxPayable:Math.min(claimedQuantity,units.length),validation:paymentClaimValidation(record)};
+    const files=paymentRecordFiles(record,'completedWork'),units=files.map((file,index)=>({key:`attachment:${index}`,label:`Attached work ${index+1} · ${file.originalName||'Supporting work'}`,eligible:true})),claimedQuantity=Number(record?.claimedCandidateCount||parseFlexiblePositiveCount(record?.groupCount)||0),actualQuantity=units.length;return {units,claimedQuantity,actualQuantity,maxPayable:actualQuantity,validation:paymentClaimValidation(record)};
   }
-  const validation=projectGroupValidation(record,{approved:true}),units=(validation.groupUnits||[]).map(unit=>({key:`group:${unit.key}`,label:unit.label,eligible:unit.classified!==false,reason:unit.classified===false?'Programme or centre could not be identified':''})),claimedQuantity=Number(validation.claimedGroupCount||0);return {units,claimedQuantity,maxPayable:Math.min(claimedQuantity,validation.completedProjectWorkCount,units.filter(unit=>unit.eligible).length),validation};
+  const validation=projectGroupValidation(record,{approved:true}),files=paymentRecordFiles(record,'completedWork'),units=files.map((file,index)=>({key:`attachment:${index}`,label:`Completed project work ${index+1} · ${file.originalName||'Attached work'}`,eligible:true})),claimedQuantity=Number(validation.claimedGroupCount||0),actualQuantity=units.length;return {units,claimedQuantity,actualQuantity,maxPayable:actualQuantity,validation};
 }
 function paymentApprovalDocuments(record){return Array.isArray(record?.paymentApproval?.documents)?record.paymentApproval.documents:[];}
 function paymentApprovalView(record){const approval=record?.paymentApproval||{},documents=paymentApprovalDocuments(record);return {status:departmentPaymentApprovalStatus(record),approvedAt:approval.approvedAt||null,approvedBy:approval.approvedBy||'',approvedByEmail:approval.approvedByEmail||'',approvedQuantity:Number(approval.approvedQuantity||0),claimedQuantity:Number(approval.claimedQuantity||0),paymentType:approval.paymentType||'',adjustmentReason:approval.adjustmentReason||'',verificationCode:approval.verificationCode||'',currentDocumentId:approval.currentDocumentId||null,returnedAt:approval.returnedAt||null,returnedBy:approval.returnedBy||'',returnReason:approval.returnReason||'',invalidatedAt:approval.invalidatedAt||null,invalidationReason:approval.invalidationReason||'',approvedUnits:Array.isArray(approval.approvedUnits)?approval.approvedUnits:[],documents:documents.map(document=>({id:document.id,originalName:document.originalName,status:document.status||'superseded',createdAt:document.createdAt,approvedAt:document.approvedAt,approvedBy:document.approvedBy,approvedQuantity:document.approvedQuantity,claimedQuantity:document.claimedQuantity,paymentType:document.paymentType,verificationCode:document.verificationCode,sha256:document.sha256,downloadUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/approved-claim/${encodeURIComponent(document.id)}`}))};}
+function directorateStageForDepartment(department){return ['education','business'].includes(department)?'pending-directorate-education-business':'pending-directorate-arts-stem';}
+function approvalOfficerKeyForStage(stage,department){return stage==='pending-hod'?`hod-${department}`:(CLAIM_APPROVAL_STAGE_UNITS[stage]||'');}
+function paymentWorkflowView(record){const workflow=record?.paymentWorkflow||{};const stage=workflow.stage||(paymentApprovalDocuments(record).length?directorateStageForDepartment(record.department):'department-review');return {stage,stageLabel:CLAIM_APPROVAL_STAGE_LABELS[stage]||stage,currentUnit:CLAIM_APPROVAL_STAGE_UNITS[stage]||'',forwardedAt:workflow.forwardedAt||null,forwardedBy:workflow.forwardedBy||'',actualAttachedQuantity:Number(workflow.actualAttachedQuantity??attachedClaimQuantity(record)),statedClaimQuantity:Number(workflow.statedClaimQuantity??paymentClaimValidation(record).claimedQuantity??0),approvedQuantity:Number(record?.paymentApproval?.approvedQuantity||workflow.actualAttachedQuantity||0),history:Array.isArray(workflow.history)?workflow.history:[]};}
+function ensurePaymentWorkflow(record){
+  const current=paymentWorkflowView(record);record.paymentWorkflow={...(record.paymentWorkflow||{}),stage:current.stage,actualAttachedQuantity:current.actualAttachedQuantity,statedClaimQuantity:current.statedClaimQuantity,history:Array.isArray(record?.paymentWorkflow?.history)?record.paymentWorkflow.history:[]};return record.paymentWorkflow;
+}
+function claimApprovalNextStage(stage){return ({'pending-directorate-education-business':'pending-provost','pending-directorate-arts-stem':'pending-provost','pending-provost':'pending-college-finance','pending-college-finance':'pending-payroll','pending-payroll':'pending-audit','pending-audit':'completed'})[stage]||'';}
+function claimWorkflowActor(req,fallback='Approving officer'){const identity=req.staffIdentity||req.adminIdentity||{};const name=identity.name||identity.username||fallback;return identity.developerPreview?`Developer Preview as ${identity.developerPreviewLabel||name}`:name;}
+function claimWorkflowRow(record){const base=payrollClaimRow(record),workflow=paymentWorkflowView(record);return {...base,paymentWorkflow:workflow,stage:workflow.stage,stageLabel:workflow.stageLabel,actualAttachedQuantity:workflow.actualAttachedQuantity,statedClaimQuantity:workflow.statedClaimQuantity,departmentPortalUrl:`/admin/${encodeURIComponent(record.department)}#${record.portalType==='field-experience'?'field':record.portalType==='assessor'?'assessor':'project'}`};}
+function consolidatedClaimRegister(records){
+  const map=new Map();
+  for(const record of records){const row=claimWorkflowRow(record),key=`${record.department}|${String(row.email||row.supervisorName||'').trim().toLowerCase()}`;if(!map.has(key))map.set(key,{key,department:record.department,departmentName:row.departmentName,supervisorName:row.supervisorName,email:row.email,phone:row.phone,claimCount:0,totalClaims:0,references:[],activities:new Set(),stages:new Set()});const item=map.get(key);item.claimCount++;item.totalClaims+=Number(row.actualAttachedQuantity||row.departmentApprovedQuantity||0);item.references.push(row.reference);item.activities.add(row.workType);item.stages.add(row.stageLabel);}
+  return [...map.values()].map(item=>({...item,activities:[...item.activities],stages:[...item.stages]})).sort((a,b)=>a.departmentName.localeCompare(b.departmentName)||a.supervisorName.localeCompare(b.supervisorName));
+}
 function invalidateDepartmentPaymentApproval(record,actor,now,reason,action='source-change-invalidated'){const approval=record?.paymentApproval;if(!approval||!paymentApprovalDocuments(record).length)return false;approval.status='invalidated';approval.invalidatedAt=now;approval.invalidatedBy=actor;approval.invalidationReason=reason;const current=paymentApprovalDocuments(record).find(document=>document.id===approval.currentDocumentId);if(current&&current.status==='current')current.status='invalidated';approval.history=Array.isArray(approval.history)?approval.history:[];approval.history.push({action,status:'invalidated',note:reason,at:now,by:actor,documentId:approval.currentDocumentId||null});if(approval.history.length>200)approval.history=approval.history.slice(-200);return true;}
 function claimSourceFiles(record){const out=[];const visit=(value,key)=>{if(!value)return;if(Array.isArray(value)){value.forEach((item,index)=>visit(item,`${key}[${index}]`));return;}if(typeof value==='object'){if(value.storedName){out.push({key,storedName:path.basename(value.storedName),originalName:value.originalName||'',size:Number(value.size||0)});return;}Object.entries(value).forEach(([childKey,child])=>visit(child,`${key}.${childKey}`));}};visit(record?.files,'files');return out;}
 async function sha256File(filePath){return new Promise(resolve=>{const hash=crypto.createHash('sha256'),stream=fs.createReadStream(filePath);stream.on('data',chunk=>hash.update(chunk));stream.on('error',()=>resolve('MISSING'));stream.on('end',()=>resolve(hash.digest('hex')));});}
 async function claimSourceFingerprint(record){const files=[];for(const file of claimSourceFiles(record))files.push({...file,sha256:await sha256File(path.join(FILES_DIR,file.storedName))});const source={id:record.id,reference:record.reference,portalType:record.portalType||'project-work',submittedAt:record.submittedAt,claimant:record.fullName||record.assessorName||'',email:record.email||'',staffId:record.staffId||'',groupCount:record.groupCount||'',claimedGroupCount:record.claimedGroupCount||null,claimedCandidateCount:record.claimedCandidateCount||null,workCount:record.workCount||null,studyCentres:projectStudyCentres(record),scoreSheet:record.scoreSheet||null,works:(record.works||[]).map(work=>({workNo:work.workNo,studentName:work.studentName,indexNumber:work.indexNumber,programme:work.programme})),scoreReviewExcludedRows:record.scoreReviewExcludedRows||[],fieldScoreReviewExcludedRows:record.fieldScoreReviewExcludedRows||[],projectCentreDecisions:record.projectCentreDecisions||[],reviewStatus:projectReviewStatus(record),claimReviewStatus:assessorClaimReviewStatus(record),claimantCertification:claimantCertificationView(record),files};return crypto.createHash('sha256').update(JSON.stringify(source)).digest('hex');}
-function claimAuditView(record){const events=[];if((record?.portalType||'project-work')==='project-work'){for(const item of projectGroupAnalysis(record,{approved:true}).transferExceptions.filter(entry=>entry.resolution==='automatic-predominant'))events.push({stage:'Project Work centre reconciliation',action:`Automatic predominant reporting centre ${item.reportingCentreCode}`,note:`${item.caseKey} · ${item.minorityStudentCount} minority-code student${item.minorityStudentCount===1?'':'s'} retained with the group; original index numbers unchanged.`,at:record.submittedAt||null,by:'System rule'});}for(const item of record?.reviewHistory||[])events.push({stage:'Consolidation review',action:projectReviewLabel(item.status),note:item.note||'',at:item.reviewedAt||item.at||null,by:item.reviewedBy||item.by||''});for(const item of record?.projectCentreDecisionHistory||[]){const action=item.action==='keep-distinct'?'Centre groups kept distinct':item.action==='apply-suggested-correction'?'Suggested registration/index correction applied':`Predominant reporting centre ${item.reportingCentreCode||''}`.trim();events.push({stage:'Project Work centre reconciliation',action,note:`${item.caseKey||'Programme/group'}${item.reason?` · ${item.reason}`:''}`,at:item.decidedAt||item.at||null,by:item.decidedBy||item.by||''});}for(const item of record?.registrationCorrectionHistory||[])events.push({stage:item.reasonType==='centre-reconciliation'?'Project Work centre reconciliation':'Duplicate reconciliation',action:'Registration/index number corrected',note:`Row ${Number(item.sourceIndex)+1}: ${item.oldRegistrationNo||'blank'} → ${item.newRegistrationNo||'blank'}${item.reason?` · ${item.reason}`:''}`,at:item.correctedAt||null,by:item.correctedBy||''});for(const item of record?.duplicateRowRemovalHistory||[])events.push({stage:'Duplicate reconciliation',action:'Row removed from approved records',note:`${item.registrationNo||'No registration'} · ${item.name||'Name unavailable'}${item.reason?` · ${item.reason}`:''}`,at:item.removedAt||null,by:item.removedBy||''});for(const item of record?.claimReviewHistory||[])events.push({stage:'Claim verification',action:projectReviewLabel(item.status),note:item.note||'',at:item.reviewedAt||item.at||null,by:item.reviewedBy||item.by||''});for(const item of record?.claimantCertification?.history||[])events.push({stage:'Claimant certification',action:item.action||'Certification update',note:item.note||'',at:item.at||null,by:record?.claimantCertification?.claimantEmail||record?.email||''});for(const item of record?.paymentApproval?.history||[])events.push({stage:'Department payment approval',action:item.action||item.status||'Approval update',note:item.note||'',at:item.at||item.approvedAt||null,by:item.by||item.approvedBy||''});for(const item of record?.payroll?.history||[])events.push({stage:'Payroll',action:payrollStatusLabel({payroll:{status:item.status}}),note:item.note||'',at:item.updatedAt||item.at||null,by:item.updatedBy||item.by||''});return events.sort((a,b)=>String(a.at||'').localeCompare(String(b.at||'')));}
+function claimAuditView(record){const events=[];if((record?.portalType||'project-work')==='project-work'){for(const item of projectGroupAnalysis(record,{approved:true}).transferExceptions.filter(entry=>entry.resolution==='automatic-predominant'))events.push({stage:'Project Work centre reconciliation',action:`Automatic predominant reporting centre ${item.reportingCentreCode}`,note:`${item.caseKey} · ${item.minorityStudentCount} minority-code student${item.minorityStudentCount===1?'':'s'} retained with the group; original index numbers unchanged.`,at:record.submittedAt||null,by:'System rule'});}if(record?.portalType==='field-experience'){for(const item of fieldCentreAnalysis(record).transferExceptions.filter(entry=>entry.resolution==='automatic-predominant'))events.push({stage:'Field Experience centre reconciliation',action:`Automatic predominant reporting centre ${item.reportingCentreCode}`,note:`${item.programme} · ${item.minorityStudentCount} transferred student${item.minorityStudentCount===1?'':'s'} retained with the predominant centre; original registration numbers unchanged.`,at:record.submittedAt||null,by:'System rule'});}for(const item of record?.reviewHistory||[])events.push({stage:'Consolidation review',action:projectReviewLabel(item.status),note:item.note||'',at:item.reviewedAt||item.at||null,by:item.reviewedBy||item.by||''});for(const item of record?.projectCentreDecisionHistory||[]){const action=item.action==='keep-distinct'?'Centre groups kept distinct':item.action==='apply-suggested-correction'?'Suggested registration/index correction applied':`Predominant reporting centre ${item.reportingCentreCode||''}`.trim();events.push({stage:'Project Work centre reconciliation',action,note:`${item.caseKey||'Programme/group'}${item.reason?` · ${item.reason}`:''}`,at:item.decidedAt||item.at||null,by:item.decidedBy||item.by||''});}for(const item of record?.fieldCentreDecisionHistory||[]){const action=item.action==='keep-distinct'?'Centre lists kept distinct':`Predominant reporting centre ${item.reportingCentreCode||''}`.trim();events.push({stage:'Field Experience centre reconciliation',action,note:`${item.caseKey||'Programme'}${item.reason?` · ${item.reason}`:''}`,at:item.decidedAt||null,by:item.decidedBy||''});}for(const item of record?.registrationCorrectionHistory||[])events.push({stage:item.reasonType==='centre-reconciliation'?'Project Work centre reconciliation':'Duplicate reconciliation',action:'Registration/index number corrected',note:`Row ${Number(item.sourceIndex)+1}: ${item.oldRegistrationNo||'blank'} → ${item.newRegistrationNo||'blank'}${item.reason?` · ${item.reason}`:''}`,at:item.correctedAt||null,by:item.correctedBy||''});for(const item of record?.duplicateRowRemovalHistory||[])events.push({stage:'Duplicate reconciliation',action:'Row removed from approved records',note:`${item.registrationNo||'No registration'} · ${item.name||'Name unavailable'}${item.reason?` · ${item.reason}`:''}`,at:item.removedAt||null,by:item.removedBy||''});for(const item of record?.claimReviewHistory||[])events.push({stage:'Claim verification',action:projectReviewLabel(item.status),note:item.note||'',at:item.reviewedAt||item.at||null,by:item.reviewedBy||item.by||''});for(const item of record?.claimantCertification?.history||[])events.push({stage:'Claimant certification',action:item.action||'Certification update',note:item.note||'',at:item.at||null,by:record?.claimantCertification?.claimantEmail||record?.email||''});for(const item of record?.paymentApproval?.history||[])events.push({stage:'Department payment approval',action:item.action||item.status||'Approval update',note:item.note||'',at:item.at||item.approvedAt||null,by:item.by||item.approvedBy||''});for(const item of record?.paymentWorkflow?.history||[])events.push({stage:'Approval routing',action:CLAIM_APPROVAL_STAGE_LABELS[item.stage]||item.action||item.stage||'Workflow update',note:item.note||'',at:item.at||null,by:item.by||''});for(const item of record?.payroll?.history||[])events.push({stage:'Payroll',action:payrollStatusLabel({payroll:{status:item.status}}),note:item.note||'',at:item.updatedAt||item.at||null,by:item.updatedBy||item.by||''});return events.sort((a,b)=>String(a.at||'').localeCompare(String(b.at||'')));}
 async function hodAccountForRequest(req){if(req.adminIdentity?.master)return {error:'HoD approval requires an individual staff account. Department master credentials cannot sign claims.'};if(req.adminIdentity?.developerPreview)return {error:'Developer Preview cannot upload or apply a HoD signature.'};const account=(await readAdminUsers()).find(item=>item.id===req.adminIdentity?.id&&item.active!==false);if(!account)return {error:'Your individual staff account could not be verified.'};if(account.role!=='administrator'||!normalizeHodDepartments(account.hodDepartments,account.departments).includes(req.adminDepartment))return {error:'This account is not an authorised HoD payment approver for this department.'};return {account};}
 function payrollStatusLabel(record){return {pending:'Pending Payroll Verification',verified:'Verified','approved-for-payment':'Approved for Payment',paid:'Paid',queried:'Queried / On Hold','returned-to-department':'Returned to Department'}[String(record?.payroll?.status||'pending')]||'Pending Payroll Verification';}
 function approvedPaymentClaimRecords(records){return records.filter(record=>['project-work','field-experience','assessor'].includes(record.portalType||'project-work')&&paymentApprovalDocuments(record).length>0).slice().sort((a,b)=>String(departmentPaymentApprovedAt(a)||a.submittedAt||'').localeCompare(String(departmentPaymentApprovedAt(b)||b.submittedAt||''))||String(a.reference||'').localeCompare(String(b.reference||'')));}
 function currentDepartmentPaymentApprovedRecords(records){return approvedPaymentClaimRecords(records).filter(record=>departmentPaymentApprovalStatus(record)==='approved');}
-function payrollApprovedForPaymentRecords(records){return approvedPaymentClaimRecords(records).filter(record=>departmentPaymentApprovalStatus(record)==='approved'&&['approved-for-payment','paid'].includes(String(record?.payroll?.status||'')));}
+function payrollOperationalClaimRecords(records){return approvedPaymentClaimRecords(records).filter(record=>{const stage=paymentWorkflowView(record).stage;return !record.paymentWorkflow||['pending-payroll','pending-audit','completed'].includes(stage);});}
+function payrollApprovedForPaymentRecords(records){return approvedPaymentClaimRecords(records).filter(record=>departmentPaymentApprovalStatus(record)==='approved'&&['approved-for-payment','paid'].includes(String(record?.payroll?.status||''))&&(!record.paymentWorkflow||['pending-audit','completed'].includes(paymentWorkflowView(record).stage)));}
 function auditorVisibleClaimRecords(records){return payrollApprovedForPaymentRecords(records);}
 function paymentRecordFiles(record,key){const value=record?.files?.[key];return Array.isArray(value)?value.filter(Boolean):(value?[value]:[]);}
 function paymentClaimValidation(record){
@@ -4649,10 +4761,11 @@ function paymentClaimValidation(record){
   if(record.portalType==='field-experience'){
     const claimedQuantity=Number(record?.claimedCandidateCount||parseFlexiblePositiveCount(record?.groupCount)||0);
     const scoreSheetQuantity=approvedFieldExperienceScoreRows(record).length;
-    return {claimedQuantity,scoreSheetQuantity,supportingWorkCount:null,claimFormCount:paymentRecordFiles(record,'claimForm').length,valid:Boolean(claimedQuantity)&&claimedQuantity===scoreSheetQuantity,label:'Candidate check'};
+    const supportingWorkCount=paymentRecordFiles(record,'completedWork').length;
+    return {claimedQuantity,scoreSheetQuantity,supportingWorkCount,actualAttachedQuantity:supportingWorkCount,claimFormCount:paymentRecordFiles(record,'claimForm').length,valid:Boolean(supportingWorkCount)&&!fieldClaimValidation(record).requiresCentreReview,label:'Candidate and attached-work check'};
   }
   const validation=projectGroupValidation(record,{approved:true});
-  return {claimedQuantity:validation.claimedGroupCount,scoreSheetQuantity:validation.scoreSheetGroupCount,supportingWorkCount:validation.completedProjectWorkCount,claimFormCount:paymentRecordFiles(record,'claimForm').length,valid:validation.valid,label:'Group check',groupNumbers:validation.groupNumbers};
+  return {claimedQuantity:validation.claimedGroupCount,scoreSheetQuantity:validation.scoreSheetGroupCount,supportingWorkCount:validation.completedProjectWorkCount,actualAttachedQuantity:validation.completedProjectWorkCount,claimFormCount:paymentRecordFiles(record,'claimForm').length,valid:Boolean(validation.completedProjectWorkCount)&&!validation.requiresCentreReview,label:'Group and attached-work check',groupNumbers:validation.groupNumbers};
 }
 function payrollClaimRow(record){
   const validation=paymentClaimValidation(record),claims=paymentRecordFiles(record,'claimForm'),isField=record.portalType==='field-experience',isAssessor=record.portalType==='assessor';
@@ -4661,7 +4774,7 @@ function payrollClaimRow(record){
   const activityKey=isAssessor?`dissertation-${reportType}`:(isField?(record.assessmentType||'field-experience'): 'project-work');
   const category=isAssessor?(reportType==='vetting'?'Vetting Report':'Assessment Report'):(isField?fieldAssessmentLabel(record):(projectStream(record)==='non-residential'?'Non-Residential (Regular)':'Distance'));
   const claimFormPresent=isAssessor?claims.length>=validation.claimedQuantity:Boolean(claims[0]),approval=paymentApprovalView(record),currentDocument=approval.documents.find(document=>document.id===approval.currentDocumentId)||approval.documents.at(-1)||null;
-  return {id:record.id,department:record.department,departmentName:record.departmentName||DEPARTMENTS[record.department]?.name||record.department,portalType:isAssessor?'assessor':(isField?'field-experience':'project-work'),activityKey,activityGroup:isAssessor?'dissertation':(isField?'field-experience':'project-work'),workType,reference:record.reference,approvedAt:departmentPaymentApprovedAt(record),approvedBy:departmentPaymentApprovedBy(record),supervisorName:isAssessor?(record.assessorName||''):(record.fullName||''),email:record.email||'',phone:record.phone||'',studyCentres:isAssessor?'':studyCentreDisplay(record),contextLabel:isAssessor?([record.studentName,record.programme].filter(Boolean).join(' · ')) : studyCentreDisplay(record),category,studentStream:category,claimedGroupsRaw:record.groupCount||record.workCount||'',claimedGroupCount:validation.claimedQuantity,scoreSheetGroupCount:validation.scoreSheetQuantity,completedProjectWorkCount:validation.supportingWorkCount,claimedQuantity:validation.claimedQuantity,departmentApprovedQuantity:approval.approvedQuantity,paymentType:approval.paymentType,adjustmentReason:approval.adjustmentReason,scoreSheetQuantity:validation.scoreSheetQuantity,supportingWorkCount:validation.supportingWorkCount,groupValidation:validation,validation,approvedScoreRows:isAssessor?validation.scoreSheetQuantity:(isField?approvedFieldExperienceScoreRows(record).length:approvedProjectScoreRows(record).length),claimFormName:claims.map(item=>item.originalName||'Claim form').join(', '),claimFormCount:claims.length,claimFormPresent,claimPreviewUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/claim-preview`,departmentPaymentStatus:approval.status,departmentPaymentStatusLabel:{approved:'Approved for Payment',returned:'Returned by Payroll',invalidated:'Approval Invalidated',pending:'Pending HoD Approval'}[approval.status]||approval.status,approvedClaimUrl:currentDocument?.downloadUrl||'',approvedClaimName:currentDocument?.originalName||'',verificationCode:approval.verificationCode||currentDocument?.verificationCode||'',auditUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/claim-audit`,payrollStatus:String(record?.payroll?.status||'pending'),payrollStatusLabel:payrollStatusLabel(record),payrollNote:record?.payroll?.note||'',payrollUpdatedAt:record?.payroll?.updatedAt||null,payrollUpdatedBy:record?.payroll?.updatedBy||''};
+  return {id:record.id,department:record.department,departmentName:record.departmentName||DEPARTMENTS[record.department]?.name||record.department,portalType:isAssessor?'assessor':(isField?'field-experience':'project-work'),activityKey,activityGroup:isAssessor?'dissertation':(isField?'field-experience':'project-work'),workType,reference:record.reference,approvedAt:departmentPaymentApprovedAt(record),approvedBy:departmentPaymentApprovedBy(record),supervisorName:isAssessor?(record.assessorName||''):(record.fullName||''),email:record.email||'',phone:record.phone||'',studyCentres:isAssessor?'':studyCentreDisplay(record),contextLabel:isAssessor?([record.studentName,record.programme].filter(Boolean).join(' · ')) : studyCentreDisplay(record),category,studentStream:category,claimedGroupsRaw:record.groupCount||record.workCount||'',claimedGroupCount:validation.claimedQuantity,scoreSheetGroupCount:validation.scoreSheetQuantity,completedProjectWorkCount:validation.supportingWorkCount,claimedQuantity:validation.claimedQuantity,actualAttachedQuantity:Number(validation.actualAttachedQuantity??attachedClaimQuantity(record)),departmentApprovedQuantity:approval.approvedQuantity,paymentType:approval.paymentType,adjustmentReason:approval.adjustmentReason,scoreSheetQuantity:validation.scoreSheetQuantity,supportingWorkCount:validation.supportingWorkCount,groupValidation:validation,validation,approvedScoreRows:isAssessor?validation.scoreSheetQuantity:(isField?approvedFieldExperienceScoreRows(record).length:approvedProjectScoreRows(record).length),claimFormName:claims.map(item=>item.originalName||'Claim form').join(', '),claimFormCount:claims.length,claimFormPresent,claimPreviewUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/claim-preview`,departmentPaymentStatus:approval.status,departmentPaymentStatusLabel:{approved:'Approved for Payment',returned:'Returned by Payroll',invalidated:'Approval Invalidated',pending:'Pending HoD Approval'}[approval.status]||approval.status,approvedClaimUrl:currentDocument?.downloadUrl||'',approvedClaimName:currentDocument?.originalName||'',verificationCode:approval.verificationCode||currentDocument?.verificationCode||'',auditUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/claim-audit`,payrollStatus:String(record?.payroll?.status||'pending'),payrollStatusLabel:payrollStatusLabel(record),payrollNote:record?.payroll?.note||'',payrollUpdatedAt:record?.payroll?.updatedAt||null,payrollUpdatedBy:record?.payroll?.updatedBy||''};
 }
 function payrollRegisterAoA(records,scope='payroll'){
   const h=['S/N','WORKFLOW','CATEGORY / STREAM','REFERENCE','DEPARTMENT APPROVED AT','DEPARTMENT APPROVED BY','CLAIMANT','EMAIL','PHONE','STUDY CENTRE / SUBMISSION','CLAIMED QUANTITY','DEPARTMENT PAYABLE QUANTITY','PAYMENT TYPE','ADJUSTMENT REASON','APPROVED SCORE QUANTITY','SUPPORTING DOCUMENTS','RECONCILIATION','CLAIM FORM','VERIFICATION CODE','DEPARTMENT PAYMENT STATUS','PAYROLL STATUS','PAYROLL NOTE','PAYROLL UPDATED AT','PAYROLL UPDATED BY'];
@@ -5279,13 +5392,16 @@ app.get('/api/study-centres', async(req,res)=>{
 });
 app.get('/api/developer/portal-settings', developerAuth, async(_req,res)=>{
   const settings=await readPortalSettings();
-  res.json({fieldExperienceClaimFormRequired:settings.fieldExperienceClaimFormRequired});
+  res.json({fieldExperienceClaimFormRequired:settings.fieldExperienceClaimFormRequired,approvalOfficers:settings.approvalOfficers,approvalOfficerKeys:CLAIM_OFFICER_KEYS});
 });
 app.patch('/api/developer/portal-settings', developerAuth, async(req,res)=>{
   const current=await readPortalSettings();
   if(req.body?.fieldExperienceClaimFormRequired!==undefined) current.fieldExperienceClaimFormRequired=Boolean(req.body.fieldExperienceClaimFormRequired);
+  if(req.body?.approvalOfficers&&typeof req.body.approvalOfficers==='object'){
+    for(const key of CLAIM_OFFICER_KEYS){if(!Object.prototype.hasOwnProperty.call(req.body.approvalOfficers,key))continue;const item=req.body.approvalOfficers[key]||{},email=String(item.email||'').trim().toLowerCase(),phone=cleanHumanText(item.phone).slice(0,40);if(email&&!isEmail(email))return res.status(400).json({error:`Enter a valid email address for ${key}.`});if(phone&&!supportNormaliseMobile(phone))return res.status(400).json({error:`Enter a valid mobile number with country code for ${key}.`});current.approvalOfficers[key]={name:cleanHumanText(item.name).slice(0,180),email,phone};}
+  }
   const saved=await writePortalSettings(current);
-  res.json({ok:true,fieldExperienceClaimFormRequired:saved.fieldExperienceClaimFormRequired});
+  res.json({ok:true,fieldExperienceClaimFormRequired:saved.fieldExperienceClaimFormRequired,approvalOfficers:saved.approvalOfficers});
 });
 
 app.get('/api/developer/study-centres', developerAuth, async(_req,res)=>{
@@ -5712,7 +5828,56 @@ app.get('/api/staff/me',staffAuth,async(req,res)=>{
   const units=normalizeStaffUnits(identity.units).map(id=>({id,...STAFF_UNITS[id]}));
   const tickets=await readSupportTickets();
   const supportCount=units.some(unit=>unit.id==='student-support')?tickets.filter(ticket=>!['resolved','closed'].includes(ticket.status)).length:0;
-  res.json({ok:true,staff:{name:identity.name||identity.username,username:identity.username,role:identity.role,units,departments:normalizeAdminDepartments(identity.departments),sections:normalizeAdminSections(identity.sections),developerPreview:Boolean(identity.developerPreview),developerPreviewLabel:identity.developerPreviewLabel||'',previewExpiresAt:identity.previewExpiresAt||null},metrics:{openSupportTickets:supportCount}});
+  res.json({ok:true,staff:{name:identity.name||identity.username,username:identity.username,role:identity.role,units,departments:normalizeAdminDepartments(identity.departments),hodDepartments:normalizeHodDepartments(identity.hodDepartments,identity.departments),sections:normalizeAdminSections(identity.sections),developerPreview:Boolean(identity.developerPreview),developerPreviewLabel:identity.developerPreviewLabel||'',previewExpiresAt:identity.previewExpiresAt||null},metrics:{openSupportTickets:supportCount}});
+});
+function claimUnitHasRegisterAccess(record,unit){
+  const workflow=paymentWorkflowView(record),currentUnit=CLAIM_APPROVAL_STAGE_UNITS[workflow.stage]||'';
+  if(currentUnit===unit)return true;
+  return workflow.history.some(item=>CLAIM_APPROVAL_STAGE_UNITS[item.stage]===unit||CLAIM_APPROVAL_STAGE_UNITS[item.fromStage]===unit||String(item.action||'')===`approved-by-${unit}`);
+}
+function paymentClaimsForStaff(records,identity){
+  const units=new Set(normalizeStaffUnits(identity?.units)),departments=new Set(normalizeAdminDepartments(identity?.departments)),hodDepartments=new Set(normalizeHodDepartments(identity?.hodDepartments,identity?.departments));
+  return records.filter(record=>{
+    if(!['project-work','field-experience','assessor'].includes(record.portalType||'project-work'))return false;
+    if(departments.size&&!departments.has(record.department))return false;
+    for(const unit of units){
+      if(unit==='hod'&&!(hodDepartments.has(record.department)||departments.has(record.department)))continue;
+      if(claimUnitHasRegisterAccess(record,unit))return true;
+    }
+    return false;
+  });
+}
+app.get('/api/staff/payment-claims',staffAuth,async(req,res)=>{
+  const identityUnits=new Set(normalizeStaffUnits(req.staffIdentity?.units)),records=paymentClaimsForStaff(await readDb(),req.staffIdentity),rows=records.map(record=>{const row=claimWorkflowRow(record),currentUnit=CLAIM_APPROVAL_STAGE_UNITS[row.stage]||'';return {...row,canAct:(ROLE_RANK[req.staffIdentity?.role]||0)>=ROLE_RANK.officer&&currentUnit!=='hod'&&identityUnits.has(currentUnit)};}).sort((a,b)=>String(a.departmentName).localeCompare(String(b.departmentName))||String(a.supervisorName).localeCompare(String(b.supervisorName))||String(a.reference).localeCompare(String(b.reference)));
+  res.json({ok:true,claims:rows,consolidated:consolidatedClaimRegister(records),canDecide:(ROLE_RANK[req.staffIdentity?.role]||0)>=ROLE_RANK.officer});
+});
+app.get('/api/staff/payment-claims/register.xlsx',staffAuth,async(req,res)=>{
+  const records=paymentClaimsForStaff(await readDb(),req.staffIdentity),summary=consolidatedClaimRegister(records),rows=records.map(claimWorkflowRow);
+  const workbook=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([['S/N','DEPARTMENT','SUPERVISOR / EXAMINER','EMAIL','PHONE','UNIQUE CLAIM RECORDS','TOTAL APPROVED / ATTACHED CLAIM QUANTITY','ACTIVITIES','CURRENT STAGES'],...summary.map((item,index)=>[index+1,item.departmentName,item.supervisorName,item.email,item.phone,item.claimCount,item.totalClaims,item.activities.join(' | '),item.stages.join(' | ')])]),'Consolidated Register');
+  XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([['S/N','REFERENCE','DEPARTMENT','WORKFLOW','SUPERVISOR / EXAMINER','EMAIL','STATED QUANTITY','ACTUAL ATTACHED QUANTITY','HOD APPROVED QUANTITY','CURRENT STAGE'],...rows.map((item,index)=>[index+1,item.reference,item.departmentName,item.workType,item.supervisorName,item.email,item.statedClaimQuantity,item.actualAttachedQuantity,item.departmentApprovedQuantity,item.stageLabel])]),'Claim Details');
+  const buffer=XLSX.write(workbook,{type:'buffer',bookType:'xlsx'});res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition','attachment; filename="functional-unit-claim-approval-register.xlsx"');res.send(buffer);
+});
+app.get('/api/staff/payment-claims/:id/approved-claim',staffAuth,async(req,res)=>{
+  const record=paymentClaimsForStaff(await readDb(),req.staffIdentity).find(item=>item.id===req.params.id);if(!record)return res.status(404).send('Approved claim not found in your current approval register.');const document=paymentApprovalDocuments(record).find(item=>item.id===record.paymentApproval?.currentDocumentId);if(!document)return res.status(404).send('Approved claim PDF is not available.');const fp=path.join(FILES_DIR,path.basename(document.storedName));if(!fs.existsSync(fp))return res.status(404).send('Approved claim PDF is unavailable.');res.download(fp,safeBaseName(document.originalName||`${record.reference}-approved.pdf`));
+});
+app.post('/api/staff/payment-claims/:id/decision',staffAuth,async(req,res)=>{
+  if((ROLE_RANK[req.staffIdentity?.role]||0)<ROLE_RANK.officer)return res.status(403).json({error:'Officer or administrator access is required to record an approval decision.'});
+  const decision=String(req.body?.decision||'').trim().toLowerCase(),note=cleanHumanText(req.body?.note).slice(0,1500);if(!['approve','return'].includes(decision))return res.status(400).json({error:'Choose Approve or Return to Department.'});if(decision==='return'&&!note)return res.status(400).json({error:'Enter the reason for returning the claim.'});
+  const all=await readDb(),record=paymentClaimsForStaff(all,req.staffIdentity).find(item=>item.id===req.params.id);if(!record)return res.status(404).json({error:'This claim is not waiting in your current functional-unit register.'});
+  const workflow=ensurePaymentWorkflow(record),currentStage=workflow.stage,currentUnit=CLAIM_APPROVAL_STAGE_UNITS[currentStage],identityUnits=new Set(normalizeStaffUnits(req.staffIdentity?.units));if(!currentUnit||!identityUnits.has(currentUnit)||currentUnit==='hod')return res.status(403).json({error:'This approval must be completed in the designated portal.'});
+  const now=new Date().toISOString(),by=claimWorkflowActor(req),actionNote=note||(decision==='approve'?`${STAFF_UNITS[currentUnit]?.label||currentUnit} approved the claim.`:'');let nextStage='';
+  if(decision==='return'){
+    nextStage='returned-to-department';workflow.stage=nextStage;workflow.returnedAt=now;workflow.returnedBy=by;workflow.returnReason=note;workflow.history.push({stage:nextStage,action:'returned-to-department',note,at:now,by,fromStage:currentStage});
+    record.paymentApproval={...(record.paymentApproval||{}),status:'returned',returnedAt:now,returnedBy:by,returnReason:note};
+    record.payroll={...(record.payroll||{}),status:'returned-to-department',note,updatedAt:now,updatedBy:by};
+  }else{
+    nextStage=claimApprovalNextStage(currentStage);if(!nextStage)return res.status(409).json({error:'No further approval stage is configured for this claim.'});workflow.stage=nextStage;workflow.history.push({stage:nextStage,action:`approved-by-${currentUnit}`,note:actionNote,at:now,by,fromStage:currentStage});
+    if(currentStage==='pending-payroll'){record.payroll={...(record.payroll||{}),status:'approved-for-payment',note:actionNote,updatedAt:now,updatedBy:by};record.payroll.history=Array.isArray(record.payroll.history)?record.payroll.history:[];record.payroll.history.push({status:'approved-for-payment',note:actionNote,updatedAt:now,updatedBy:by});}
+    if(currentStage==='pending-audit')record.audit={status:'verified',verifiedAt:now,verifiedBy:by,note:actionNote};
+  }
+  await writeDb(all);let deliveries=[];if(decision==='approve'&&nextStage!=='completed')deliveries=await dispatchClaimApprovalNotification(record,nextStage,req).catch(error=>[{channel:'notification',status:'failed',error:String(error.message||error),at:new Date().toISOString()}]);if(deliveries.length)await mutateRecordById(record.id,target=>{const wf=ensurePaymentWorkflow(target);wf.notifications=Array.isArray(wf.notifications)?wf.notifications:[];wf.notifications.push(...deliveries);return true;});
+  res.json({ok:true,claim:claimWorkflowRow(record),notificationDeliveries:deliveries});
 });
 function supportDashboardTickets(tickets, unitId) {
   const visible=tickets.filter(ticket=>!ticket.sensitive);
@@ -6097,6 +6262,19 @@ app.post('/api/admin/:department/submissions/:id/resend-claim-certification', de
   if(!delivery.emailSent)return res.status(502).json({error:`The certification link was renewed, but the email could not be sent: ${delivery.emailError||'Email service error.'}`});
   res.json({ok:true,emailSent:true,recipient:record.email,expiresAt:record.claimantCertification.expiresAt});
 });
+app.post('/api/admin/:department/claims/:id/forward-for-payment',departmentAuth,async(req,res)=>{
+  const all=await readDb(),record=all.find(item=>item.id===req.params.id&&item.department===req.adminDepartment&&['project-work','field-experience','assessor'].includes(item.portalType||'project-work'));
+  if(!record)return res.status(404).json({error:'Claim submission not found in this department.'});if(!requireRecordAccess(req,res,record,'administrator'))return;
+  if(!paymentConsolidationApproved(record))return res.status(400).json({error:'Approve the submission for consolidation or complete claim verification before forwarding it for payment.'});
+  const currentWorkflow=paymentWorkflowView(record);if(!['department-review','returned-to-department'].includes(currentWorkflow.stage))return res.status(409).json({error:`This claim is currently ${currentWorkflow.stageLabel} and cannot be forwarded again until it is returned to the department.`});
+  const certification=claimantCertificationView(record);if(certification.status!=='verified')return res.status(400).json({error:'The claimant must electronically certify the claim before it can be forwarded.'});
+  if(!paymentRecordFiles(record,'claimForm').length)return res.status(400).json({error:'A claim form is required before forwarding the claim for payment.'});
+  const payment=paymentUnitData(record),actualQuantity=Number(payment.actualQuantity??payment.maxPayable??attachedClaimQuantity(record));if(actualQuantity<1)return res.status(400).json({error:'No attached or verified work is available for a payment claim.'});
+  const now=new Date().toISOString(),by=adminActorLabel(req,'Department administrator'),workflow=ensurePaymentWorkflow(record),note=cleanHumanText(req.body?.note).slice(0,1000)||`Forwarded using ${actualQuantity} actual attached or verified work item${actualQuantity===1?'':'s'}.`;
+  workflow.stage='pending-hod';workflow.forwardedAt=now;workflow.forwardedBy=by;workflow.actualAttachedQuantity=actualQuantity;workflow.statedClaimQuantity=Number(payment.claimedQuantity||0);workflow.returnedAt=null;workflow.returnedBy='';workflow.returnReason='';workflow.history.push({stage:'pending-hod',action:'forwarded-for-payment',note,at:now,by,actualAttachedQuantity:actualQuantity,statedClaimQuantity:workflow.statedClaimQuantity});
+  await writeDb(all);const deliveries=await dispatchClaimApprovalNotification(record,'pending-hod',req).catch(error=>[{channel:'notification',status:'failed',error:String(error.message||error),at:new Date().toISOString()}]);await mutateRecordById(record.id,target=>{const wf=ensurePaymentWorkflow(target);wf.notifications=Array.isArray(wf.notifications)?wf.notifications:[];wf.notifications.push(...deliveries);return true;});
+  res.json({ok:true,paymentWorkflow:paymentWorkflowView(record),actualAttachedQuantity:actualQuantity,statedClaimQuantity:workflow.statedClaimQuantity,notificationDeliveries:deliveries});
+});
 app.post('/api/admin/:department/claims/:id/payment-approval', departmentAuth, async(req,res)=>{
   const all=await readDb(),record=all.find(item=>item.id===req.params.id&&item.department===req.adminDepartment&&['project-work','field-experience','assessor'].includes(item.portalType||'project-work'));
   if(!record)return res.status(404).json({error:'Claim submission not found in this department.'});
@@ -6107,14 +6285,16 @@ app.post('/api/admin/:department/claims/:id/payment-approval', departmentAuth, a
   const signaturePath=path.join(FILES_DIR,path.basename(signature.storedName));if(!fs.existsSync(signaturePath))return res.status(409).json({error:'The saved HoD signature file is unavailable. Upload it again.'});
   if(await sha256File(signaturePath)!==signature.sha256)return res.status(409).json({error:'The saved HoD signature failed its integrity check. Upload it again.'});
   if(!paymentConsolidationApproved(record))return res.status(400).json({error:'Approve the submission for consolidation or complete claim verification before approving it for payment.'});
+  const workflow=ensurePaymentWorkflow(record);if(record.paymentWorkflow?.forwardedAt&&workflow.stage!=='pending-hod')return res.status(409).json({error:`This claim is currently ${CLAIM_APPROVAL_STAGE_LABELS[workflow.stage]||workflow.stage} and is not waiting for HoD approval.`});
   const certification=claimantCertificationView(record);if(certification.status!=='verified')return res.status(400).json({error:'The claimant must electronically certify the claim before HoD approval. Use Resend Certification if needed.'});
   const claimForms=paymentRecordFiles(record,'claimForm');if(!claimForms.length)return res.status(400).json({error:'A claim form is required before HoD approval for payment.'});
   const payment=paymentUnitData(record),requested=Array.isArray(req.body?.approvedUnitKeys)?req.body.approvedUnitKeys.map(String):[];
   const eligible=new Map(payment.units.filter(unit=>unit.eligible!==false).map(unit=>[unit.key,unit])),approvedUnits=[...new Set(requested)].map(key=>eligible.get(key)).filter(Boolean);
   if(!approvedUnits.length)return res.status(400).json({error:'Select at least one eligible item for payment.'});
   if(approvedUnits.length>payment.maxPayable)return res.status(400).json({error:`A maximum of ${payment.maxPayable} item(s) can be approved from the verified supporting documents.`});
-  const fullPayment=payment.validation.valid&&approvedUnits.length===payment.claimedQuantity,reason=String(req.body?.adjustmentReason||'').trim().slice(0,1500);
-  if(!fullPayment&&!reason)return res.status(400).json({error:'Enter the reconciliation reason for a part-payment or quantity adjustment.'});
+  const actualQuantity=Number(payment.actualQuantity??payment.maxPayable??attachedClaimQuantity(record)),fullPayment=approvedUnits.length===actualQuantity;let reason=String(req.body?.adjustmentReason||'').trim().slice(0,1500);
+  if(!reason&&actualQuantity!==Number(payment.claimedQuantity||0))reason=`Approved quantity is based on ${actualQuantity} actual attached or verified work item${actualQuantity===1?'':'s'}; the stated claim quantity was ${Number(payment.claimedQuantity||0)}.`;
+  if(!fullPayment&&!reason)return res.status(400).json({error:'Enter the reconciliation reason for approving fewer items than the attached-work quantity.'});
   const fingerprint=await claimSourceFingerprint(record),now=new Date().toISOString(),documentId=crypto.randomUUID(),code=`UCC-${crypto.randomBytes(2).toString('hex').toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
   const actor=hod.account.name||hod.account.username,filename=`${safeBaseName(record.reference||record.id)}-approved-${Date.now()}.pdf`,storedName=`${Date.now()}-${crypto.randomBytes(6).toString('hex')}-${filename}`,outputPath=path.join(FILES_DIR,storedName);
   const certificationLine=`Electronically certified by ${certification.claimantName}, ${certification.staffId||certification.claimantEmail}, on ${certification.verifiedAt}. Declaration: ${certification.declarationText}`;
@@ -6124,8 +6304,9 @@ app.post('/api/admin/:department/claims/:id/payment-approval', departmentAuth, a
   const document={id:documentId,storedName,originalName:filename,mimeType:'application/pdf',size:pdf.length,sha256:documentSha,status:'current',createdAt:now,approvedAt:now,approvedBy:actor,approvedQuantity:approvedUnits.length,claimedQuantity:payment.claimedQuantity,paymentType:fullPayment?'full':'part',verificationCode:code,sourceFingerprint:fingerprint};
   record.paymentApproval={...(record.paymentApproval||{}),status:'approved',approvedAt:now,approvedBy:actor,approvedByEmail:hod.account.email||'',approvedByAccountId:hod.account.id,approvedQuantity:approvedUnits.length,claimedQuantity:payment.claimedQuantity,paymentType:fullPayment?'Full payment':'Part payment / adjusted quantity',adjustmentReason:reason,approvedUnits:approvedUnits.map(unit=>({key:unit.key,label:unit.label})),verificationCode:code,currentDocumentId:documentId,sourceFingerprint:fingerprint,documents:[...prior,document],returnedAt:null,returnedBy:'',returnReason:'',invalidatedAt:null,invalidationReason:''};
   record.paymentApproval.history=Array.isArray(record.paymentApproval.history)?record.paymentApproval.history:[];record.paymentApproval.history.push({action:'approved-for-payment',status:'approved',note:reason,at:now,by:actor,documentId,approvedQuantity:approvedUnits.length,claimedQuantity:payment.claimedQuantity});
-  record.payroll={...(record.payroll||{}),status:'pending',note:'Department approved the claim for Payroll processing.',updatedAt:now,updatedBy:actor};record.payroll.history=Array.isArray(record.payroll.history)?record.payroll.history:[];record.payroll.history.push({status:'pending',note:record.payroll.note,updatedAt:now,updatedBy:actor});
-  await writeDb(all);res.json({ok:true,paymentApproval:paymentApprovalView(record),approvedClaimUrl:`/api/admin/${encodeURIComponent(req.adminDepartment)}/submissions/${encodeURIComponent(record.id)}/approved-claim/${encodeURIComponent(documentId)}`});
+  const nextStage=directorateStageForDepartment(record.department);workflow.stage=nextStage;workflow.actualAttachedQuantity=actualQuantity;workflow.statedClaimQuantity=Number(payment.claimedQuantity||0);workflow.history.push({stage:nextStage,action:'hod-approved-and-forwarded',note:reason||'HoD approved the claim using the actual attached-work quantity.',at:now,by:actor,approvedQuantity:approvedUnits.length});
+  record.payroll={...(record.payroll||{}),status:'pending',note:`HoD approved the claim; ${CLAIM_APPROVAL_STAGE_LABELS[nextStage]}.`,updatedAt:now,updatedBy:actor};record.payroll.history=Array.isArray(record.payroll.history)?record.payroll.history:[];record.payroll.history.push({status:'pending',note:record.payroll.note,updatedAt:now,updatedBy:actor});
+  await writeDb(all);const deliveries=await dispatchClaimApprovalNotification(record,nextStage,req).catch(error=>[{channel:'notification',status:'failed',error:String(error.message||error),at:new Date().toISOString()}]);await mutateRecordById(record.id,target=>{const wf=ensurePaymentWorkflow(target);wf.notifications=Array.isArray(wf.notifications)?wf.notifications:[];wf.notifications.push(...deliveries);return true;});res.json({ok:true,paymentApproval:paymentApprovalView(record),paymentWorkflow:paymentWorkflowView(record),approvedClaimUrl:`/api/admin/${encodeURIComponent(req.adminDepartment)}/submissions/${encodeURIComponent(record.id)}/approved-claim/${encodeURIComponent(documentId)}`});
 });
 app.get('/api/admin/:department/submissions', departmentAuth, async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
@@ -6380,6 +6561,31 @@ app.post('/api/admin/:department/project-work/:id/resend-return-email', departme
   catch(e){target.reviewReturnEmailStatus='failed';target.reviewReturnEmailError=String(e.message||e).slice(0,500);await writeDb(all);console.error('Project Work correction resend failed:',e);res.status(502).json({error:`The correction email could not be sent: ${e.message||e}`});}
 });
 
+app.post('/api/admin/:department/field-experience/:id/centre-decision',departmentAuth,requireAdminAccess('field-experience','administrator'),async(req,res)=>{
+  const all=await readDb(),record=all.find(item=>item.id===req.params.id&&item.department===req.adminDepartment&&item.portalType==='field-experience');
+  if(!record)return res.status(404).json({error:'Field Experience and Teaching Practice submission not found in this department.'});
+  const caseKey=cleanHumanText(req.body?.caseKey),action=String(req.body?.action||'').trim().toLowerCase(),reason=cleanHumanText(req.body?.reason).slice(0,500);
+  if(!caseKey||!['keep-distinct','merge-predominant'].includes(action))return res.status(400).json({error:'Choose a valid centre decision.'});
+  if(!reason)return res.status(400).json({error:'Enter the reason or evidence for this centre decision.'});
+  const before=fieldCentreAnalysis(record),sourceCase=before.centreReviewCases.find(item=>item.caseKey===caseKey)||before.transferExceptions.find(item=>item.caseKey===caseKey);
+  if(!sourceCase)return res.status(409).json({error:'This centre pattern has changed or no longer requires a decision. Refresh the record.'});
+  const reportingCentreCode=action==='merge-predominant'?normalizeCentreCode(req.body?.reportingCentreCode||sourceCase.suggestedReportingCentreCode||sourceCase.reportingCentreCode):'';
+  const allowed=new Set(sourceCase.reportingCentreOptions||sourceCase.clusters?.map(item=>item.centre)||[sourceCase.reportingCentreCode].filter(Boolean));
+  if(action==='merge-predominant'&&(!reportingCentreCode||!allowed.has(reportingCentreCode)))return res.status(400).json({error:'Choose one of the identified study-centre codes as the reporting centre.'});
+  const now=new Date().toISOString(),by=adminActorLabel(req,'Department administrator'),oldVersion=batchVersion(record),oldStatus=projectReviewStatus(record);
+  record.fieldCentreDecisions=(Array.isArray(record.fieldCentreDecisions)?record.fieldCentreDecisions:[]).filter(item=>item.caseKey!==caseKey);
+  const decision={caseKey,centreSignature:sourceCase.centreSignature,action,reportingCentreCode,reason,decidedAt:now,decidedBy:by};record.fieldCentreDecisions.push(decision);
+  record.fieldCentreDecisionHistory=Array.isArray(record.fieldCentreDecisionHistory)?record.fieldCentreDecisionHistory:[];record.fieldCentreDecisionHistory.push(decision);if(record.fieldCentreDecisionHistory.length>200)record.fieldCentreDecisionHistory=record.fieldCentreDecisionHistory.slice(-200);
+  record.classificationVersion=oldVersion+1;const validation=fieldClaimValidation(record);record.fieldValidation={...validation,validatedAt:now};
+  record.fieldReconciliation={status:validation.valid?'resolved':'in-progress',validForFurtherProcessing:validation.valid,updatedAt:now,updatedBy:by,lastComment:reason,remainingWarnings:validation.issues};
+  if(oldStatus==='approved'){record.reviewStatus='pending';record.reviewNote='Reporting-centre decision requires renewed consolidation approval.';record.reviewedAt=now;record.reviewedBy=by;record.reviewHistory=Array.isArray(record.reviewHistory)?record.reviewHistory:[];record.reviewHistory.push({status:'pending',note:record.reviewNote,reviewedAt:now,reviewedBy:by});}
+  resetPayrollAfterDepartmentChange(record,by,now,'Field Experience reporting-centre decision changed.');await writeDb(all);
+  const batches=await readScoreBatches();let affectedBatches=0;
+  for(const batch of batches){if(batch.department!==req.adminDepartment||batch.portalType!=='field-experience')continue;const item=(batch.items||[]).find(candidate=>candidate.submissionId===record.id&&Number(candidate.classificationVersion||0)===oldVersion);if(!item)continue;const newReports=scoreBatchReportsForAssessment(record.assessmentType).map(report=>({...report,rows:fieldScoreReportRows([record],report.key,studentStream(record))}));batch.corrections=Array.isArray(batch.corrections)?batch.corrections:[];batch.corrections.push({submissionId:record.id,reference:record.reference,fromLabel:'Previous Field Experience centre allocation',toLabel:action==='keep-distinct'?'Keep centres distinct':`Report under predominant centre ${reportingCentreCode}`,reason,at:now,by,oldSnapshotReports:item.snapshotReports||[],newSnapshotReports:newReports});affectedBatches++;}
+  if(affectedBatches)await writeScoreBatches(batches);
+  res.json({ok:true,decision,fieldValidation:record.fieldValidation,reconciliationStatus:record.fieldReconciliation.status,validForFurtherProcessing:validation.valid,reviewStatus:projectReviewStatus(record),affectedBatches});
+});
+
 app.post('/api/admin/:department/field-experience/:id/review', departmentAuth, requireAdminAccess('field-experience','administrator'), async(req,res)=>{
   const status=String(req.body?.status||'').trim().toLowerCase();
   if(!PROJECT_REVIEW_STATUSES.has(status)) return res.status(400).json({error:'Choose Pending, Approved, Rejected or Returned for Correction.'});
@@ -6393,6 +6599,8 @@ app.post('/api/admin/:department/field-experience/:id/review', departmentAuth, r
     target.fieldScoreReviewExcludedRows=[...new Set(req.body.excludedRowIndexes.map(Number).filter(index=>Number.isInteger(index)&&validIndexes.has(index)))].sort((a,b)=>a-b);
   }
   if(status==='approved'&&!approvedFieldExperienceScoreRows(target).length)return res.status(400).json({error:'At least one score row must remain included before this submission can be approved.'});
+  const fieldValidation=fieldClaimValidation(target);target.fieldValidation={...fieldValidation,validatedAt:new Date().toISOString()};
+  if(status==='approved'&&fieldValidation.requiresCentreReview)return res.status(409).json({error:'Resolve every Field Experience programme/centre review case before approving this submission for consolidation.'});
   const now=new Date().toISOString();
   const reviewer=adminActorLabel(req,'Department administrator');
   resetPayrollAfterDepartmentChange(target,reviewer,now,'Departmental Field Experience and Teaching Practice review changed.');
@@ -6542,7 +6750,7 @@ app.get('/api/admin/:department/submissions/:id', departmentAuth, async(req,res)
   if(!r)return res.status(404).json({error:'Submission not found in this department.'});
   if(!requireRecordAccess(req,res,r,'viewer'))return;
   const paymentData=['project-work','field-experience','assessor'].includes(r.portalType||'project-work')?paymentUnitData(r):null;
-  const common={...r,claimantCertification:claimantCertificationView(r),paymentApproval:paymentApprovalView(r),paymentUnits:paymentData?.units||[],maximumPayableQuantity:paymentData?.maxPayable||0,claimAudit:claimAuditView(r)};
+  const common={...r,claimantCertification:claimantCertificationView(r),paymentApproval:paymentApprovalView(r),paymentWorkflow:paymentWorkflowView(r),paymentUnits:paymentData?.units||[],maximumPayableQuantity:paymentData?.maxPayable||0,actualAttachedQuantity:Number(paymentData?.actualQuantity??paymentData?.maxPayable??0),claimAudit:claimAuditView(r)};
   if((r.portalType||'project-work')==='project-work'){
     return res.json({...common,reviewScoreRows:validScoreRowsWithMeta(r).map((row,i)=>({reviewNo:i+1,sourceIndex:row.sourceIndex,originalSn:row.originalSn,name:row.name,registrationNo:row.registrationNo,groupNo:row.groupNo,totalScore:row.totalScore,included:row.included})),groupValidation:projectGroupValidation(r),duplicateReconciliation:projectDuplicateReconciliation(r,records)});
   }
@@ -6786,7 +6994,7 @@ app.get('/api/admin/:department/export/payment-approved-register.xlsx', departme
 });
 app.get('/api/payroll/:department/claims', departmentAuth, requireAdminAccess('payroll','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(),req.adminDepartment);
-  res.json(approvedPaymentClaimRecords(records).map(payrollClaimRow));
+  res.json(payrollOperationalClaimRecords(records).map(record=>({...payrollClaimRow(record),paymentWorkflow:paymentWorkflowView(record)})));
 });
 app.post('/api/payroll/:department/claims/:id/status', departmentAuth, requireAdminAccess('payroll','officer'), async(req,res)=>{
   const status=String(req.body?.status||'').trim();
@@ -6811,8 +7019,11 @@ app.post('/api/payroll/:department/claims/:id/status', departmentAuth, requireAd
     record.paymentApproval.status='returned';record.paymentApproval.returnedAt=now;record.paymentApproval.returnedBy=by;record.paymentApproval.returnReason=note;
     const current=paymentApprovalDocuments(record).find(document=>document.id===record.paymentApproval.currentDocumentId);if(current&&current.status==='current')current.status='returned';
     record.paymentApproval.history=Array.isArray(record.paymentApproval.history)?record.paymentApproval.history:[];record.paymentApproval.history.push({action:'returned-by-payroll',status:'returned',note,at:now,by,documentId:record.paymentApproval.currentDocumentId||null});
+    const workflow=ensurePaymentWorkflow(record);workflow.stage='returned-to-department';workflow.returnedAt=now;workflow.returnedBy=by;workflow.returnReason=note;workflow.history.push({stage:'returned-to-department',action:'returned-by-payroll',note,at:now,by});
+  }else if(status==='approved-for-payment'){
+    const workflow=ensurePaymentWorkflow(record);workflow.stage='pending-audit';workflow.history.push({stage:'pending-audit',action:'approved-by-payroll',note:note||'Payroll approved the claim for payment and forwarded it to Audit.',at:now,by});
   }
-  await writeDb(all);res.json({ok:true,claim:payrollClaimRow(record)});
+  await writeDb(all);if(status==='approved-for-payment'){const deliveries=await dispatchClaimApprovalNotification(record,'pending-audit',req).catch(error=>[{channel:'notification',status:'failed',error:String(error.message||error),at:new Date().toISOString()}]);if(deliveries.length)await mutateRecordById(record.id,target=>{const wf=ensurePaymentWorkflow(target);wf.notifications=Array.isArray(wf.notifications)?wf.notifications:[];wf.notifications.push(...deliveries);return true;});}res.json({ok:true,claim:{...payrollClaimRow(record),paymentWorkflow:paymentWorkflowView(record)}});
 });
 app.get('/api/payroll/:department/register.xlsx', departmentAuth, requireAdminAccess('payroll','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(),req.adminDepartment);sendWorkbook(res,'payroll-register',records,`${req.adminDepartment}-department-approved-payroll-register.xlsx`);

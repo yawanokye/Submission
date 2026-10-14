@@ -123,7 +123,7 @@ async function main() {
     const dashboard = await expectJson('/api/staff/dashboard', staffPreview.cookie);
     assert.equal(dashboard.overview.total, 3, 'monitoring overview should count visible complaints and requests');
     assert.equal(dashboard.statusStatistics.length, 14, 'every support status should be returned, including zero counts');
-    assert.equal(dashboard.unitStatistics.length, 19, 'every configured functional unit should be returned');
+    assert.equal(dashboard.unitStatistics.length, 20, 'every configured functional unit, including the HoD portal, should be returned');
     assert.equal(dashboard.overview.complaints, 2);
     assert.equal(dashboard.overview.requests, 1);
 
@@ -152,7 +152,7 @@ async function main() {
       const directoratePreview = await developerPost('/api/developer/staff-preview-session', { unit:directorate });
       const directorateDashboard = await expectJson('/api/staff/dashboard', directoratePreview.cookie);
       assert.equal(directorateDashboard.overview.total, 4, `${directorate} should monitor every non-confidential complaint and request`);
-      assert.equal(directorateDashboard.unitStatistics.length, 19, `${directorate} should receive the all-unit monitoring matrix`);
+      assert.equal(directorateDashboard.unitStatistics.length, 20, `${directorate} should receive the all-unit monitoring matrix`);
     }
 
     const routedReferences = {};
