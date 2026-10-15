@@ -141,3 +141,15 @@ tr.review-row-returned td{background:#f3f8fd}tr.review-row-returned td:first-chi
 .reason-details{display:grid;gap:7px;font-weight:700}.reason-details textarea,.cert-waiver-box textarea,.cert-waiver-box input[type="password"],.cert-waiver-box input[type="file"]{width:100%;box-sizing:border-box}.reason-error{color:#a51d26!important;font-weight:700}
 .cert-waiver-box,.cert-waiver-summary{margin:16px 0;padding:16px;border-radius:14px;border:1px solid #dba938;background:#fff9e8}.cert-waiver-box>label{display:grid;gap:6px;margin:10px 0;font-weight:700}.cert-waiver-box>label:has(input[type="checkbox"]){display:flex;align-items:center}.cert-waiver-summary{display:grid;gap:8px}.cert-waiver-summary p,.cert-waiver-summary small{margin:0}.cert-waiver-summary a{justify-self:start}
 .payment-approval-actions fieldset{border:1px solid #d7e0eb;border-radius:12px;margin:14px 0;padding:12px}.payment-approval-actions legend{font-weight:800;padding:0 6px}
+.claim-name-editor{margin-top:20px;padding:20px;border:1px solid #cad8e5;border-radius:12px;background:#f7fafc;display:grid;gap:14px}
+.claim-name-editor .form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.claim-name-editor label{display:grid;gap:6px;color:#173452;font-weight:600}
+.claim-name-editor input:not([type="checkbox"]),.claim-name-editor textarea{width:100%;box-sizing:border-box;padding:10px;border:1px solid #b9c9d8;border-radius:7px;font:inherit}
+.claim-name-editor label:has(input[type="checkbox"]){display:flex;align-items:flex-start;gap:9px}
+.claim-name-editor input[type="checkbox"]{margin-top:4px}
+.claim-name-status{color:#9c283a;margin:0}
+.claim-reference{color:#164d86;text-decoration:underline;text-underline-offset:3px}
+.module-claims{padding:18px 0;border-top:1px solid #d9e2ec;margin-top:22px}
+.module-claims>summary{font-size:1.15rem;font-weight:750;cursor:pointer;color:#173452;margin-bottom:16px}
+[data-hod-register]{padding-top:16px}
+@media(max-width:600px){.claim-name-editor .form-grid{grid-template-columns:1fr}.claim-name-editor{padding:14px}}

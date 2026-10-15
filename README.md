@@ -1,3 +1,15 @@
+# v62 update: Project Work claim tabs and claimant-name corrections
+
+- Distance Project Work and Non-Residential Project Work each contain an Approved Claims for HoD tab with their own totals, selections and download.
+- Claim references open the original claim form together with the claimant-name review panel. The downloaded reconciliation workbook also contains claim-form hyperlinks.
+- A clearly labelled name in a readable claim form takes priority over the typed supervisor/examiner name for processing. Blank, scanned or ambiguous forms need manual review.
+- Assigned administrators can confirm or correct the title, first name, middle name and surname, with tick-box reasons and a record of the original and corrected names.
+- A changed payee name invalidates an earlier payment approval and requires fresh HoD approval. Original uploaded files and historical claimant certifications are preserved.
+- The waiver button activates when one or more eligible claims are individually selected. Already certified claims are skipped in a mixed selection.
+- Field Experience and Assessment/Vetting claim controls remain available inside their own module sections.
+
+See `PATCH_NOTES_v62.txt` for deployment and verification details.
+
 # v61 update: unique consolidated claims and duplicate-payment protection
 
 - Multiple unique submissions from the same claimant are grouped under one consolidated claim number for the HoD register.

@@ -1,0 +1,35 @@
+UCC-CoDE eServices v62
+Project Work Claim Tabs, Claimant Name Review and Individual Waiver Selection
+
+Where to find Project Work claims
+
+Department Administration > Undergraduate Project Work > Distance Project Work > Approved Claims for HoD
+Department Administration > Undergraduate Project Work > Non-Residential Project Work > Approved Claims for HoD
+
+Each tab shows only its own approved Project Work submissions, consolidated totals and claim selections. Each Download Consolidated Copy link exports that category only. Field Experience and Assessment/Vetting retain their own module claim controls.
+
+Reviewing references and names
+
+Click a source reference to open the submission and its original claim form preview. Click a consolidated number to open its first source form, then use the listed source references to review additional forms. Workbook reference links also open the original form after staff authentication.
+
+The system reads explicit claimant, supervisor, examiner, marker, assessor or mentor name fields in supported readable PDF, DOC and DOCX claim forms. Bank account names and HoD approval names are excluded. Ambiguous names and scanned files require manual review. No OCR or AI service has been introduced.
+
+Before a claim is signed, a reliably detected form name takes priority over the name typed at submission. Existing signed approvals keep their recorded identity until an administrator confirms a correction.
+
+An assigned administrator can enter the title, first name, middle name and surname and tick the correction reason. The administrator confirms that the form was checked. The submitted name, detected form name, previous effective name, corrected name, officer, email, date, time and reasons remain in the audit history.
+
+Effective names appear in the department view, consolidated HoD register, applicable downloaded registers, claim ZIP filenames and newly generated approved PDFs. Historic claimant declarations remain attributed to the person and name that originally certified them.
+
+If a payee name changes after approval, the prior approval is invalidated, the claim returns for departmental reconciliation, and fresh HoD approval is required. Original uploaded files are never rewritten by a name correction.
+
+Waiver selection correction
+
+Ticking one eligible claim individually immediately enables Waive Certification. Ticking more eligible claims updates the count. If certified or previously waived entries are included, they are skipped and only eligible selected claims enter the waiver form. Removing the last eligible selection disables the button. Shared master credentials and Developer Preview remain excluded from waiver confirmation.
+
+Deployment
+
+Deploy the complete v62 package and run npm ci. No additional environment variables or database migration is required. Keep the existing persistent storage and officer accounts.
+
+Validation
+
+Syntax and DOM contracts, claim-name extraction and correction tests, simulated DOM interactions, HoD claim routing, duplicate-payment protection and the payment workflow were checked. Tests cover individual and mixed waiver selections, category-specific tabs and exports, preview permissions, corrected names in approval PDFs, original-file preservation, and invalidation following a name change.

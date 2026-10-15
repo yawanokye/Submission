@@ -1,5 +1,16 @@
 # Changelog
 
+## 62.0.0 Claim tabs, name review and individual waiver selection
+
+- Moves Project Work HoD claims into separate tabs beneath Distance and Non-Residential Project Work.
+- Scopes totals, selection actions and workbook downloads to the relevant module and category.
+- Links claim references to form verification and adds form hyperlinks in reconciliation workbooks.
+- Reads labelled claimant, supervisor, examiner or marker names from text-based PDF, DOC and DOCX forms.
+- Gives the form name priority and provides separate name-part fields for administrator corrections.
+- Audits changes and invalidates an earlier approval when the effective payee name changes.
+- Activates certification waiver from an individually selected eligible claim and skips already certified entries in mixed selections.
+- Preserves the prior duplicate-payment checks and HoD-only payment-signature authority.
+
 ## 61.0.0 Unique consolidated claims and duplicate-payment protection
 
 - Assigns one stable consolidated claim number to a claimant's unique approved submissions within each department, year and category.
