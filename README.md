@@ -1,3 +1,5 @@
+Latest release: **v64**. See [PATCH_NOTES_v64.txt](PATCH_NOTES_v64.txt) for alphabetical HoD claims, duplicate reconciliation, final versions, waivers, claim-form links and evidence-backed balance payments.
+
 # v63 update: department loading hotfix
 
 - Department registers load saved metadata without opening every attached claim form.

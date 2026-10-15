@@ -1,0 +1,41 @@
+UCC-CoDE eServices v64
+Alphabetical HoD Claims, Waivers, Final Versions and Balance Payments
+
+What changed
+
+1. Approved Claims for HoD and its claimant summaries are alphabetical by claimant name, ignoring common titles. Ready and held submissions share the same alphabetical order. Distance and Non-Residential remain separate.
+
+2. Duplicate payment checks compare approved student index numbers and scores without relying on group labels or centre/stream labels. They detect complete repeats, changed scores and partial student overlaps. Completed-work SHA-256 checks detect renamed copies, repeated individual attachments and duplicate attachments inside one submission. Field Experience and Teaching Practice checks are separated by assessment and academic year. Run Scan Repeated Claims to backfill file checks for historical records.
+
+3. Duplicate holds apply when forwarding to HoD, generating the HoD approval, approving in functional units, verifying in Payroll and recording payment. Already approved historical repeats remain visible. The paid record takes priority. Administrators can exclude an unpaid repeat, select tick-box reasons and retain the canonical reference. Source files, prior PDFs and audit events remain available. Paid records cannot be reset, deleted or excluded through these actions. A suspected duplicate already paid is flagged for Finance investigation; this update does not reverse an actual payment.
+
+4. Multiple unique submissions remain consolidated under the claimant, year and category. Each original claim form is linked in the HoD copy, functional-unit register, Payroll and Audit. Multi-form and work-level assessment claims have individual links. Approval emails include current original forms and the earlier paid forms/evidence when processing a balance. All links require the authorised account and use the configured public base URL.
+
+5. For a later submission that fully covers earlier work from the same claimant, Use final submission and replace earlier versions retains the reviewed final version and excludes covered unpaid versions. Existing approvals of replaced versions are invalidated, and the final version requires fresh routing and approval. Distinct submissions with different students remain separate payable sources. A partial overlap that does not fully cover the earlier submission remains held for correction.
+
+6. If earlier work was paid, choose Record previous payment and approve balance. Confirm your individual account password, tick the final attachments already paid and select the evidence/confirmation reasons. Previously recorded transaction comments can serve as linked evidence, or upload a payment-evidence document. The recorded paid quantity must be known and must match the selected work. Byte-identical paid attachments cannot be left unchecked. The system records the total attached count, already paid count, remaining payable count, original references, payment comments, reviewer and timestamp. Only unpaid work remains selectable for HoD payment approval. A zero balance cannot be forwarded for a new payment.
+
+7. The approved PDF, registers, audit history and forwarding email show a Part already paid comment and evidence links. Payment evidence is checked at payment transitions. Altering the evidence or work attachments invalidates the allocation/approval. Later combined submissions deduct both the initial payment and any paid balance. Paid student/work snapshots preserve the identities and quantities used at payment time. Legacy snapshots are first captured from the stored records during scanning/reconciliation; the update cannot reconstruct historical details absent from the existing data.
+
+8. Waive / Reconcile records the attached-work count as the approved payment basis when the original stated count or centre/group count differs. The original count and review history remain unchanged. This is the department's explicit monetary reconciliation; it does not rewrite original student results or index numbers. Waived certification appears green throughout the registers. Eligible claims become green Ready for HoD after waiver/reconciliation; duplicate-payment holds and missing-document issues remain clearly stated.
+
+9. Individual selection activates the waiver action. Mixed bulk selections process qualifying claims and report each skipped reference and reason instead of rejecting the entire batch. Select Needing Waiver / Reconciliation includes older waived submissions still blocked by an unreconciled quantity/centre check. Their original waiver signatory remains unchanged; the new quantity decision records the current administrator separately.
+
+10. Claim payment mutations are serialised within the Node process so concurrent approval and reconciliation actions do not restore superseded approvals. The v63 department-loading protections remain: initial pages use metadata and do not parse every uploaded claim document.
+
+Using this update
+
+- Redeploy the complete v64 source with existing persistent storage and environment variables. No new environment variable or SQLite migration is required. Back up persistent data before deploying.
+- In each relevant Approved Claims for HoD tab, run Scan Repeated Claims to identify historical student/file repeats. Review linked forms before excluding a repeat, retaining a final version or confirming an earlier payment.
+- For old waivers that remain unready, select Needing Waiver / Reconciliation, choose reasons and confirm with the HoD or assigned administrator's own password.
+- Set approval-officer email/mobile details and PUBLIC_BASE_URL as already supported. Notification delivery still depends on the configured mail/SMS provider.
+
+Verified locally
+
+- Syntax and DOM/form contracts.
+- New duplicate, alphabetical, cross-stream, legacy-paid, audited-exclusion and waiver/reconciliation integration tests.
+- New final-version, unique-source consolidation, initial/balance/further-balance deduction and evidence-integrity tests, including simulated DOM selection and payment-cap checks.
+- Approval notification rendering with an in-memory transport; no real email or SMS was sent.
+- Existing HoD routing, claim-name correction, optional dashboard failure, malformed legacy files, payment approval/invalidation, score duplicate policy and portal permissions.
+
+This package is prepared for deployment. It does not modify the running production service or its existing payment records by itself.

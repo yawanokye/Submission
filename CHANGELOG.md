@@ -1,3 +1,7 @@
+## v64
+
+Alphabetical HoD claims; student/file duplicate holds across payment stages; audited exclusion and final-version selection; evidence-backed balance payments; green waiver reconciliation and mixed bulk processing; protected original-form links throughout approvals. See PATCH_NOTES_v64.txt for deployment and reconciliation steps.
+
 # Changelog
 
 ## 63.0.0 Department-loading hotfix
