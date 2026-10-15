@@ -1,3 +1,15 @@
+# v63 update: department loading hotfix
+
+- Department registers load saved metadata without opening every attached claim form.
+- Older claim forms are read individually when their review record is opened. Their detected names are then retained for the register and approval process.
+- Invalid stored-file references, missing uploads and damaged documents fall back to manual review instead of preventing the department from loading.
+- The department page identifies the failed data section, shows the HTTP status where available, and offers Try Again.
+- An unavailable optional section no longer blocks access to the main submissions list. Failed claim-register data is marked unavailable rather than shown as an empty register.
+- Updated asset URLs and cache headers prevent older department scripts from being reused after deployment.
+- All claim tabs, individual waiver selection, name corrections and duplicate-payment safeguards from v62 remain available.
+
+See `PATCH_NOTES_v63.txt` for the reproduced failure, validation and deployment guidance.
+
 # v62 update: Project Work claim tabs and claimant-name corrections
 
 - Distance Project Work and Non-Residential Project Work each contain an Approved Claims for HoD tab with their own totals, selections and download.

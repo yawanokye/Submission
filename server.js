@@ -14,6 +14,7 @@ const { createApprovalPdf, parsePng, parseJpeg } = require('./lib/approval-pdf')
 const { extractClaimantName, claimName, claimNameView } = require('./lib/claim-identity');
 
 const app = express();
+const asyncRoute=handler=>(req,res,next)=>{res.setHeader('Cache-Control','no-store');return Promise.resolve(handler(req,res,next)).catch(next);};
 
 app.set('trust proxy', 1);
 
@@ -1387,9 +1388,10 @@ async function extractDissertationText(file) {
 
 const claimNameCache=new Map();
 async function hydrateClaimName(record){
+  if(!record||typeof record!=='object')return record;
   if(!['project-work','field-experience','assessor'].includes(record?.portalType||'project-work'))return record;
-  const forms=Array.isArray(record.files?.claimForm)?record.files.claimForm:[record.files?.claimForm],items=forms.filter(item=>item?.storedName);
-  if(!items.length)return record;
+  const forms=Array.isArray(record.files?.claimForm)?record.files.claimForm:[record.files?.claimForm],items=forms.filter(item=>typeof item?.storedName==='string'&&item.storedName.trim());
+  if(!items.length){if(forms.some(Boolean))record.claimFormIdentity={status:'manual-review',name:'',applyName:false};return record;}
   const identities=[];
   for(const item of items){
     const fp=path.join(FILES_DIR,path.basename(item.storedName));let stat;try{stat=await fsp.stat(fp);}catch{continue;}
@@ -1398,21 +1400,29 @@ async function hydrateClaimName(record){
       if(claimNameCache.size>=500)claimNameCache.delete(claimNameCache.keys().next().value);
       claimNameCache.set(fileKey,(async()=>{try{if(stat.size>20*1024*1024)return {status:'manual-review',name:'',fileKey};const raw=await extractDissertationText({path:fp,originalname:item.originalName});return {...extractClaimantName(raw),fileKey};}catch{return {status:'manual-review',name:'',fileKey};}})());
     }
-    identities.push(await claimNameCache.get(fileKey));
+    const identity=await claimNameCache.get(fileKey);if(identity)identities.push(identity);
   }
   const names=[...new Set(identities.map(item=>item.name).filter(Boolean))],detected=names.length===1&&identities.every(item=>item.status==='extracted')?{...identities[0]}:{status:names.length>1?'ambiguous':'manual-review',name:''};
   // Historical signed approvals retain the identity that was approved until an
   // administrator explicitly records a correction and obtains fresh approval.
   const unchanged=record.claimFormIdentity?.name===detected.name;
-  record.claimFormIdentity={...detected,applyName:unchanged?record.claimFormIdentity.applyName:!paymentApprovalDocuments(record).length};return record;
+  record.claimFormIdentity={...detected,applyName:unchanged?record.claimFormIdentity?.applyName:!paymentApprovalDocuments(record).length};return record;
 }
 async function hydrateClaimNames(records){
   let next=0;await Promise.all(Array.from({length:Math.min(4,records.length)},async()=>{while(next<records.length){const record=records[next++];await hydrateClaimName(record);}}));return records;
 }
-async function readDepartmentClaims(department){return hydrateClaimNames(recordsForDepartment(await readDb(),department));}
+// Registers read saved metadata only. Parsing every attachment here made all
+// dashboard requests depend on the oldest and slowest uploaded document.
+async function readDepartmentClaims(department){return recordsForDepartment(await readDb(),department);}
+async function readClaimNameForReview(record){
+  const previous=JSON.stringify(record.claimFormIdentity||null),source=JSON.stringify(record.files?.claimForm||null);
+  await hydrateClaimName(record);
+  if(previous!==JSON.stringify(record.claimFormIdentity||null))await mutateDb(records=>{const target=records.find(item=>item?.id===record.id&&item.department===record.department);if(target&&JSON.stringify(target.files?.claimForm||null)===source)target.claimFormIdentity=record.claimFormIdentity;return true;});
+  return record;
+}
 
 async function sendInlineClaimPreview(res, item, previewTitle = 'Claim Form Preview') {
-  if(!item?.storedName) return res.status(404).send('Claim form is unavailable.');
+  if(typeof item?.storedName!=='string'||!item.storedName.trim()) return res.status(404).send('Claim form is unavailable.');
   const fp=path.join(FILES_DIR,path.basename(item.storedName));
   if(!fs.existsSync(fp)) return res.status(404).send('Claim form file is unavailable.');
   const ext=path.extname(item.originalName||fp).toLowerCase();
@@ -4332,7 +4342,7 @@ app.post('/api/assessor', upload.fields(assessorUploadFields), async (req, res) 
   } catch(e){console.error(e);await removeUploaded(req).catch(()=>{});res.status(500).json({error:'The report submission could not be saved.'});}
 });
 
-function recordsForDepartment(records, department) { return records.filter(r => r.department === department); }
+function recordsForDepartment(records, department) { return records.filter(r => r&&typeof r==='object'&&r.department === department); }
 function projectRecords(records) { return records.filter(r => r.portalType === 'project-work' || !r.portalType); }
 function projectStudyCentres(record) {
   const direct=Array.isArray(record?.studyCentres)?record.studyCentres.map(cleanHumanText).filter(Boolean):[];
@@ -5746,14 +5756,14 @@ app.post('/api/admin-invitation/:token/set-password', async(req,res)=>{
 });
 
 // DEPARTMENT ADMIN: dissertation assignment by secure emailed link
-app.get('/api/admin/:department/dissertation-assignments', departmentAuth, async(req,res)=>{
+app.get('/api/admin/:department/dissertation-assignments', departmentAuth, asyncRoute(async(req,res)=>{
   if(!adminCan(req,'dissertation','viewer'))return res.json([]);
   const departmentRecords=await readDepartmentClaims(req.adminDepartment);
   const records=dissertationRecords(departmentRecords);
   const reports=assessorRecords(departmentRecords);
   const list=(await readAssignments()).filter(a=>a.department===req.adminDepartment).slice().reverse().map(a=>publicAssignment(a,records,reports));
   res.json(list);
-});
+}));
 
 app.post('/api/admin/:department/dissertation-assignments/delete-selected', departmentAuth, requireAdminAccess('dissertation','administrator'), async(req,res)=>{
   const ids=Array.isArray(req.body?.ids)?[...new Set(req.body.ids.map(String))]:[];
@@ -5971,11 +5981,11 @@ function paymentClaimsForStaff(records,identity){
   });
 }
 app.get('/api/staff/payment-claims',staffAuth,async(req,res)=>{
-  const identityUnits=new Set(normalizeStaffUnits(req.staffIdentity?.units)),records=await hydrateClaimNames(paymentClaimsForStaff(await readDb(),req.staffIdentity)),rows=records.map(record=>{const row=claimWorkflowRow(record),currentUnit=CLAIM_APPROVAL_STAGE_UNITS[row.stage]||'';return {...row,canAct:(ROLE_RANK[req.staffIdentity?.role]||0)>=ROLE_RANK.officer&&currentUnit!=='hod'&&identityUnits.has(currentUnit)};}).sort((a,b)=>String(a.departmentName).localeCompare(String(b.departmentName))||String(a.supervisorName).localeCompare(String(b.supervisorName))||String(a.reference).localeCompare(String(b.reference)));
+  const identityUnits=new Set(normalizeStaffUnits(req.staffIdentity?.units)),records=paymentClaimsForStaff(await readDb(),req.staffIdentity),rows=records.map(record=>{const row=claimWorkflowRow(record),currentUnit=CLAIM_APPROVAL_STAGE_UNITS[row.stage]||'';return {...row,canAct:(ROLE_RANK[req.staffIdentity?.role]||0)>=ROLE_RANK.officer&&currentUnit!=='hod'&&identityUnits.has(currentUnit)};}).sort((a,b)=>String(a.departmentName).localeCompare(String(b.departmentName))||String(a.supervisorName).localeCompare(String(b.supervisorName))||String(a.reference).localeCompare(String(b.reference)));
   res.json({ok:true,claims:rows,consolidated:consolidatedClaimRegister(records),canDecide:(ROLE_RANK[req.staffIdentity?.role]||0)>=ROLE_RANK.officer});
 });
 app.get('/api/staff/payment-claims/register.xlsx',staffAuth,async(req,res)=>{
-  const records=await hydrateClaimNames(paymentClaimsForStaff(await readDb(),req.staffIdentity)),summary=consolidatedClaimRegister(records),rows=records.map(claimWorkflowRow);
+  const records=paymentClaimsForStaff(await readDb(),req.staffIdentity),summary=consolidatedClaimRegister(records),rows=records.map(claimWorkflowRow);
   const workbook=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([['S/N','DEPARTMENT','SUPERVISOR / EXAMINER','EMAIL','PHONE','UNIQUE CLAIM RECORDS','TOTAL APPROVED / ATTACHED CLAIM QUANTITY','ACTIVITIES','CURRENT STAGES'],...summary.map((item,index)=>[index+1,item.departmentName,item.supervisorName,item.email,item.phone,item.claimCount,item.totalClaims,item.activities.join(' | '),item.stages.join(' | ')])]),'Consolidated Register');
   XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([['S/N','REFERENCE','DEPARTMENT','WORKFLOW','SUPERVISOR / EXAMINER','EMAIL','STATED QUANTITY','ACTUAL ATTACHED QUANTITY','HOD APPROVED QUANTITY','CURRENT STAGE'],...rows.map((item,index)=>[index+1,item.reference,item.departmentName,item.workType,item.supervisorName,item.email,item.statedClaimQuantity,item.actualAttachedQuantity,item.departmentApprovedQuantity,item.stageLabel])]),'Claim Details');
@@ -6344,26 +6354,26 @@ app.post('/api/staff/referrals/:id/reassign', staffAuth, async(req, res) => {
 
 // Public admin chooser. Department data remain protected behind department-specific credentials.
 app.get('/admin',(_req,res)=>res.sendFile(path.join(__dirname,'admin','chooser.html')));
-app.get('/admin/admin.css',(_req,res)=>res.sendFile(path.join(__dirname,'admin','admin.css')));
-app.get('/admin/admin.js',(_req,res)=>res.sendFile(path.join(__dirname,'admin','admin.js')));
-app.get('/admin/:department',departmentAuth,(req,res)=>res.sendFile(path.join(__dirname,'admin','index.html')));
+app.get('/admin/admin.css',(_req,res)=>res.set('Cache-Control','no-store').sendFile(path.join(__dirname,'admin','admin.css')));
+app.get('/admin/admin.js',(_req,res)=>res.set('Cache-Control','no-store').sendFile(path.join(__dirname,'admin','admin.js')));
+app.get('/admin/:department',departmentAuth,(req,res)=>res.set('Cache-Control','no-store').sendFile(path.join(__dirname,'admin','index.html')));
 app.get('/operations/portal.css',(_req,res)=>res.sendFile(path.join(__dirname,'operations','portal.css')));
 app.get('/operations/payroll.js',(_req,res)=>res.sendFile(path.join(__dirname,'operations','payroll.js')));
 app.get('/operations/auditor.js',(_req,res)=>res.sendFile(path.join(__dirname,'operations','auditor.js')));
 app.get('/payroll/:department',departmentAuth,(req,res)=>adminCan(req,'payroll','viewer')?res.sendFile(path.join(__dirname,'operations','payroll.html')):res.status(403).send('Your account does not have access to the Payroll Portal.'));
 app.get('/auditor/:department',departmentAuth,(req,res)=>adminCan(req,'auditor','viewer')?res.sendFile(path.join(__dirname,'operations','auditor.html')):res.status(403).send("Your account does not have access to the Auditor's Portal."));
 
-app.get('/api/admin/:department/info', departmentAuth, async(req,res)=>{
+app.get('/api/admin/:department/info', departmentAuth, asyncRoute(async(req,res)=>{
   const availableDepartmentSlugs=normalizeAdminDepartments(req.adminIdentity?.departments||[req.adminDepartment]);
   const availableDepartments=(availableDepartmentSlugs.length?availableDepartmentSlugs:[req.adminDepartment]).map(slug=>({slug,name:DEPARTMENTS[slug].name}));
   res.json({ department:req.adminDepartment, departmentName:req.adminDepartmentName, availableDepartments, admin:{id:req.adminIdentity?.id||'',name:req.adminIdentity?.name||'',username:req.adminIdentity?.username||'',email:req.adminIdentity?.email||'',role:req.adminIdentity?.role||'viewer',sections:req.adminIdentity?.sections||[],departments:availableDepartmentSlugs,hodDepartments:normalizeHodDepartments(req.adminIdentity?.hodDepartments,availableDepartmentSlugs),hasHodSignature:Boolean(req.adminIdentity?.hasHodSignature),signatureUpdatedAt:req.adminIdentity?.signatureUpdatedAt||null,master:Boolean(req.adminIdentity?.master),developerPreview:Boolean(req.adminIdentity?.developerPreview),developerPreviewLabel:req.adminIdentity?.developerPreviewLabel||'',previewExpiresAt:req.adminIdentity?.previewExpiresAt||null} });
-});
-app.get('/api/admin/:department/hod-signature-profile', departmentAuth, async(req,res)=>{
+}));
+app.get('/api/admin/:department/hod-signature-profile', departmentAuth, asyncRoute(async(req,res)=>{
   const result=await hodAccountForRequest(req);
   if(result.error)return res.json({authorised:false,error:result.error,department:req.adminDepartment});
   const signature=result.account.hodSignature||{};
   res.json({authorised:true,department:req.adminDepartment,name:result.account.name||result.account.username,email:result.account.email||'',hasSignature:Boolean(signature.storedName),signatureUpdatedAt:signature.uploadedAt||null,signatureWidth:signature.width||null,signatureHeight:signature.height||null});
-});
+}));
 app.post('/api/admin/:department/hod-signature-profile', departmentAuth, hodSignatureUpload.single('signature'), async(req,res)=>{
   const result=await hodAccountForRequest(req);
   if(result.error){if(req.file)await fsp.unlink(req.file.path).catch(()=>{});return res.status(403).json({error:result.error});}
@@ -6431,12 +6441,12 @@ app.post('/api/admin/:department/claims/bulk-certification-waiver',departmentAut
 app.get('/api/admin/:department/claims/:id/certification-waiver/evidence',departmentAuth,async(req,res)=>{
   const record=(await readDepartmentClaims(req.adminDepartment)).find(item=>item.id===req.params.id);if(!record)return res.status(404).send('Claim not found.');const allowed=adminCan(req,portalSectionForRecord(record),'viewer')||adminCan(req,'payroll','viewer')||adminCan(req,'auditor','viewer');if(!allowed)return res.status(403).send('You do not have access to this waiver evidence.');const evidence=record.claimantCertification?.waiverEvidence;if(!evidence?.storedName)return res.status(404).send('No separate waiver evidence was uploaded.');const fp=path.join(FILES_DIR,path.basename(evidence.storedName));if(!fs.existsSync(fp))return res.status(404).send('Waiver evidence file is unavailable.');res.download(fp,safeBaseName(evidence.originalName||'waiver-evidence'));
 });
-app.get('/api/admin/:department/hod-forward-register',departmentAuth,async(req,res)=>{
+app.get('/api/admin/:department/hod-forward-register',departmentAuth,asyncRoute(async(req,res)=>{
   const canView=['project-work','field-experience','assessor'].some(section=>adminCan(req,section,'viewer'));if(!canView)return res.status(403).json({error:'Your account does not have access to departmental claims.'});
   const records=(await readDepartmentClaims(req.adminDepartment)).filter(record=>adminCan(req,portalSectionForRecord(record),'viewer'));
   const rows=hodForwardRegisterRows(records),readyRecords=records.filter(record=>rows.some(row=>row.id===record.id&&row.readyForHod)),consolidated=consolidatedClaimRegister(readyRecords);
   res.json({rows,consolidated,approvedCount:rows.length,readyCount:rows.filter(row=>row.readyForHod).length,readyQuantity:rows.filter(row=>row.readyForHod).reduce((sum,row)=>sum+Number(row.actualAttachedQuantity||0),0)});
-});
+}));
 app.post('/api/admin/:department/claims/forward-approved-to-hod',departmentAuth,async(req,res)=>{
   const ids=[...new Set(Array.isArray(req.body?.ids)?req.body.ids.map(String).filter(Boolean):[])];
   if(!ids.length)return res.status(400).json({error:'Select at least one reconciled approved claim.'});
@@ -6457,7 +6467,7 @@ app.post('/api/admin/:department/claims/:id/forward-for-payment',departmentAuth,
   await writeDb(all);const deliveries=await dispatchClaimApprovalNotification(record,'pending-hod',req).catch(error=>[{channel:'notification',status:'failed',error:String(error.message||error),at:new Date().toISOString()}]);await mutateRecordById(record.id,target=>{const wf=ensurePaymentWorkflow(target);wf.notifications=Array.isArray(wf.notifications)?wf.notifications:[];wf.notifications.push(...deliveries);return true;});
   res.json({ok:true,paymentWorkflow:paymentWorkflowView(record),actualAttachedQuantity:result.actualAttachedQuantity,statedClaimQuantity:result.claimedQuantity,notificationDeliveries:deliveries});
 });
-app.post('/api/admin/:department/claims/:id/payment-approval', departmentAuth, async(req,res)=>{
+app.post('/api/admin/:department/claims/:id/payment-approval', departmentAuth, asyncRoute(async(req,res)=>{
   const all=await readDb(),record=all.find(item=>item.id===req.params.id&&item.department===req.adminDepartment&&['project-work','field-experience','assessor'].includes(item.portalType||'project-work'));
   if(!record)return res.status(404).json({error:'Claim submission not found in this department.'});
   if(!requireRecordAccess(req,res,record,'administrator'))return;
@@ -6490,8 +6500,8 @@ app.post('/api/admin/:department/claims/:id/payment-approval', departmentAuth, a
   const nextStage=directorateStageForDepartment(record.department);workflow.stage=nextStage;workflow.actualAttachedQuantity=actualQuantity;workflow.statedClaimQuantity=Number(payment.claimedQuantity||0);workflow.history.push({stage:nextStage,action:'hod-approved-and-forwarded',note:reason||'HoD approved the claim using the actual attached-work quantity.',at:now,by:actor,approvedQuantity:approvedUnits.length});
   record.payroll={...(record.payroll||{}),status:'pending',note:`HoD approved the claim; ${CLAIM_APPROVAL_STAGE_LABELS[nextStage]}.`,updatedAt:now,updatedBy:actor};record.payroll.history=Array.isArray(record.payroll.history)?record.payroll.history:[];record.payroll.history.push({status:'pending',note:record.payroll.note,updatedAt:now,updatedBy:actor});
   await writeDb(all);const deliveries=await dispatchClaimApprovalNotification(record,nextStage,req).catch(error=>[{channel:'notification',status:'failed',error:String(error.message||error),at:new Date().toISOString()}]);await mutateRecordById(record.id,target=>{const wf=ensurePaymentWorkflow(target);wf.notifications=Array.isArray(wf.notifications)?wf.notifications:[];wf.notifications.push(...deliveries);return true;});res.json({ok:true,paymentApproval:paymentApprovalView(record),paymentWorkflow:paymentWorkflowView(record),approvedClaimUrl:`/api/admin/${encodeURIComponent(req.adminDepartment)}/submissions/${encodeURIComponent(record.id)}/approved-claim/${encodeURIComponent(documentId)}`});
-});
-app.post('/api/admin/:department/claims/:id/claimant-name',departmentAuth,async(req,res)=>{
+}));
+app.post('/api/admin/:department/claims/:id/claimant-name',departmentAuth,asyncRoute(async(req,res)=>{
   const reasonLabels={'claim-form-name':'Use the claimant name on the uploaded claim form','spelling-correction':'Correct a spelling or typing error','name-order':'Correct the order or missing parts of the name','official-record':'Match the verified staff record'},reasonCodes=[...new Set((Array.isArray(req.body?.reasonCodes)?req.body.reasonCodes:[]).filter(code=>reasonLabels[code]))];
   const parts={title:cleanHumanText(req.body?.title),firstName:cleanHumanText(req.body?.firstName),middleName:cleanHumanText(req.body?.middleName),lastName:cleanHumanText(req.body?.lastName)};
   if(!parts.firstName||!parts.lastName)return res.status(400).json({error:'Enter the claimant’s first name and surname.'});
@@ -6511,14 +6521,14 @@ app.post('/api/admin/:department/claims/:id/claimant-name',departmentAuth,async(
     return {ok:true,claimantName:claimNameView(record),paymentApprovalInvalidated:hadApproval};
   });
   if(result.error)return res.status(result.status).json({error:result.error});res.json(result);
-});
-app.get('/api/admin/:department/submissions', departmentAuth, async(req,res)=>{
+}));
+app.get('/api/admin/:department/submissions', departmentAuth, asyncRoute(async(req,res)=>{
   const records=await readDepartmentClaims(req.adminDepartment);
   const assignments=adminCan(req,'dissertation','viewer')?(await readAssignments()).filter(a=>a.department===req.adminDepartment):[];
   const mapped=adminRecordsMap(records,assignments).filter(r=>adminCan(req,portalSectionForRecord(r),'viewer'));
   res.json(mapped);
-});
-app.get('/api/admin/:department/score-batches',departmentAuth,async(req,res)=>{
+}));
+app.get('/api/admin/:department/score-batches',departmentAuth,asyncRoute(async(req,res)=>{
   const batches=(await readScoreBatches()).filter(batch=>batch.department===req.adminDepartment&&adminCan(req,batch.portalType,'viewer')).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
   const records=await readDepartmentClaims(req.adminDepartment),all=await readScoreBatches(),unbatched={};
   for(const portalType of ['project-work','field-experience'])for(const stream of ['distance','non-residential']){
@@ -6526,7 +6536,7 @@ app.get('/api/admin/:department/score-batches',departmentAuth,async(req,res)=>{
     else for(const assessmentType of FIELD_ASSESSMENT_KEYS)unbatched[`${portalType}:${stream}:${assessmentType}`]=scoreBatchCandidates(records,all,{portalType,stream,assessmentType}).length;
   }
   res.json({ok:true,batches:batches.map(batch=>({...batch,items:undefined,corrections:undefined,snapshotRows:undefined,reports:(batch.reports||[]).map(report=>({...report,rows:undefined,rowCount:(report.rows||[]).length})),recordCount:(batch.items||[]).length,rowCount:batch.portalType==='project-work'?(batch.snapshotRows||[]).length:(batch.reports||[]).reduce((n,r)=>n+(r.rows||[]).length,0),correctionCount:(batch.corrections||[]).length})),unbatched});
-});
+}));
 app.post('/api/admin/:department/score-batches',departmentAuth,async(req,res)=>{
   const portalType=String(req.body?.portalType||''),stream=String(req.body?.stream||'');
   if(!['project-work','field-experience'].includes(portalType)||!['distance','non-residential'].includes(stream))return res.status(400).json({error:'Choose a valid portal and student category.'});
@@ -6948,11 +6958,12 @@ app.post('/api/admin/:department/submissions/delete-selected', departmentAuth, a
   const result=await deleteDepartmentSubmissions(req.adminDepartment,targets.map(r=>r.id));
   res.json({ok:true,deleted:result.deleted});
 });
-app.get('/api/admin/:department/submissions/:id', departmentAuth, async(req,res)=>{
+app.get('/api/admin/:department/submissions/:id', departmentAuth, asyncRoute(async(req,res)=>{
   const records=await readDepartmentClaims(req.adminDepartment);
   const r=records.find(x=>x.id===req.params.id);
   if(!r)return res.status(404).json({error:'Submission not found in this department.'});
   if(!requireRecordAccess(req,res,r,'viewer'))return;
+  await readClaimNameForReview(r);
   const paymentData=['project-work','field-experience','assessor'].includes(r.portalType||'project-work')?paymentUnitData(r):null;
   const common={...r,claimantName:claimNameView(r),claimantCertification:claimantCertificationView(r),paymentApproval:paymentApprovalView(r),paymentWorkflow:paymentWorkflowView(r),paymentUnits:paymentData?.units||[],maximumPayableQuantity:paymentData?.maxPayable||0,actualAttachedQuantity:Number(paymentData?.actualQuantity??paymentData?.maxPayable??0),hodForwardReadiness:hodForwardReadiness(r,records),claimAudit:claimAuditView(r)};
   if((r.portalType||'project-work')==='project-work'){
@@ -6962,7 +6973,7 @@ app.get('/api/admin/:department/submissions/:id', departmentAuth, async(req,res)
     return res.json({...common,assessmentLabel:fieldAssessmentLabel(r),fieldValidation:fieldClaimValidation(r),reviewFieldScoreRows:fieldValidScoreRowsWithMeta(r).map((row,i)=>({reviewNo:i+1,sourceIndex:row.sourceIndex,originalSn:row.originalSn,registrationNo:row.registrationNo,name:row.name,scoreHeaders:row.scoreHeaders,scoreValues:row.scoreValues,included:row.included!==false})),duplicateReconciliation:fieldDuplicateReconciliation(r,records)});
   }
   res.json(common);
-});
+}));
 app.get('/api/admin/:department/submissions/:id/claim-audit', departmentAuth, async(req,res)=>{
   const record=(await readDepartmentClaims(req.adminDepartment)).find(item=>item.id===req.params.id);
   if(!record)return res.status(404).json({error:'Submission not found in this department.'});
@@ -7045,7 +7056,7 @@ app.get('/api/admin/:department/submissions/:id/files/:kind/:index?', department
   if(!allowed.includes(req.params.kind))return res.status(400).send('Invalid file type.');
   let item=r.files?.[req.params.kind];
   if(Array.isArray(item))item=item[Number(req.params.index||0)];
-  if(!item)return res.status(404).send('File not found.');
+  if(typeof item?.storedName!=='string'||!item.storedName.trim())return res.status(404).send('The stored file reference is unavailable. Review this submission and upload a valid replacement.');
   const fp=path.join(FILES_DIR,path.basename(item.storedName));
   if(!fs.existsSync(fp))return res.status(404).send('Stored file is unavailable.');
   res.download(fp,item.originalName);
@@ -7290,7 +7301,7 @@ app.post('/api/admin/:department/dissertations/download-selected', departmentAut
   catch(e) { console.error('ZIP download failed:', e); if(!res.headersSent)res.status(500).json({error:'Could not create the ZIP file.'}); else res.end(); }
 });
 
-app.get('/api/admin/:department/summary',departmentAuth,async(req,res)=>{
+app.get('/api/admin/:department/summary',departmentAuth,asyncRoute(async(req,res)=>{
   const records=(await readDepartmentClaims(req.adminDepartment)).filter(r=>adminCan(req,portalSectionForRecord(r),'viewer'));
   res.json({
     total:records.length,
@@ -7304,7 +7315,7 @@ app.get('/api/admin/:department/summary',departmentAuth,async(req,res)=>{
     nonResidentialScoreRows:adminCan(req,'project-work','viewer')?allNonResidentialScoreRows(records).length:0,
     fieldScoreRows:adminCan(req,'field-experience','viewer')?allFieldExperienceScoreRows(records).length:0
   });
-});
+}));
 
 app.get('/health',async(_req,res)=>{const admins=await readAdminUsers(),centreCatalogue=await readStudyCentreCatalogue(),centreDirectory=await readStudyCentreDirectory(),supportTickets=await readSupportTickets();const centreCount=Object.values(centreCatalogue).reduce((n,list)=>n+(Array.isArray(list)?list.length:0),0);const activeSessions=Number(supportDatabase.prepare('SELECT COUNT(*) AS count FROM portal_sessions WHERE expires_at > ?').get(Date.now())?.count||0);res.json({ok:true,appName:'UCC-CoDE eServices',departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',smsConfigured:supportMobileChannelConfigured('sms'),smsProvider:supportMobileChannelConfigured('sms')?'arkesel':'',resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:admins.length,pendingAdminInvitations:admins.filter(a=>!a.passwordHash&&a.invitationTokenHash).length,studyCentres:centreCount,studyCentreDirectory:centreDirectory.length,supportTickets:supportTickets.length,sessionStore:'sqlite',persistentSessions:true,activeSessions,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'});});
 app.get('/vendor/xlsx.full.min.js', (_req,res)=>res.sendFile(path.join(__dirname,'node_modules','xlsx','dist','xlsx.full.min.js')));

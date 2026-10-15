@@ -1,5 +1,15 @@
 # Changelog
 
+## 63.0.0 Department-loading hotfix
+
+- Removes claim-document extraction from department register, statistics, assignment and processing-batch loading.
+- Guards malformed legacy file metadata and unavailable claim attachments.
+- Reads and retains legacy claim names when an individual review is opened.
+- Forwards rejected dashboard handlers to Express error handling instead of letting a request rejection terminate the process.
+- Adds request-specific loading errors, retry controls and optional-section recovery.
+- Versions department assets and disables caching for protected department responses.
+- Adds a regression test that fails against v62 and passes with the fix for malformed, missing and damaged claim-file fixtures.
+
 ## 62.0.0 Claim tabs, name review and individual waiver selection
 
 - Moves Project Work HoD claims into separate tabs beneath Distance and Non-Residential Project Work.

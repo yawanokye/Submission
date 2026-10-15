@@ -1,0 +1,34 @@
+UCC-CoDE eServices v63
+Department-Loading Hotfix
+
+Reported symptom
+
+The service starts and listens on port 10000, but Department Administration displays Could not load department submissions.
+
+Reproduced v62 failure
+
+v62 read attached claim forms while building several initial department responses. A malformed legacy stored-file reference could reject the new name reader. Express 4 did not automatically pass that rejected asynchronous handler to the error middleware. In a regression fixture, a non-text stored-file reference terminated the process and dropped the submissions request.
+
+This reproduces one concrete v62 failure. The supplied production startup log does not identify the exact record or request that failed on the live service.
+
+Corrections
+
+1. Initial department responses read saved metadata without parsing claim documents.
+2. Legacy forms are inspected individually when a claim is opened for review. Detected names are retained without rewriting the uploaded form or historical claimant certification.
+3. Invalid stored-file references, missing files and damaged documents fall back to manual review.
+4. The main dashboard handlers forward failures to the normal error middleware.
+5. The page reports which section failed and provides a Try Again button.
+6. Unavailable optional statistics, assignment, signature, batch or claim sections do not hide the main submissions register. A failed HoD register is clearly marked unavailable and cannot be mistaken for an empty queue.
+7. The department page uses versioned script and stylesheet URLs and no-store cache headers.
+
+Verification
+
+- The new regression test fails against the v62 server and passes against v63.
+- All seven initial department endpoints were verified with malformed, missing and damaged claim uploads.
+- Individual claim review remains accessible for those fixtures.
+- The simulated DOM interaction test verifies that an optional processing-batch HTTP 503 does not prevent the claims tabs, reference review or individual waiver selection from working.
+- Syntax and DOM contracts, claim-name corrections, payment approval invalidation, claim routing, duplicate-payment checks and portal permissions remain covered.
+
+Deployment
+
+Redeploy the complete v63 project. Keep the existing persistent storage and environment variables. No SQLite migration or new environment variable is required. The Node SQLite ExperimentalWarning is informational and is separate from the department-loading regression.

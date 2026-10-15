@@ -153,3 +153,6 @@ tr.review-row-returned td{background:#f3f8fd}tr.review-row-returned td:first-chi
 .module-claims>summary{font-size:1.15rem;font-weight:750;cursor:pointer;color:#173452;margin-bottom:16px}
 [data-hod-register]{padding-top:16px}
 @media(max-width:600px){.claim-name-editor .form-grid{grid-template-columns:1fr}.claim-name-editor{padding:14px}}
+.department-load-status{margin:18px 0;padding:16px 20px;border:1px solid #e4c684;background:#fff8e8;border-radius:10px;color:#684c15}
+.department-load-status[hidden]{display:none}
+.department-load-status ul{margin:8px 0 12px;padding-left:20px}
