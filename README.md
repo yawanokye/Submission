@@ -1,3 +1,5 @@
+Latest release: **v65**. Field Experience and Teaching Practice require a claim form and score sheet. The completed-work / supporting-evidence upload section is removed. See [PATCH_NOTES_v65.txt](PATCH_NOTES_v65.txt).
+
 Latest release: **v64**. See [PATCH_NOTES_v64.txt](PATCH_NOTES_v64.txt) for alphabetical HoD claims, duplicate reconciliation, final versions, waivers, claim-form links and evidence-backed balance payments.
 
 # v63 update: department loading hotfix

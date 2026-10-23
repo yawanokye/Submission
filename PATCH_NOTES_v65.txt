@@ -1,0 +1,35 @@
+UCC-CoDE eServices v65
+Field Experience and Teaching Practice upload requirements
+23 October 2026
+
+Public submission requirements
+
+- A completed claim form is compulsory for every Field Experience and Teaching Practice category.
+- The Excel score sheet remains compulsory.
+- The completed-work / supporting-evidence upload section is removed from the public form. The server no longer requires these files or matches their count to the stated candidate count. Previously stored evidence remains available to authorised reviewers. For compatibility, older clients may still send optional evidence files without making them compulsory.
+- Required claimant details, the claimant declaration and score validation remain in place.
+- The public form uses these requirements immediately. It cannot switch the claim form back to optional when a settings request fails.
+- Existing settings files that previously made the claim optional are overridden by the required policy. The developer setting now displays only Compulsory and rejects requests to make the claim optional.
+
+New claim processing
+
+New Field Experience / Teaching Practice submissions use approved unique candidate scores for the payable quantity. Optional evidence files are available to reviewers but do not determine that quantity or create payment duplicates solely because the same supporting evidence accompanies distinct candidates. Repeated student results still trigger payment checks. Conflicting scores must be corrected before HoD payment approval.
+
+The existing certification waiver, departmental reconciliation, HoD approval, later approvals and balance-payment safeguards remain usable without completed-work uploads. Candidate counts, optional evidence counts and previously paid candidate quantities are identified separately. Original uploaded files remain unchanged.
+
+Existing submissions and signed approvals retain their saved v64 attachment-based model and history. This update does not reinterpret already approved claims. Undergraduate Project Work requirements remain unchanged, including its compulsory completed works and attachment-count validation.
+
+Verification
+
+- All six categories accept claim + score sheet with no supporting evidence.
+- Submissions with fewer or more optional evidence files than candidates are accepted.
+- Missing claims and missing scores are rejected. Rejected uploads are cleaned up.
+- The compulsory claim policy survives a legacy optional setting and unavailable public settings requests.
+- New candidate-based submissions can be reviewed, waived, forwarded to HoD and approved without evidence uploads.
+- A later combined candidate claim deducts candidates already paid and approves only the balance.
+- Project Work still rejects missing completed works.
+- Existing payment, routing, duplicate, claim-name, loading and notification checks are retained.
+
+Deployment
+
+Redeploy the complete v65 source and retain the existing persistent storage and environment variables. No new environment variable or database migration is required. See the deployment guidance already included with the project. This package does not deploy itself or modify the running service.

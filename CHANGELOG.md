@@ -1,3 +1,7 @@
+## v65
+
+Field Experience and Teaching Practice now require the claim form, remove the completed-work/supporting-evidence upload section, and use approved candidate scores for new payment quantities. Project Work and historical signed claims keep their existing rules. See PATCH_NOTES_v65.txt.
+
 ## v64
 
 Alphabetical HoD claims; student/file duplicate holds across payment stages; audited exclusion and final-version selection; evidence-backed balance payments; green waiver reconciliation and mixed bulk processing; protected original-form links throughout approvals. See PATCH_NOTES_v64.txt for deployment and reconciliation steps.
