@@ -270,6 +270,7 @@ const STAFF_UNITS = Object.freeze({
   'directorate-arts-stem': { label: 'Directorate of Arts and STEM Studies', summary: 'Academic oversight for Arts, Social Sciences, STEM and ICT programmes.' },
   'academic-departments': { label: 'Academic Departments', summary: 'Receive programme, assessment, project-work, teaching-practice and departmental academic matters.' },
   'examinations': { label: 'Examinations Unit', summary: 'Process examination-related matters and support controlled results workflows.' },
+  'finance-officer': {label:'Assigned Finance Officer',summary:'Process claims specifically assigned by the College Finance Officer, then forward them to Audit.'},
   'payroll': { label: 'Payroll Portal', summary: 'Process only department-approved claims for payment.' },
   'auditor': { label: "Auditor's Portal", summary: 'Final audit verification of payroll-approved claims with a retained approval history.' },
   'regional-administrator': { label: 'Regional Administrators', summary: 'Facilitate, verify and escalate centre matters without approving academic records.' },
@@ -287,6 +288,7 @@ const CLAIM_APPROVAL_STAGE_UNITS = Object.freeze({
   'pending-provost':'provost',
   'pending-college-finance':'college-finance',
   'pending-payroll':'payroll',
+  'pending-finance-officer':'finance-officer',
   'pending-audit':'auditor'
 });
 const CLAIM_APPROVAL_STAGE_LABELS = Object.freeze({
@@ -297,6 +299,7 @@ const CLAIM_APPROVAL_STAGE_LABELS = Object.freeze({
   'pending-provost':'Awaiting Provost approval',
   'pending-college-finance':'Awaiting College Finance Officer approval',
   'pending-payroll':'Awaiting Payroll approval',
+  'pending-finance-officer':'Awaiting assigned Finance Officer processing',
   'pending-audit':'Awaiting Audit verification',
   'completed':'Approval workflow completed',
   'returned-to-department':'Returned to department'
@@ -937,7 +940,14 @@ function requireSupportRole(minimumRole='viewer') {
     ? next() : res.status(403).json({error:'Your Student Support account does not have permission for this action.'});
 }
 
+function applyHodAssignment(account){
+  account.role='administrator';
+  account.units=[...new Set([...normalizeStaffUnits(account.units),'hod'])];
+  account.sections=[...new Set([...normalizeAdminSections(account.sections),'project-work','field-experience','assessor','payroll'])];
+  return account;
+}
 const DEVELOPER_PREVIEW_PROFILES = {
+  'hod-viewer': {label:'HoD Claims Viewer',role:'viewer',sections:['project-work','field-experience','assessor','payroll']},
   'department-administrator': {label:'Department Administrator',role:'administrator',sections:['project-work','field-experience','dissertation','assessor','payroll','auditor']},
   'department-officer': {label:'Department Officer',role:'officer',sections:['project-work','field-experience','dissertation','assessor']},
   'department-viewer': {label:'Department Viewer',role:'viewer',sections:['project-work','field-experience','dissertation','assessor']},
@@ -946,11 +956,13 @@ const DEVELOPER_PREVIEW_PROFILES = {
   'auditor': {label:'Auditor',role:'viewer',sections:['project-work','field-experience','auditor']}
 };
 function developerPreviewRedirect(department,destination) {
+  if(destination==='hod') return `/admin/${encodeURIComponent(department)}?view=hod#project`;
   if(destination==='payroll') return `/payroll/${encodeURIComponent(department)}`;
   if(destination==='auditor') return `/auditor/${encodeURIComponent(department)}`;
   return `/admin/${encodeURIComponent(department)}`;
 }
 function previewDestinationAllowed(identity,destination) {
+  if(destination==='hod')return normalizeStaffUnits(identity.units).includes('hod')||normalizeHodDepartments(identity.hodDepartments,identity.departments).length>0;
   if(destination==='payroll') return (identity.sections||[]).includes('payroll');
   if(destination==='auditor') return (identity.sections||[]).includes('auditor');
   return ['project-work','field-experience','dissertation','assessor'].some(section=>(identity.sections||[]).includes(section));
@@ -2290,6 +2302,21 @@ const resourceUpload = multer({
     cb(null, RESOURCE_EXTENSIONS.has(ext));
   }
 });
+async function rejectEmptyClaimUploads(req, res) {
+  const empty=Object.values(req.files||{}).flat().find(file=>!Number.isFinite(file.size)||file.size<=0);
+  if(!empty)return false;
+  await removeUploaded(req);
+  res.status(400).json({error:`The attached file "${safeBaseName(empty.originalname)}" is empty. Upload the completed document before submitting.`});
+  return true;
+}
+function storedClaimFilePresent(file){
+  if(typeof file?.storedName!=='string'||!file.storedName.trim())return false;
+  try{const stat=fs.statSync(path.join(FILES_DIR,path.basename(file.storedName)));return stat.isFile()&&stat.size>0;}catch{return false;}
+}
+function claimAttachmentIssues(record){
+  const required=record.portalType==='assessor'?['claimForm','reportFile','scoreSheet']:record.portalType==='field-experience'?['claimForm','scoresFile']:['claimForm','reportFile','scoresFile','completedWork'];
+  return required.filter(key=>{const files=paymentRecordFiles(record,key);return !files.length||files.some(file=>!storedClaimFilePresent(file));}).map(key=>`${({claimForm:'Claim form',reportFile:'Report',scoreSheet:'Score sheet',scoresFile:'Score sheet',completedWork:'Completed work'})[key]} attachment is missing or empty. Upload the completed document before payment processing.`);
+}
 function filesFor(req, key) { return (req.files && req.files[key]) || []; }
 async function removeUploaded(req) { await Promise.all(Object.values(req.files || {}).flat().map(f => fsp.unlink(f.path).catch(() => {}))); }
 function fileRecord(f) { return f ? { storedName: path.basename(f.path), originalName: f.originalname, mimeType: f.mimetype, size: f.size } : null; }
@@ -2770,7 +2797,7 @@ async function sendArkeselSupportSms(phone, body) {
   return { id:String(delivery?.id || result.id || ''), provider:'arkesel' };
 }
 async function dispatchClaimApprovalNotification(record,stage,req){
-  const settings=await readPortalSettings(),key=approvalOfficerKeyForStage(stage,record.department),officer=settings.approvalOfficers?.[key]||{},unit=CLAIM_APPROVAL_STAGE_UNITS[stage]||'',base=baseUrlFor(req),link=stage==='pending-hod'?`${base}/admin/${encodeURIComponent(record.department)}#${record.portalType==='field-experience'?'field':record.portalType==='assessor'?'assessor':'project'}`:`${base}/staff#claim-approvals`;
+  const settings=await readPortalSettings(),key=approvalOfficerKeyForStage(stage,record.department),officer=stage==='pending-finance-officer'?((await readAdminUsers()).find(account=>account.id===record.paymentWorkflow?.assignedFinanceOfficerId)||{}):(settings.approvalOfficers?.[key]||{}),unit=CLAIM_APPROVAL_STAGE_UNITS[stage]||'',base=baseUrlFor(req),link=stage==='pending-hod'?`${base}/admin/${encodeURIComponent(record.department)}#${record.portalType==='field-experience'?'field':record.portalType==='assessor'?'assessor':'project'}`:`${base}/staff#claim-approvals`;
   const prior=priorPaymentSummary(record);
   const claimForms=originalClaimForms(record,stage==='pending-hod'?'admin':'staff').map(form=>({...form,url:base+form.url})),priorForms=(prior?.priorClaims||[]).flatMap(item=>(item.claimFormLinks||[]).map(form=>({...form,url:base+(stage==='pending-hod'?`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(item.id)}/claim-preview?${form.url.split('?')[1]||'claim=0'}`:form.url)})));
   const subject=`Approval waiting - ${record.reference}`,label=CLAIM_APPROVAL_STAGE_LABELS[stage]||'Approval waiting';
@@ -3933,6 +3960,7 @@ app.post('/api/project-work', upload.fields([
   { name: 'completedWork', maxCount: 25 }, { name: 'scoresFile', maxCount: 1 }
 ]), async (req, res) => {
   try {
+    if(await rejectEmptyClaimUploads(req,res))return;
     const department = validateDepartment(req);
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
     const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount']);
@@ -3997,6 +4025,7 @@ app.post('/api/field-experience', upload.fields([
   { name: 'completedWork', maxCount: 100 }
 ]), async (req, res) => {
   try {
+    if(await rejectEmptyClaimUploads(req,res))return;
     const department = validateDepartment(req);
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
     const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount','assessmentType']);
@@ -4022,8 +4051,10 @@ app.post('/api/field-experience', upload.fields([
     let scoreResult;
     try { scoreResult = parseFieldExperienceWorkbook(filesFor(req,'scoresFile')[0].path,assessmentType); }
     catch (e) { await removeUploaded(req); return res.status(400).json({ error: e.message }); }
-    const claimedCandidateCount=parseFlexiblePositiveCount(text(req,'groupCount'));
-    if(!claimedCandidateCount){await removeUploaded(req);return res.status(400).json({error:'Enter Number of Students / Candidates as a positive number.'});}
+    const claimedCandidateCount=Number(text(req,'groupCount'));
+    if(!Number.isSafeInteger(claimedCandidateCount)||claimedCandidateCount<1){await removeUploaded(req);return res.status(400).json({error:'Enter Number of Students / Candidates as a positive number.'});}
+    const submittedCandidates=scoreResult.rows.filter(row=>cleanHumanText(row?.registrationNo));
+    if(claimedCandidateCount!==submittedCandidates.length){await removeUploaded(req);return res.status(400).json({error:`The claim quantity (${claimedCandidateCount}) must equal the number of candidates in the attached score sheet (${submittedCandidates.length}). Correct the claim count or score sheet before submitting.`});}
     const indexesWithoutScore=scoreResult.rows.filter(row=>cleanHumanText(row?.registrationNo)&&!(row?.scoreValues||[]).some(value=>cleanHumanText(value)));
     if(indexesWithoutScore.length){await removeUploaded(req);return res.status(400).json({error:`Every registration number must have at least one score. Add the missing score for ${indexesWithoutScore.slice(0,8).map(row=>cleanHumanText(row.registrationNo)).join(', ')} and submit again.`});}
     const claimantName=buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'middleName'),text(req,'lastName')),claimantCertification=newClaimantCertification({name:claimantName,email:text(req,'email'),staffId:text(req,'staffId')});
@@ -4194,6 +4225,7 @@ app.post('/api/assessor/assignment/:token/works/:dissertationId', assignmentWork
   const lockKey=`${req.params.token}:${req.params.dissertationId}`;
   return withAssignmentWorkLock(lockKey, async()=>{
     try{
+    if(await rejectEmptyClaimUploads(req,res))return;
       const assignment=await assignmentByToken(req.params.token);
       const live=validateLiveAssignmentForSubmission(assignment);
       if(!live.ok){await removeUploaded(req);return res.status(live.status).json({error:live.message});}
@@ -4243,6 +4275,7 @@ app.post('/api/assessor/assignment/:token/works/:dissertationId', assignmentWork
 
 app.post('/api/assessor', upload.fields(assessorUploadFields), async (req, res) => {
   try {
+    if(await rejectEmptyClaimUploads(req,res))return;
     const assignmentToken=text(req,'assignmentToken');
     if(assignmentToken){await removeUploaded(req);return res.status(409).json({error:'This secure assignment now uses one report submission per assigned work. Reopen the secure assignment link from your email and submit each work from that workspace.'});}
     let assignment=null;
@@ -4282,10 +4315,13 @@ app.post('/api/assessor', upload.fields(assessorUploadFields), async (req, res) 
     if(!isEmail(assessorEmail)){await removeUploaded(req);return res.status(400).json({error:'Enter a valid claimant email address.'});}
     if(!declarationAccepted(req.body?.claimantDeclaration)){await removeUploaded(req);return res.status(400).json({error:'Tick the claimant declaration before submitting the claim.'});}
 
-    const workCount=assignment ? linkedDissertations.length : Number.parseInt(text(req,'workCount'),10);
+    const workCount=assignment ? linkedDissertations.length : Number(text(req,'workCount'));
     if (!Number.isInteger(workCount) || workCount < 1 || workCount > 25) {
       await removeUploaded(req); return res.status(400).json({ error:'Number of reports must be between 1 and 25.' });
     }
+
+    const extraAttachments=Object.keys(req.files||{}).filter(key=>/^(?:reportFile|claimForm|scoreSheet|dissertationFile)_\d+$/.test(key)&&Number(key.split('_').at(-1))>=workCount);
+    if(extraAttachments.length){await removeUploaded(req);return res.status(400).json({error:'The number of report, claim-form and score-sheet attachments must match the stated number of reports. Remove attachments for extra works or correct the report count.'});}
 
     const works=[];
     for(let i=0;i<workCount;i++){
@@ -4799,11 +4835,16 @@ function paymentApprovalDocuments(record){return Array.isArray(record?.paymentAp
 function paymentApprovalView(record){const approval=record?.paymentApproval||{},documents=paymentApprovalDocuments(record);return {status:departmentPaymentApprovalStatus(record),consolidatedClaimNumber:approval.consolidatedClaimNumber||'',approvedAt:approval.approvedAt||null,approvedBy:approval.approvedBy||'',approvedByEmail:approval.approvedByEmail||'',approvedQuantity:Number(approval.approvedQuantity||0),claimedQuantity:Number(approval.claimedQuantity||0),paymentType:approval.paymentType||'',adjustmentReason:approval.adjustmentReason||'',verificationCode:approval.verificationCode||'',currentDocumentId:approval.currentDocumentId||null,returnedAt:approval.returnedAt||null,returnedBy:approval.returnedBy||'',returnReason:approval.returnReason||'',invalidatedAt:approval.invalidatedAt||null,invalidationReason:approval.invalidationReason||'',approvedUnits:Array.isArray(approval.approvedUnits)?approval.approvedUnits:[],documents:documents.map(document=>({id:document.id,originalName:document.originalName,status:document.status||'superseded',consolidatedClaimNumber:document.consolidatedClaimNumber||approval.consolidatedClaimNumber||'',createdAt:document.createdAt,approvedAt:document.approvedAt,approvedBy:document.approvedBy,approvedQuantity:document.approvedQuantity,claimedQuantity:document.claimedQuantity,paymentType:document.paymentType,verificationCode:document.verificationCode,sha256:document.sha256,downloadUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/approved-claim/${encodeURIComponent(document.id)}`}))};}
 function directorateStageForDepartment(department){return ['education','business'].includes(department)?'pending-directorate-education-business':'pending-directorate-arts-stem';}
 function approvalOfficerKeyForStage(stage,department){return stage==='pending-hod'?`hod-${department}`:(CLAIM_APPROVAL_STAGE_UNITS[stage]||'');}
-function paymentWorkflowView(record){const workflow=record?.paymentWorkflow||{};const stage=workflow.stage||(paymentApprovalDocuments(record).length?directorateStageForDepartment(record.department):'department-review');return {stage,stageLabel:CLAIM_APPROVAL_STAGE_LABELS[stage]||stage,currentUnit:CLAIM_APPROVAL_STAGE_UNITS[stage]||'',forwardedAt:workflow.forwardedAt||null,forwardedBy:workflow.forwardedBy||'',actualAttachedQuantity:Number(workflow.actualAttachedQuantity??attachedClaimQuantity(record)),statedClaimQuantity:Number(workflow.statedClaimQuantity??paymentClaimValidation(record).claimedQuantity??0),approvedQuantity:Number(record?.paymentApproval?.approvedQuantity||workflow.actualAttachedQuantity||0),history:Array.isArray(workflow.history)?workflow.history:[]};}
+function paymentWorkflowView(record){const workflow=record?.paymentWorkflow||{};const stage=workflow.stage||(paymentApprovalDocuments(record).length?directorateStageForDepartment(record.department):'department-review');return {stage,directorUnits:selectedDirectorUnits(record),processingTarget:workflow.processingTarget||'payroll',assignedFinanceOfficerId:workflow.assignedFinanceOfficerId||'',assignedFinanceOfficerName:workflow.assignedFinanceOfficerName||'',stageLabel:CLAIM_APPROVAL_STAGE_LABELS[stage]||stage,currentUnit:CLAIM_APPROVAL_STAGE_UNITS[stage]||'',forwardedAt:workflow.forwardedAt||null,forwardedBy:workflow.forwardedBy||'',actualAttachedQuantity:Number(workflow.actualAttachedQuantity??attachedClaimQuantity(record)),statedClaimQuantity:Number(workflow.statedClaimQuantity??paymentClaimValidation(record).claimedQuantity??0),approvedQuantity:Number(record?.paymentApproval?.approvedQuantity||workflow.actualAttachedQuantity||0),history:Array.isArray(workflow.history)?workflow.history:[]};}
 function ensurePaymentWorkflow(record){
   const current=paymentWorkflowView(record);record.paymentWorkflow={...(record.paymentWorkflow||{}),stage:current.stage,actualAttachedQuantity:current.actualAttachedQuantity,statedClaimQuantity:current.statedClaimQuantity,history:Array.isArray(record?.paymentWorkflow?.history)?record.paymentWorkflow.history:[]};return record.paymentWorkflow;
 }
-function claimApprovalNextStage(stage){return ({'pending-directorate-education-business':'pending-provost','pending-directorate-arts-stem':'pending-provost','pending-provost':'pending-college-finance','pending-college-finance':'pending-payroll','pending-payroll':'pending-audit','pending-audit':'completed'})[stage]||'';}
+const CLAIM_DIRECTOR_UNITS=['directorate-education-business','directorate-arts-stem'];
+function selectedDirectorUnits(record){const selected=record?.paymentWorkflow?.directorUnits;return Array.isArray(selected)&&selected.length?selected:[CLAIM_APPROVAL_STAGE_UNITS[directorateStageForDepartment(record.department)]];}
+function claimApprovalNextStage(stage,record){
+  if(stage.startsWith('pending-directorate-')){const units=selectedDirectorUnits(record),index=units.indexOf(CLAIM_APPROVAL_STAGE_UNITS[stage]);return index>=0&&index<units.length-1?`pending-${units[index+1]}`:'pending-provost';}
+  if(stage==='pending-college-finance'&&record?.paymentWorkflow?.processingTarget==='finance-officer')return 'pending-finance-officer';
+  return ({'pending-directorate-education-business':'pending-provost','pending-directorate-arts-stem':'pending-provost','pending-provost':'pending-college-finance','pending-college-finance':'pending-payroll','pending-payroll':'pending-audit','pending-finance-officer':'pending-audit','pending-audit':'completed'})[stage]||'';}
 function claimWorkflowActor(req,fallback='Approving officer'){const identity=req.staffIdentity||req.adminIdentity||{};const name=identity.name||identity.username||fallback;return identity.developerPreview?`Developer Preview as ${identity.developerPreviewLabel||name}`:name;}
 function claimStream(record){
   if(['project-work','field-experience'].includes(record?.portalType||'project-work')){const key=studentStream(record);return {key,label:key==='non-residential'?'Non-Residential':'Distance'};}
@@ -4938,6 +4979,7 @@ function hodForwardReadiness(record,records=[]){
   if(!paymentConsolidationApproved(record))reasons.push('Submission is not approved for consolidation.');
   if(!['verified','waived'].includes(claimantCertificationView(record).status))reasons.push('Claimant electronic certification is not verified or formally waived.');
   if(!payrollClaimRow(record).claimFormPresent)reasons.push('A complete claim form is required.');
+  reasons.push(...claimAttachmentIssues(record));
   const quantityReconciliation=attachmentQuantityReconciliation(record);
   if(claimedQuantity<1&&!quantityReconciliation)reasons.push('The stated claim quantity is missing or invalid.');
   if(record.priorPaymentReconciliation&&!priorPaymentAllocation(record))reasons.push('The prior-payment evidence allocation no longer matches the current attachments. Reconcile it again before approval.');
@@ -5005,7 +5047,7 @@ function payrollClaimRow(record){
   const workType=isAssessor?(reportType==='vetting'?'Dissertation Vetting':'Dissertation Assessment'):(isField?'Field Experience and Teaching Practice':'Undergraduate Project Work');
   const activityKey=isAssessor?`dissertation-${reportType}`:(isField?(record.assessmentType||'field-experience'): 'project-work');
   const category=isAssessor?(reportType==='vetting'?'Vetting Report':'Assessment Report'):(isField?fieldAssessmentLabel(record):(projectStream(record)==='non-residential'?'Non-Residential (Regular)':'Distance'));
-  const claimFormPresent=isAssessor?claims.length>=validation.claimedQuantity:Boolean(claims[0]),approval=paymentApprovalView(record),currentDocument=approval.documents.find(document=>document.id===approval.currentDocumentId)||approval.documents.at(-1)||null;
+  const claimFormPresent=claims.length>0&&claims.every(storedClaimFilePresent)&&(!isAssessor||claims.length===validation.claimedQuantity),approval=paymentApprovalView(record),currentDocument=approval.documents.find(document=>document.id===approval.currentDocumentId)||approval.documents.at(-1)||null;
   return {id:record.id,department:record.department,departmentName:record.departmentName||DEPARTMENTS[record.department]?.name||record.department,portalType:isAssessor?'assessor':(isField?'field-experience':'project-work'),activityKey,activityGroup:isAssessor?'dissertation':(isField?'field-experience':'project-work'),workType,reference:record.reference,approvedAt:departmentPaymentApprovedAt(record),approvedBy:departmentPaymentApprovedBy(record),supervisorName:claimName(record),claimantName:claimNameView(record),originalClaimForms:originalClaimForms(record,'admin'),priorPayment:priorPaymentSummary(record),payableQuantity:paymentUnitData(record).maxPayable,email:record.email||'',phone:record.phone||'',studyCentres:isAssessor?'':studyCentreDisplay(record),contextLabel:isAssessor?([record.studentName,record.programme].filter(Boolean).join(' · ')) : studyCentreDisplay(record),category,studentStream:category,claimedGroupsRaw:record.groupCount||record.workCount||'',claimedGroupCount:validation.claimedQuantity,scoreSheetGroupCount:validation.scoreSheetQuantity,completedProjectWorkCount:validation.supportingWorkCount,claimedQuantity:validation.claimedQuantity,actualAttachedQuantity:Number(validation.actualAttachedQuantity??attachedClaimQuantity(record)),quantityBasisLabel:claimQuantityLabel(record),optionalEvidenceCount:fieldCandidateClaim(record)?paymentRecordFiles(record,'completedWork').length:null,departmentApprovedQuantity:approval.approvedQuantity,paymentType:approval.paymentType,adjustmentReason:approval.adjustmentReason,scoreSheetQuantity:validation.scoreSheetQuantity,supportingWorkCount:validation.supportingWorkCount,groupValidation:validation,validation,approvedScoreRows:isAssessor?validation.scoreSheetQuantity:(isField?approvedFieldExperienceScoreRows(record).length:approvedProjectScoreRows(record).length),claimFormName:claims.map(item=>item.originalName||'Claim form').join(', '),claimFormCount:claims.length,claimFormPresent,claimantCertificationStatus:certification.status,claimantCertificationLabel:certification.status==='verified'?'Electronically Certified':certification.status==='waived'?'Certification Waived':'Not Verified',certificationWaiverReasons:(certification.waiverReasons||[]).join(' '),certificationWaivedBy:certification.waivedBy||'',certificationWaivedByRole:certification.waivedByRole||'',certificationWaivedAt:certification.waivedAt||null,certificationWaiverEvidenceSource:certification.waiverEvidenceSource||'',hasCertificationWaiverEvidence:Boolean(certification.waiverEvidence),claimPreviewUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/claim-preview`,departmentPaymentStatus:approval.status,departmentPaymentStatusLabel:{approved:'Approved for Payment',returned:'Returned by Payroll',invalidated:'Approval Invalidated',pending:'Pending HoD Approval'}[approval.status]||approval.status,approvedClaimUrl:currentDocument?.downloadUrl||'',approvedClaimName:currentDocument?.originalName||'',verificationCode:approval.verificationCode||currentDocument?.verificationCode||'',auditUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/claim-audit`,payrollStatus:String(record?.payroll?.status||'pending'),payrollStatusLabel:payrollStatusLabel(record),payrollNote:record?.payroll?.note||'',payrollUpdatedAt:record?.payroll?.updatedAt||null,payrollUpdatedBy:record?.payroll?.updatedBy||''};
 }
 function payrollRegisterAoA(records,scope='payroll'){
@@ -5494,7 +5536,7 @@ app.post('/api/developer/preview-session', developerAuth, async(req,res)=>{
     const destination=String(req.body?.destination||'admin').trim();
     const mode=String(req.body?.mode||'profile').trim();
     if(!departmentFromSlug(department)) return res.status(400).json({error:'Choose a valid department.'});
-    if(!['admin','payroll','auditor'].includes(destination)) return res.status(400).json({error:'Choose a valid destination portal.'});
+    if(!['admin','hod','payroll','auditor'].includes(destination)) return res.status(400).json({error:'Choose a valid destination portal.'});
     let identity;
     let previewLabel='';
     if(mode==='account') {
@@ -5506,7 +5548,7 @@ app.post('/api/developer/preview-session', developerAuth, async(req,res)=>{
       previewLabel=`${publicAccount.name||publicAccount.username} (${publicAccount.role})`;
       identity={...publicAccount,master:false};
     } else {
-      const profileId=String(req.body?.profileId||'department-administrator').trim();
+      const profileId=String(req.body?.profileId||(destination==='hod'?'hod-viewer':'department-administrator')).trim();
       const profile=DEVELOPER_PREVIEW_PROFILES[profileId];
       if(!profile) return res.status(400).json({error:'Choose a valid preview role.'});
       const previewDepartments=['operations-officer','payroll-officer','auditor'].includes(profileId)?Object.keys(DEPARTMENTS):[department];
@@ -5518,6 +5560,8 @@ app.post('/api/developer/preview-session', developerAuth, async(req,res)=>{
         role:profile.role,
         sections:[...profile.sections],
         departments:previewDepartments,
+        units:profileId==='hod-viewer'?['hod']:[],
+        hodDepartments:profileId==='hod-viewer'?[department]:[],
         master:profileId==='department-administrator'
       };
     }
@@ -5804,7 +5848,8 @@ app.post('/api/developer/admin-users', developerAuth, async(req,res)=>{
   const name=(buildDisplayName('',firstName,middleName,lastName)||cleanHumanText(req.body?.name)).slice(0,160),email=cleanHumanText(req.body?.email).toLowerCase().slice(0,254);
   const requestedUsername=cleanHumanText(req.body?.username).toLowerCase().slice(0,100);
   const username=requestedUsername || email;
-  const role=String(req.body?.role||'viewer').trim();const departments=normalizeAdminDepartments(req.body?.departments);const hodDepartments=role==='administrator'?normalizeHodDepartments(req.body?.hodDepartments,departments):[];const sections=normalizeAdminSections(req.body?.sections);const units=normalizeStaffUnits(req.body?.units);
+  const requestedRole=String(req.body?.role||'viewer').trim(),role=requestedRole==='hod'?'administrator':requestedRole;const departments=normalizeAdminDepartments(req.body?.departments);const hodDepartments=role==='administrator'?normalizeHodDepartments(req.body?.hodDepartments?.length?req.body.hodDepartments:requestedRole==='hod'?departments:[],departments):[];const permissions=requestedRole==='hod'?applyHodAssignment({sections:req.body?.sections,units:req.body?.units}):{sections:normalizeAdminSections(req.body?.sections),units:normalizeStaffUnits(req.body?.units)},sections=permissions.sections,units=permissions.units;
+  if(requestedRole==='hod'&&!hodDepartments.length)return res.status(400).json({error:'Select at least one department for the HoD role.'});
   if((firstName||middleName||lastName)&&(!firstName||!lastName))return res.status(400).json({error:'The staff member’s first name and surname are required.'});
   if(!name||!isEmail(email)||!username)return res.status(400).json({error:'Administrator first name, surname and a valid email address are required.'});
   if(!/^[a-z0-9._@-]+$/i.test(username))return res.status(400).json({error:'Username may contain letters, numbers, dots, underscores, @ and hyphens only.'});
@@ -5851,7 +5896,10 @@ app.post('/api/developer/admin-users/:id/resend-invitation', developerAuth, asyn
 });
 app.patch('/api/developer/admin-users/:id', developerAuth, async(req,res)=>{
   const role=req.body?.role?String(req.body.role).trim():null;const departments=req.body?.departments!==undefined?normalizeAdminDepartments(req.body.departments):null;const sections=req.body?.sections!==undefined?normalizeAdminSections(req.body.sections):null;const units=req.body?.units!==undefined?normalizeStaffUnits(req.body.units):null;const requestedHodDepartments=req.body?.hodDepartments!==undefined?normalizeAdminDepartments(req.body.hodDepartments):null;
-  let item=null;await mutateAdminUsers(list=>{const a=list.find(x=>x.id===req.params.id);if(!a)return null;if(role&&ADMIN_ROLES.has(role))a.role=role;if(departments!==null)a.departments=departments;if(sections!==null)a.sections=sections;if(units!==null)a.units=units;if(requestedHodDepartments!==null)a.hodDepartments=requestedHodDepartments;if(req.body?.active!==undefined)a.active=Boolean(req.body.active);a.hodDepartments=a.role==='administrator'?normalizeHodDepartments(a.hodDepartments,a.departments):[];if(!(a.departments||[]).length&&!normalizeStaffUnits(a.units).length)return null;item=publicAdminUser(a);return item;});
+  if(role&&!ADMIN_ROLES.has(role)&&role!=='hod')return res.status(400).json({error:'Select a valid role.'});
+  const currentAccount=(await readAdminUsers()).find(item=>item.id===req.params.id);if(!currentAccount)return res.status(404).json({error:'Administrator account not found.'});if(!(departments??currentAccount.departments??[]).length&&!(units??normalizeStaffUnits(currentAccount.units)).length)return res.status(400).json({error:'Retain at least one functional unit or department for this account.'});
+  if(role==='hod'){const existing=(await readAdminUsers()).find(item=>item.id===req.params.id),allowed=departments??existing?.departments??[];if(!normalizeHodDepartments(requestedHodDepartments??allowed,allowed).length)return res.status(400).json({error:'Select at least one department for the HoD role.'});}
+  let item=null;await mutateAdminUsers(list=>{const a=list.find(x=>x.id===req.params.id);if(!a)return null;if(role&&ADMIN_ROLES.has(role))a.role=role;if(departments!==null)a.departments=departments;if(sections!==null)a.sections=sections;if(units!==null)a.units=units;if(requestedHodDepartments!==null)a.hodDepartments=requestedHodDepartments;if(req.body?.active!==undefined)a.active=Boolean(req.body.active);if(role==='hod'){applyHodAssignment(a);a.hodDepartments=normalizeHodDepartments(requestedHodDepartments??a.departments,a.departments);}a.hodDepartments=a.role==='administrator'?normalizeHodDepartments(a.hodDepartments,a.departments):[];if(!(a.departments||[]).length&&!normalizeStaffUnits(a.units).length)return null;item=publicAdminUser(a);return item;});
   if(!item)return res.status(404).json({error:'Administrator account not found.'});res.json({ok:true,user:item});
 });
 app.delete('/api/developer/admin-users/:id', developerAuth, async(req,res)=>{let removed=false;await mutateAdminUsers(list=>{const i=list.findIndex(x=>x.id===req.params.id);if(i>=0){list.splice(i,1);removed=true;}return removed;});if(!removed)return res.status(404).json({error:'Administrator account not found.'});res.json({ok:true});});
@@ -6102,6 +6150,7 @@ function paymentClaimsForStaff(records,identity){
     if(!['project-work','field-experience','assessor'].includes(record.portalType||'project-work'))return false;
     if(departments.size&&!departments.has(record.department))return false;
     for(const unit of units){
+      if(unit==='finance-officer'&&record.paymentWorkflow?.assignedFinanceOfficerId!==identity.id)continue;
       if(unit==='hod'&&!(hodDepartments.has(record.department)||departments.has(record.department)))continue;
       if(claimUnitHasRegisterAccess(record,unit))return true;
     }
@@ -6109,7 +6158,7 @@ function paymentClaimsForStaff(records,identity){
   });
 }
 app.get('/api/staff/payment-claims',staffAuth,async(req,res)=>{
-  const identityUnits=new Set(normalizeStaffUnits(req.staffIdentity?.units)),all=await readDb(),records=paymentClaimsForStaff(all,req.staffIdentity),rows=records.map(record=>{const row=claimWorkflowRow(record,all),currentUnit=CLAIM_APPROVAL_STAGE_UNITS[row.stage]||'';return {...row,canAct:(ROLE_RANK[req.staffIdentity?.role]||0)>=ROLE_RANK.officer&&currentUnit!=='hod'&&identityUnits.has(currentUnit)&&!row.paymentHold,canReturn:(ROLE_RANK[req.staffIdentity?.role]||0)>=ROLE_RANK.officer&&currentUnit!=='hod'&&identityUnits.has(currentUnit)&&!claimWasPaid(record)};}).sort((a,b)=>String(a.departmentName).localeCompare(String(b.departmentName))||String(a.supervisorName).localeCompare(String(b.supervisorName))||String(a.reference).localeCompare(String(b.reference)));
+  const identityUnits=new Set(normalizeStaffUnits(req.staffIdentity?.units)),all=await readDb(),records=paymentClaimsForStaff(all,req.staffIdentity),rows=records.map(record=>{const row=claimWorkflowRow(record,all),currentUnit=CLAIM_APPROVAL_STAGE_UNITS[row.stage]||'';return {...row,canAct:(ROLE_RANK[req.staffIdentity?.role]||0)>=ROLE_RANK.officer&&currentUnit!=='hod'&&identityUnits.has(currentUnit)&&(currentUnit!=='finance-officer'||record.paymentWorkflow?.assignedFinanceOfficerId===req.staffIdentity.id)&&!row.paymentHold,canReturn:(ROLE_RANK[req.staffIdentity?.role]||0)>=ROLE_RANK.officer&&currentUnit!=='hod'&&identityUnits.has(currentUnit)&&(currentUnit!=='finance-officer'||record.paymentWorkflow?.assignedFinanceOfficerId===req.staffIdentity.id)&&!claimWasPaid(record)};}).sort((a,b)=>String(a.departmentName).localeCompare(String(b.departmentName))||String(a.supervisorName).localeCompare(String(b.supervisorName))||String(a.reference).localeCompare(String(b.reference)));
   res.json({ok:true,claims:rows,consolidated:consolidatedClaimRegister(records,all),canDecide:(ROLE_RANK[req.staffIdentity?.role]||0)>=ROLE_RANK.officer});
 });
 app.get('/api/staff/payment-claims/register.xlsx',staffAuth,async(req,res)=>{
@@ -6134,21 +6183,35 @@ app.get('/api/staff/payment-claims/:id/approved-claim',staffAuth,async(req,res)=
 app.get('/api/staff/payment-claims/:id/certification-waiver-evidence',staffAuth,async(req,res)=>{
   const record=paymentClaimsForStaff(await readDb(),req.staffIdentity).find(item=>item.id===req.params.id);if(!record)return res.status(404).send('Claim not found in your approval register.');const evidence=record.claimantCertification?.waiverEvidence;if(!evidence?.storedName)return res.status(404).send('No separate waiver evidence was uploaded.');const fp=path.join(FILES_DIR,path.basename(evidence.storedName));if(!fs.existsSync(fp))return res.status(404).send('Waiver evidence file is unavailable.');res.download(fp,safeBaseName(evidence.originalName||'waiver-evidence'));
 });
-app.post('/api/staff/payment-claims/:id/decision',staffAuth,claimMutationLock,asyncRoute(async(req,res)=>{
+function eligibleClaimFinanceOfficer(account,record){return account?.active!==false&&(ROLE_RANK[account?.role]||0)>=ROLE_RANK.officer&&normalizeStaffUnits(account?.units).includes('finance-officer')&&(!(account.departments||[]).length||(account.departments||[]).includes(record.department));}
+app.get('/api/staff/payment-claims/:id/processing-options',staffAuth,asyncRoute(async(req,res)=>{
+  const record=paymentClaimsForStaff(await readDb(),req.staffIdentity).find(item=>item.id===req.params.id);
+  if(!record||paymentWorkflowView(record).stage!=='pending-college-finance'||!normalizeStaffUnits(req.staffIdentity.units).includes('college-finance')||(ROLE_RANK[req.staffIdentity.role]||0)<ROLE_RANK.officer)return res.status(403).json({error:'Only the College Finance Officer can assign claim processing at this stage.'});
+  res.json({officers:(await readAdminUsers()).filter(account=>eligibleClaimFinanceOfficer(account,record)).map(account=>({id:account.id,name:account.name||account.username,email:account.email||''}))});
+}));
+app.post('/api/staff/payment-claims/:id/decision' ,staffAuth,claimMutationLock,asyncRoute(async(req,res)=>{
   if((ROLE_RANK[req.staffIdentity?.role]||0)<ROLE_RANK.officer)return res.status(403).json({error:'Officer or administrator access is required to record an approval decision.'});
   const decision=String(req.body?.decision||'').trim().toLowerCase(),note=cleanHumanText(req.body?.note).slice(0,1500),reasonCodes=[...new Set((Array.isArray(req.body?.reasonCodes)?req.body.reasonCodes:[]).map(value=>String(value||'').trim()).filter(Boolean))].slice(0,20),reasonDetails=cleanHumanText(req.body?.reasonDetails).slice(0,1000);if(!['approve','return'].includes(decision))return res.status(400).json({error:'Choose Approve or Return to Department.'});if(decision==='return'&&!note)return res.status(400).json({error:'Enter the reason for returning the claim.'});
   const all=await readDb(),record=paymentClaimsForStaff(all,req.staffIdentity).find(item=>item.id===req.params.id);if(!record)return res.status(404).json({error:'This claim is not waiting in your current functional-unit register.'});
   const workflow=ensurePaymentWorkflow(record),currentStage=workflow.stage,currentUnit=CLAIM_APPROVAL_STAGE_UNITS[currentStage],identityUnits=new Set(normalizeStaffUnits(req.staffIdentity?.units));if(!currentUnit||!identityUnits.has(currentUnit)||currentUnit==='hod')return res.status(403).json({error:'This approval must be completed in the designated portal.'});
   if(claimWasPaid(record))return res.status(409).json({error:'This claim has already been paid. Its payment history cannot be reset or returned.'});
+  if(decision==='approve'&&claimAttachmentIssues(record).length)return res.status(400).json({error:claimAttachmentIssues(record).join(' ')});
   if(decision==='approve'){await refreshClaimAttachmentDigests(all,record.department);const duplicateClaim=duplicateClaimInfo(record,all);if(duplicateClaim.duplicate)return res.status(409).json({error:duplicatePaymentMessage(duplicateClaim),duplicateClaim});}
+  if(currentUnit==='finance-officer'&&(workflow.assignedFinanceOfficerId!==req.staffIdentity.id||!(await readAdminUsers()).some(account=>account.id===req.staffIdentity.id&&eligibleClaimFinanceOfficer(account,record))))return res.status(403).json({error:'This claim is assigned to another Finance Officer.'});
+  if(decision==='approve'&&currentStage==='pending-college-finance'){
+    const target=String(req.body?.processingTarget||'payroll');if(!['payroll','finance-officer'].includes(target))return res.status(400).json({error:'Choose Payroll or an assigned Finance Officer.'});
+    const officer=target==='finance-officer'?(await readAdminUsers()).find(account=>account.id===req.body?.assignedFinanceOfficerId&&eligibleClaimFinanceOfficer(account,record)):null;
+    if(target==='finance-officer'&&!officer)return res.status(400).json({error:'Select an active Finance Officer with access to this department.'});
+    workflow.processingTarget=target;workflow.assignedFinanceOfficerId=officer?.id||'';workflow.assignedFinanceOfficerName=officer?.name||'';
+  }
   const now=new Date().toISOString(),by=claimWorkflowActor(req),actionNote=note||(decision==='approve'?`${STAFF_UNITS[currentUnit]?.label||currentUnit} approved the claim.`:'');let nextStage='';
   if(decision==='return'){
     nextStage='returned-to-department';workflow.stage=nextStage;workflow.returnedAt=now;workflow.returnedBy=by;workflow.returnReason=note;workflow.history.push({stage:nextStage,action:'returned-to-department',note,reasonCodes,reasonDetails,at:now,by,fromStage:currentStage});
     record.paymentApproval={...(record.paymentApproval||{}),status:'returned',returnedAt:now,returnedBy:by,returnReason:note};
     record.payroll={...(record.payroll||{}),status:'returned-to-department',note,updatedAt:now,updatedBy:by};
   }else{
-    nextStage=claimApprovalNextStage(currentStage);if(!nextStage)return res.status(409).json({error:'No further approval stage is configured for this claim.'});workflow.stage=nextStage;workflow.history.push({stage:nextStage,action:`approved-by-${currentUnit}`,note:actionNote,reasonCodes,reasonDetails,at:now,by,fromStage:currentStage});
-    if(currentStage==='pending-payroll'){record.payroll={...(record.payroll||{}),status:'approved-for-payment',note:actionNote,updatedAt:now,updatedBy:by};record.payroll.history=Array.isArray(record.payroll.history)?record.payroll.history:[];record.payroll.history.push({status:'approved-for-payment',note:actionNote,updatedAt:now,updatedBy:by});}
+    nextStage=claimApprovalNextStage(currentStage,record);if(!nextStage)return res.status(409).json({error:'No further approval stage is configured for this claim.'});workflow.stage=nextStage;workflow.history.push({stage:nextStage,action:`approved-by-${currentUnit}`,note:actionNote,reasonCodes,reasonDetails,at:now,by,fromStage:currentStage,processingTarget:workflow.processingTarget||'',assignedFinanceOfficerId:workflow.assignedFinanceOfficerId||'',assignedFinanceOfficerName:workflow.assignedFinanceOfficerName||''});
+    if(['pending-payroll','pending-finance-officer'].includes(currentStage)){record.payroll={...(record.payroll||{}),status:'approved-for-payment',note:actionNote,updatedAt:now,updatedBy:by};record.payroll.history=Array.isArray(record.payroll.history)?record.payroll.history:[];record.payroll.history.push({status:'approved-for-payment',note:actionNote,updatedAt:now,updatedBy:by});}
     if(currentStage==='pending-audit')record.audit={status:'verified',verifiedAt:now,verifiedBy:by,note:actionNote};
   }
   await writeDb(all);let deliveries=[];if(decision==='approve'&&nextStage!=='completed')deliveries=await dispatchClaimApprovalNotification(record,nextStage,req).catch(error=>[{channel:'notification',status:'failed',error:String(error.message||error),at:new Date().toISOString()}]);if(deliveries.length)await mutateRecordById(record.id,target=>{const wf=ensurePaymentWorkflow(target);wf.notifications=Array.isArray(wf.notifications)?wf.notifications:[];wf.notifications.push(...deliveries);return true;});
@@ -6692,6 +6755,7 @@ app.post('/api/admin/:department/claims/:id/payment-approval', departmentAuth,cl
   const all=await readDb(),record=all.find(item=>item.id===req.params.id&&item.department===req.adminDepartment&&['project-work','field-experience','assessor'].includes(item.portalType||'project-work'));
   if(!record)return res.status(404).json({error:'Claim submission not found in this department.'});
   if(!requireRecordAccess(req,res,record,'administrator'))return;
+  const attachmentIssues=claimAttachmentIssues(record);if(attachmentIssues.length)return res.status(400).json({error:attachmentIssues.join(' ')});
   if(claimWasPaid(record))return res.status(409).json({error:'This claim has already been paid and cannot receive another payment approval.'});
   await hydrateClaimName(record);
   const hod=await hodAccountForRequest(req);if(hod.error)return res.status(403).json({error:hod.error});
@@ -6714,6 +6778,9 @@ app.post('/api/admin/:department/claims/:id/payment-approval', departmentAuth,cl
   if(attachmentQuantityReconciliation(record)&&actualQuantity!==claimedQuantity)reason=[reason,`Department approved the ${fieldCandidateClaim(record)?'candidate':'attached-work'} count ${actualQuantity}; original stated quantity ${claimedQuantity} retained. Reconciled by ${record.claimQuantityReconciliation.by} on ${record.claimQuantityReconciliation.at}.`].filter(Boolean).join(' ');
   if(allocation)reason=[allocation.comment,reason].filter(Boolean).join(' ');
   if(!fullPayment&&!reason)return res.status(400).json({error:'Enter the reconciliation reason for approving fewer items than the attached-work quantity.'});
+  const directorUnits=req.body?.directorUnits===undefined?selectedDirectorUnits(record):[...new Set(Array.isArray(req.body.directorUnits)?req.body.directorUnits.map(String):[])];
+  if(!directorUnits.length||directorUnits.some(unit=>!CLAIM_DIRECTOR_UNITS.includes(unit)))return res.status(400).json({error:'Select at least one valid Director portal for approval.'});
+  workflow.directorUnits=directorUnits;
   const fingerprint=await claimSourceFingerprint(record),now=new Date().toISOString(),documentId=crypto.randomUUID(),code=`UCC-${crypto.randomBytes(2).toString('hex').toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
   const actor=hod.account.name||hod.account.username,consolidatedClaimNumber=consolidatedClaimRegister([record])[0]?.consolidatedClaimNumber||'',filename=`${safeBaseName(record.reference||record.id)}-approved-${Date.now()}.pdf`,storedName=`${Date.now()}-${crypto.randomBytes(6).toString('hex')}-${filename}`,outputPath=path.join(FILES_DIR,storedName);
   const certificationLine=certification.status==='waived'?`Electronic claimant certification waived by ${certification.waivedBy}, ${certification.waivedByRole||'authorised HoD or assigned departmental administrator'} (${certification.waivedByEmail||'individual staff account'}), on ${certification.waivedAt}. Reasons: ${(certification.waiverReasons||[]).join(' ')}${certification.waiverDetails?` Details: ${certification.waiverDetails}`:''} Evidence: ${certification.waiverEvidenceSource||'recorded waiver evidence'}.`:`Electronically certified by ${certification.claimantName}, ${certification.staffId||certification.claimantEmail}, on ${certification.verifiedAt}. Declaration: ${certification.declarationText}`;
@@ -6723,7 +6790,7 @@ app.post('/api/admin/:department/claims/:id/payment-approval', departmentAuth,cl
   const document={id:documentId,storedName,originalName:filename,mimeType:'application/pdf',size:pdf.length,sha256:documentSha,status:'current',consolidatedClaimNumber,createdAt:now,approvedAt:now,approvedBy:actor,approvedQuantity:approvedUnits.length,claimedQuantity:payment.claimedQuantity,paymentType:allocation?'balance':fullPayment?'full':'part',verificationCode:code,sourceFingerprint:fingerprint};
   record.paymentApproval={...(record.paymentApproval||{}),status:'approved',consolidatedClaimNumber,approvedAt:now,approvedBy:actor,approvedByEmail:hod.account.email||'',approvedByAccountId:hod.account.id,approvedQuantity:approvedUnits.length,claimedQuantity:payment.claimedQuantity,paymentType,adjustmentReason:reason,approvedUnits:approvedUnits.map(unit=>({key:unit.key,label:unit.label})),verificationCode:code,currentDocumentId:documentId,sourceFingerprint:fingerprint,documents:[...prior,document],returnedAt:null,returnedBy:'',returnReason:'',invalidatedAt:null,invalidationReason:''};
   record.paymentApproval.history=Array.isArray(record.paymentApproval.history)?record.paymentApproval.history:[];record.paymentApproval.history.push({action:'approved-for-payment',status:'approved',note:reason,reasonCodes,reasonDetails,at:now,by:actor,documentId,approvedQuantity:approvedUnits.length,claimedQuantity:payment.claimedQuantity});
-  const nextStage=directorateStageForDepartment(record.department);workflow.stage=nextStage;workflow.actualAttachedQuantity=actualQuantity;workflow.statedClaimQuantity=Number(payment.claimedQuantity||0);workflow.history.push({stage:nextStage,action:'hod-approved-and-forwarded',note:reason||'HoD approved the claim using the actual attached-work quantity.',at:now,by:actor,approvedQuantity:approvedUnits.length});
+  const nextStage=`pending-${directorUnits[0]}`;workflow.stage=nextStage;workflow.actualAttachedQuantity=actualQuantity;workflow.statedClaimQuantity=Number(payment.claimedQuantity||0);workflow.history.push({stage:nextStage,action:'hod-approved-and-forwarded',note:reason||'HoD approved the claim using the actual attached-work quantity.',at:now,by:actor,approvedQuantity:approvedUnits.length,directorUnits:[...directorUnits]});
   record.payroll={...(record.payroll||{}),status:'pending',note:`HoD approved the claim; ${CLAIM_APPROVAL_STAGE_LABELS[nextStage]}.`,updatedAt:now,updatedBy:actor};record.payroll.history=Array.isArray(record.payroll.history)?record.payroll.history:[];record.payroll.history.push({status:'pending',note:record.payroll.note,updatedAt:now,updatedBy:actor});
   await writeDb(all);const deliveries=await dispatchClaimApprovalNotification(record,nextStage,req).catch(error=>[{channel:'notification',status:'failed',error:String(error.message||error),at:new Date().toISOString()}]);await mutateRecordById(record.id,target=>{const wf=ensurePaymentWorkflow(target);wf.notifications=Array.isArray(wf.notifications)?wf.notifications:[];wf.notifications.push(...deliveries);return true;});res.json({ok:true,paymentApproval:paymentApprovalView(record),paymentWorkflow:paymentWorkflowView(record),approvedClaimUrl:`/api/admin/${encodeURIComponent(req.adminDepartment)}/submissions/${encodeURIComponent(record.id)}/approved-claim/${encodeURIComponent(documentId)}`});
 }));
@@ -7430,6 +7497,32 @@ app.get('/api/admin/:department/export/field-experience-master.xlsx', department
 
 // Payroll receives only department-approved Project Work, Field Experience and dissertation assessment/vetting claims.
 // Auditor access begins only after Payroll marks a claim Approved for Payment.
+function manualPaymentPackEligible(record,all){return paymentConsolidationApproved(record)&&['verified','waived'].includes(claimantCertificationView(record).status)&&!claimWasPaid(record)&&!duplicateClaimInfo(record,all).duplicate&&claimAttachmentIssues(record).length===0&&paymentUnitData(record).maxPayable>0;}
+async function sendManualPaymentPack(req,res,visible,all){
+  const ids=Array.isArray(req.body?.ids)?[...new Set(req.body.ids.map(String))]:[],portal=String(req.body?.portal||''),stream=String(req.body?.stream||'');
+  let records=ids.length?ids.map(id=>visible.find(record=>record.id===id)).filter(Boolean):visible.filter(record=>(!portal||(record.portalType||'project-work')===portal)&&(!stream||claimStream(record).key===stream)&&manualPaymentPackEligible(record,all));
+  if(ids.length&&records.length!==ids.length)return res.status(404).json({error:'One or more selected claims are outside your authorised register.'});
+  if(!records.length)return res.status(400).json({error:'No complete, approved, unpaid claims are available for a manual payment pack.'});
+  const invalid=records.filter(record=>!manualPaymentPackEligible(record,all));if(invalid.length)return res.status(400).json({error:'Resolve certification, duplicate or missing-document issues before downloading these claims.',references:invalid.map(record=>record.reference)});
+  records=records.slice().sort((a,b)=>claimName(a).localeCompare(claimName(b))||String(a.reference).localeCompare(String(b.reference)));
+  const groups=new Map();for(const record of records){const key=`${record.department}:${record.staffId||String(record.email||claimName(record)).toLowerCase()}`;if(!groups.has(key))groups.set(key,{name:claimName(record),email:record.email||'',department:record.departmentName||record.department,stated:0,verified:0,approved:0,payable:0,references:[]});const row=groups.get(key),payment=paymentUnitData(record);row.stated+=Number(payment.claimedQuantity||0);row.verified+=Number(payment.actualQuantity??payment.maxPayable);row.approved+=Number(record.paymentApproval?.approvedQuantity||0);row.payable+=departmentPaymentApprovalStatus(record)==='approved'?Number(record.paymentApproval.approvedQuantity||0):Number(payment.maxPayable||0);row.references.push(record.reference);}
+  const rows=[...groups.values()],total=rows.reduce((sum,row)=>sum+row.payable,0),wb=XLSX.utils.book_new(),header=['S/N','CLAIMANT','EMAIL','DEPARTMENT','CLAIMED QUANTITY','VERIFIED QUANTITY','HOD APPROVED QUANTITY','PROPOSED / APPROVED PAYABLE QUANTITY','REFERENCES'];
+  addSheet(wb,'Payment Register',[header,...rows.map((row,i)=>[i+1,row.name,row.email,row.department,row.stated,row.verified,row.approved,row.payable,row.references.join(' | ')]),['','TOTAL','','',rows.reduce((sum,row)=>sum+row.stated,0),rows.reduce((sum,row)=>sum+row.verified,0),rows.reduce((sum,row)=>sum+row.approved,0),total,'']],[8,35,30,38,20,20,24,30,70]);
+  addSheet(wb,'Claim Details',[['REFERENCE','CLAIMANT','ACTIVITY','CLAIMED','PAYABLE','DIRECTOR PORTALS','CURRENT STAGE','HOD APPROVAL','ORIGINAL CLAIM FORMS'],...records.map(record=>[record.reference,claimName(record),payrollClaimRow(record).workType,paymentUnitData(record).claimedQuantity,record.paymentApproval?.approvedQuantity||paymentUnitData(record).maxPayable,selectedDirectorUnits(record).map(unit=>STAFF_UNITS[unit].label).join(' then '),paymentWorkflowView(record).stageLabel,departmentPaymentApprovalStatus(record)==='approved'?'Approved':'Awaiting HoD approval',paymentRecordFiles(record,'claimForm').map(file=>file.originalName).join(' | ')])],[28,35,38,16,16,65,40,30,65]);
+  const temp=path.join(DATA_DIR,`manual-payment-${crypto.randomUUID()}`);await fsp.mkdir(temp,{recursive:true});
+  try{
+    const files=[],add=async(name,data)=>{const fp=path.join(temp,safeBaseName(name));await fsp.writeFile(fp,data);files.push({name,path:fp});};
+    await add('payment-register.xlsx',XLSX.write(wb,{type:'buffer',bookType:'xlsx'}));
+    await add('covering-letter-template.txt',`[Add official letterhead]\n[Date]\n\nTo: The selected Director(s), as listed in the attached register\nThrough: The Head of Department\n\nREQUEST FOR APPROVAL AND PROCESSING OF CLAIMS\n\nPlease find attached a payment register for ${rows.length} claimant(s), covering ${records.length} submission(s) and ${total} proposed or approved payable claim units. The original claim forms and any available HoD approval PDFs accompany this pack for verification.\n\n[Add purpose, period, amount, departmental reference and any other details.]\n\nPlease review and endorse for onward submission to the Provost, College Finance Officer, Payroll or the assigned Finance Officer, and Audit.\n\n[HoD name, signature and date]\n\nA downloaded register is not evidence that approval has been granted. Check the HoD approval column and complete each manual endorsement. Digital source claim forms remain available to authorised officers at every routed stage.\n`);
+    const endorsements=['Head of Department','Selected Director(s)','Provost','College Finance Officer','Payroll / assigned Finance Officer','Audit'];
+    await add('printable-register-and-endorsements.html',`<!doctype html><html><head><meta charset="utf-8"><title>Payment register and manual endorsements</title><style>body{font:12px Arial;color:#142b42;margin:28px}table{border-collapse:collapse;width:100%;margin:18px 0}th,td{border:1px solid #9aa9b5;padding:8px;text-align:left}h1{font-size:21px}small{font-size:10px} .sign td{height:38px}@media print{@page{size:A4 landscape;margin:15mm}}</style></head><body><h1>UCC-CoDE Payment Register</h1><p>${rows.length} claimant(s). ${records.length} submission(s). ${total} payable claim units. Prepared ${htmlEscape(new Date().toISOString())}.</p><p>Add your official covering letter. Verify the original claim forms before signing at each stage. Proposed quantities require HoD approval.</p><table><thead><tr><th>S/N</th><th>Claimant / Department</th><th>Claimed</th><th>Verified</th><th>HoD approved</th><th>Payable</th><th>References</th></tr></thead><tbody>${rows.map((row,i)=>`<tr><td>${i+1}</td><td>${htmlEscape(row.name)}<br><small>${htmlEscape(row.department)}</small></td><td>${row.stated}</td><td>${row.verified}</td><td>${row.approved}</td><td>${row.payable}</td><td>${htmlEscape(row.references.join(', '))}</td></tr>`).join('')}</tbody></table><h2>Manual endorsements</h2><table class="sign"><thead><tr><th>Stage</th><th>Name</th><th>Claim forms checked</th><th>Decision / Comments</th><th>Signature / Date</th></tr></thead><tbody>${endorsements.map(stage=>`<tr><td>${htmlEscape(stage)}</td><td></td><td></td><td></td><td></td></tr>`).join('')}</tbody></table><p>Downloading this pack does not change the digital approval or payment status. Record any manual decisions through the authorised portal before marking a claim for payment.</p></body></html>`);
+    for(const record of records){let index=0;for(const file of paymentRecordFiles(record,'claimForm'))files.push({path:path.join(FILES_DIR,path.basename(file.storedName)),name:`claim-forms/${safeBaseName(record.reference)}-${++index}-${safeBaseName(file.originalName||'claim-form')}`});for(const document of paymentApprovalDocuments(record).filter(item=>item.status==='current'&&storedClaimFilePresent(item)))files.push({path:path.join(FILES_DIR,path.basename(document.storedName)),name:`hod-approvals/${safeBaseName(record.reference)}-${safeBaseName(document.originalName||'approval.pdf')}`});}
+    res.setHeader('Content-Type','application/zip');res.setHeader('Content-Disposition','attachment; filename="ucc-code-manual-payment-pack.zip"');await streamZipArchive(res,files);
+  }finally{await fsp.rm(temp,{recursive:true,force:true});}
+}
+app.post('/api/admin/:department/claims/manual-payment-pack.zip',departmentAuth,asyncRoute(async(req,res)=>{const all=await readDb(),visible=recordsForDepartment(all,req.adminDepartment).filter(record=>['project-work','field-experience','assessor'].includes(record.portalType||'project-work')&&adminCan(req,portalSectionForRecord(record),'viewer'));if(!visible.length)return res.status(403).json({error:'Departmental claim access is required.'});await sendManualPaymentPack(req,res,visible,all);}));
+app.post('/api/staff/payment-claims/manual-payment-pack.zip',staffAuth,asyncRoute(async(req,res)=>{const all=await readDb();await sendManualPaymentPack(req,res,paymentClaimsForStaff(all,req.staffIdentity),all);}));
+
 app.get('/api/admin/:department/export/payment-approved-register.xlsx', departmentAuth, async(req,res)=>{
   const canView=['project-work','field-experience','assessor'].some(section=>adminCan(req,section,'viewer'));if(!canView)return res.status(403).json({error:'Your account does not have access to departmental claims.'});
   const records=await readDepartmentClaims(req.adminDepartment);sendWorkbook(res,'department-payment-register',records,`${req.adminDepartment}-department-approved-for-payment-register.xlsx`);

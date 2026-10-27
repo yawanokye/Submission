@@ -1,3 +1,16 @@
+## v66, 27 October 2026
+
+- Added manual payment packs with an Excel claimant/quantity register, covering-letter template, printable endorsement sheet, original claim forms and signed HoD approval PDFs. Available to the HoD and each authorised downstream officer. Downloads preserve digital approval status.
+- Recheck original supporting files at every approval stage before forwarding.
+- Added explicit HoD assignment for new and existing administrator accounts, with department checkboxes and automatic claim-portal permissions.
+- HoDs can select one or both Director portals. Each selected Director must approve before the Provost and College Finance Officer. The College Finance Officer chooses Payroll or a named, authorised Finance Officer, followed by Audit. Assigned Finance Officers see only their own assigned claims.
+- Added Developer > HoD, Payroll & Auditor > Open HoD Portal with department-scoped viewing of approved claims and the queue awaiting HoD payment approval.
+- Added direct bulk forwarding from project-work, field-experience and assessor submission selections. Opened the existing claim reconciliation lists by default.
+- Reject missing or zero-byte claim uploads. Recheck the actual stored source files before forwarding and before HoD payment approval.
+- Require the field-experience candidate claim count to equal the candidates in the attached score sheet. Project-work group/attachment matching remains enforced. Assessor report counts must be integers, with one report, claim form and score sheet per work, and no extra work attachments.
+- Keep Field Experience and Teaching Practice based on candidate scores, without requiring completed-work evidence.
+- Added integration and browser DOM checks for developer access, empty uploads, claim-count mismatches, mixed invalid batches and bulk forwarding.
+
 ## v65
 
 Field Experience and Teaching Practice now require the claim form, remove the completed-work/supporting-evidence upload section, and use approved candidate scores for new payment quantities. Project Work and historical signed claims keep their existing rules. See PATCH_NOTES_v65.txt.

@@ -3,6 +3,8 @@ function setStatus(el, ok, message){
   el.textContent=message;
 }
 async function submitForm(form, endpoint, statusEl, submitBtn){
+  const empty=[...form.querySelectorAll('input[type="file"]')].flatMap(input=>[...(input.files||[])]).find(file=>file.size===0);
+  if(empty){const message=`The attached file "${empty.name}" is empty. Upload the completed document.`;setStatus(statusEl,false,message);throw new Error(message);}
   submitBtn.disabled=true;
   const old=submitBtn.textContent;
   submitBtn.textContent='Submitting…';
