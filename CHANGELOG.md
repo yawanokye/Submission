@@ -1,3 +1,11 @@
+## v67, 27 October 2026
+
+- Added category filters and A–Z, oldest-first and newest-first sorting to HoD approval lists.
+- Separated Project Work, Distance; Project Work, Non-Residential; Field Experience; and Teaching Practice. Micro-Teaching, Macro-Teaching and Reflection are grouped under Teaching Practice. Assessment/vetting claims remain available separately.
+- Applied the same category grouping, filters, registers and packs throughout Director, Provost, College Finance, assigned Finance Officer, Payroll and Audit portals. All Payments includes authorised payment history, with paid and blocked records clearly marked and zero outstanding payable units.
+- Added explicit grouped-category and All Payments pack downloads. Combined packs contain category totals, separate category registers, and supporting documents grouped by category and claimant.
+- Category registers include all approved submissions, including those awaiting HoD approval, with claimant names, quantities, stages and original claim-form links. Manual payment packs use the same category and sorting filters.
+
 ## v66, 27 October 2026
 
 - Added manual payment packs with an Excel claimant/quantity register, covering-letter template, printable endorsement sheet, original claim forms and signed HoD approval PDFs. Available to the HoD and each authorised downstream officer. Downloads preserve digital approval status.

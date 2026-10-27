@@ -16,12 +16,12 @@
 <main>
   <section class="intro compact-intro">
     <div><div class="eyebrow">HoD-approved claims only</div><h2>Claims Processing</h2><p>Payroll receives the immutable approved PDF, payable quantity and full audit history. Return a claim to the department when reconciliation is required.</p></div>
-    <div class="actions"><a id="approvedRegister" class="btn primary" href="#">Payroll Approved for Payment Register</a><a id="payrollRegister" class="btn" href="#">All Department-Signed Claims Register</a></div>
+    <div class="actions"><button id="downloadCategoryPack" class="btn" type="button">Download Grouped Category Pack</button><button id="downloadAllPacks" class="btn" type="button">Download All Payments Pack</button><a id="approvedRegister" class="btn primary" href="#">Payroll Approved for Payment Register</a><a id="payrollRegister" class="btn" href="#">All Department-Signed Claims Register</a></div>
   </section>
   <section class="card operations-card">
     <div class="operations-filters">
       <label>Department<select id="departmentFilter"></select></label>
-      <label>Activity<select id="activityFilter">
+      <label>Payment category<select id="categoryFilter"><option value="">All payment categories</option><option value="project-distance">Project Work, Distance</option><option value="project-non-residential">Project Work, Non-Residential</option><option value="field-experience">Field Experience</option><option value="teaching-practice">Teaching Practice</option><option value="assessor">Assessment / Vetting</option></select></label><label>Sort by<select id="categorySort"><option value="claimant">Claimant, A–Z</option><option value="oldest">Oldest submission first</option><option value="newest">Newest submission first</option></select></label><label>Activity<select id="activityFilter">
         <option value="all">All activities</option>
         <option value="project-work">Undergraduate Project Work</option>
         <optgroup label="Field Experience and Teaching Practice">

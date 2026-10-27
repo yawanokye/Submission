@@ -158,3 +158,5 @@ tr.review-row-returned td{background:#f3f8fd}tr.review-row-returned td:first-chi
 .department-load-status ul{margin:8px 0 12px;padding-left:20px}
 
 .claim-ready{background:#f0faf4}.claim-held{background:#fff5f1}.certification-state{display:inline-block;border-radius:14px;padding:3px 9px;font-weight:750}.certification-state.cleared{background:#dcf3e5;color:#17613b}.duplicate-payment{display:grid;gap:7px;margin-top:8px;color:#8d2630}.duplicate-payment small{display:block}.cert-waiver-summary{border-color:#80be9c;background:#edf9f1;color:#17613b}
+
+.hod-register-controls{display:flex;flex-wrap:wrap;gap:16px;align-items:end;margin:16px 0;padding:16px;border:1px solid #c7dce8;border-radius:10px;background:#f4f9fc}.hod-register-controls label{display:grid;gap:6px;color:#082b4c;font-weight:750}.hod-register-controls select{min-width:230px;max-width:100%;padding:10px;border:1px solid #bccbd7;border-radius:6px;background:#fff;color:#182431}.hod-register-controls>span{max-width:280px;font-size:12px;color:#526575}@media(max-width:600px){.hod-register-controls label,.hod-register-controls select{width:100%;min-width:0}}

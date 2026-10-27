@@ -16,12 +16,12 @@
 <main>
   <section class="intro compact-intro">
     <div><div class="eyebrow">Read only, Payroll gate enforced</div><h2>Payment Claim Verification</h2><p>Select a department and activity. Only claims marked Approved for Payment or Paid by Payroll appear here.</p></div>
-    <div class="actions"><a id="approvedRegister" class="btn" href="#">Payment-Approved Register</a><a id="auditRegister" class="btn primary" href="#">Auditor Register</a></div>
+    <div class="actions"><button id="downloadCategoryPack" class="btn" type="button">Download Grouped Category Pack</button><button id="downloadAllPacks" class="btn" type="button">Download All Payments Pack</button><a id="approvedRegister" class="btn" href="#">Payment-Approved Register</a><a id="auditRegister" class="btn primary" href="#">Auditor Register</a></div>
   </section>
   <section class="card operations-card">
     <div class="operations-filters auditor-filters">
       <label>Department<select id="departmentFilter"></select></label>
-      <label>Activity<select id="activityFilter">
+      <label>Payment category<select id="categoryFilter"><option value="">All payment categories</option><option value="project-distance">Project Work, Distance</option><option value="project-non-residential">Project Work, Non-Residential</option><option value="field-experience">Field Experience</option><option value="teaching-practice">Teaching Practice</option><option value="assessor">Assessment / Vetting</option></select></label><label>Sort by<select id="categorySort"><option value="claimant">Claimant, A–Z</option><option value="oldest">Oldest submission first</option><option value="newest">Newest submission first</option></select></label><label>Activity<select id="activityFilter">
         <option value="all">All activities</option>
         <option value="project-work">Undergraduate Project Work</option>
         <optgroup label="Field Experience and Teaching Practice">
