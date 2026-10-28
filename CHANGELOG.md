@@ -1,3 +1,10 @@
+## v68, 28 October 2026
+
+- Renamed the HoD Approval List to HoD Claim Review List and explained that it includes ready, held and forwarded submissions.
+- Held and already-paid claims show zero payable units. Remaining claim quantities stay visible separately. The category Excel register includes both figures and the review status.
+- Added a held-claim count and clear hold labels. Forwarded claims retain their current approval stage without a false payment-hold message.
+- Clarified that student and work-file duplicate counts are matches against the linked claim, not missing attachments.
+
 ## v67, 27 October 2026
 
 - Added category filters and A–Z, oldest-first and newest-first sorting to HoD approval lists.
