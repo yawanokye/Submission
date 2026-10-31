@@ -453,6 +453,16 @@ const FIELD_ASSESSMENTS = Object.freeze({
   }
 });
 const FIELD_ASSESSMENT_KEYS = Object.keys(FIELD_ASSESSMENTS);
+const FIELD_SCORE_ONLY_TYPES=Object.freeze(['field-experience-5','micro-teaching']);
+function fieldScoreOnly(record){
+  if(record?.portalType!=='field-experience')return false;
+  const type=String(record.assessmentType||record.assessmentLabel||'').trim().toLowerCase().replace(/[\s_]+/g,'-');
+  return FIELD_SCORE_ONLY_TYPES.includes(type)||type==='field-experience-v';
+}
+function fieldPaymentPolicy(record){
+  const scoreOnly=fieldScoreOnly(record);
+  return {scoreOnly,paymentEligible:!scoreOnly,paymentPolicyLabel:scoreOnly?'Score sheet only. Tutors for this activity were paid during face-to-face sessions. No new payment claim is processed here.':''};
+}
 const FIELD_SCORE_REPORTS = Object.freeze({
   'field-experience-1': { label:'Field Experience I', assessmentType:'field-experience-1-2', scoreIndex:0, scoreHeader:'F. EXP I', sheetName:'Field Experience I' },
   'field-experience-2': { label:'Field Experience II', assessmentType:'field-experience-1-2', scoreIndex:1, scoreHeader:'F. EXP II', sheetName:'Field Experience II' },
@@ -2216,7 +2226,7 @@ function fieldReportingCentre(record,row,sourceIndex,directory=studyCentreDirect
   return {...centre,resolution:assignment?.resolution||'index-centre',indexCentreCode:assignment?.indexCentreCode||fallback.code};
 }
 function fieldClaimValidation(record) {
-  const claimedCandidateCount=Number(record?.claimedCandidateCount||parseFlexiblePositiveCount(record?.groupCount)||0);
+  const claimedCandidateCount=fieldScoreOnly(record)?Number(record.submittedCandidateCount||record.scoreSheet?.rows?.length||0):Number(record?.claimedCandidateCount||parseFlexiblePositiveCount(record?.groupCount)||0);
   const scoreRowCount=fieldValidScoreRows(record).length;
   const actualAttachedWorkCount=paymentRecordFiles(record,'completedWork').length;
   const centreAnalysis=fieldCentreAnalysis(record);
@@ -2314,7 +2324,7 @@ function storedClaimFilePresent(file){
   try{const stat=fs.statSync(path.join(FILES_DIR,path.basename(file.storedName)));return stat.isFile()&&stat.size>0;}catch{return false;}
 }
 function claimAttachmentIssues(record){
-  const required=record.portalType==='assessor'?['claimForm','reportFile','scoreSheet']:record.portalType==='field-experience'?['claimForm','scoresFile']:['claimForm','reportFile','scoresFile','completedWork'];
+  const required=fieldScoreOnly(record)?['scoresFile']:record.portalType==='assessor'?['claimForm','reportFile','scoreSheet']:record.portalType==='field-experience'?['claimForm','scoresFile']:['claimForm','reportFile','scoresFile','completedWork'];
   return required.filter(key=>{const files=paymentRecordFiles(record,key);return !files.length||files.some(file=>!storedClaimFilePresent(file));}).map(key=>`${({claimForm:'Claim form',reportFile:'Report',scoreSheet:'Score sheet',scoresFile:'Score sheet',completedWork:'Completed work'})[key]} attachment is missing or empty. Upload the completed document before payment processing.`);
 }
 function filesFor(req, key) { return (req.files && req.files[key]) || []; }
@@ -4028,13 +4038,14 @@ app.post('/api/field-experience', upload.fields([
     if(await rejectEmptyClaimUploads(req,res))return;
     const department = validateDepartment(req);
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
-    const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount','assessmentType']);
+    const missing = requireText(req, ['title','firstName','lastName','phone','email','assessmentType']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error: `Missing required field: ${missing}` }); }
     if(!isEmail(text(req,'email'))){await removeUploaded(req);return res.status(400).json({error:'Enter a valid claimant email address.'});}
-    if(!declarationAccepted(req.body?.claimantDeclaration)){await removeUploaded(req);return res.status(400).json({error:'Tick the claimant declaration before submitting the claim.'});}
     const assessmentType=text(req,'assessmentType');
     const assessmentSpec=fieldAssessmentSpec(assessmentType);
     if(!assessmentSpec){await removeUploaded(req);return res.status(400).json({error:'Please select a valid Field Experience or Teaching Practice assessment type.'});}
+    const scoreOnly=fieldScoreOnly({portalType:'field-experience',assessmentType});
+    if(!scoreOnly&&!declarationAccepted(req.body?.claimantDeclaration)){await removeUploaded(req);return res.status(400).json({error:'Tick the claimant declaration before submitting the claim.'});}
     const studentStream=String(text(req,'studentStream')||'distance').trim().toLowerCase();
     if(!['distance','non-residential'].includes(studentStream)){await removeUploaded(req);return res.status(400).json({error:'Select Distance or Non-Residential student category.'});}
     const selectedCentres=studentStream==='distance'?textList(req,'studyCentre'):[];
@@ -4042,7 +4053,7 @@ app.post('/api/field-experience', upload.fields([
     const allowedCentres=await readStudyCentres(department);
     const invalidCentres=selectedCentres.filter(c=>!allowedCentres.includes(c));
     if(invalidCentres.length){await removeUploaded(req);return res.status(400).json({error:`The following study centre selection is not published for this department: ${invalidCentres.join(', ')}.`});}
-    if (!filesFor(req,'claimForm').length) {
+    if (!scoreOnly&&!filesFor(req,'claimForm').length) {
       await removeUploaded(req); return res.status(400).json({ error: 'A completed Claim Form is required for Field Experience and Teaching Practice submissions.' });
     }
     if (!filesFor(req,'scoresFile').length) {
@@ -4051,20 +4062,21 @@ app.post('/api/field-experience', upload.fields([
     let scoreResult;
     try { scoreResult = parseFieldExperienceWorkbook(filesFor(req,'scoresFile')[0].path,assessmentType); }
     catch (e) { await removeUploaded(req); return res.status(400).json({ error: e.message }); }
-    const claimedCandidateCount=Number(text(req,'groupCount'));
-    if(!Number.isSafeInteger(claimedCandidateCount)||claimedCandidateCount<1){await removeUploaded(req);return res.status(400).json({error:'Enter Number of Students / Candidates as a positive number.'});}
     const submittedCandidates=scoreResult.rows.filter(row=>cleanHumanText(row?.registrationNo));
-    if(claimedCandidateCount!==submittedCandidates.length){await removeUploaded(req);return res.status(400).json({error:`The claim quantity (${claimedCandidateCount}) must equal the number of candidates in the attached score sheet (${submittedCandidates.length}). Correct the claim count or score sheet before submitting.`});}
+    const claimedCandidateCount=scoreOnly?0:Number(text(req,'groupCount'));
+    if(!scoreOnly&&(!Number.isSafeInteger(claimedCandidateCount)||claimedCandidateCount<1)){await removeUploaded(req);return res.status(400).json({error:'Enter Number of Students / Candidates as a positive number.'});}
+    if(!submittedCandidates.length){await removeUploaded(req);return res.status(400).json({error:'The score sheet must contain at least one candidate with scores.'});}
+    if(!scoreOnly&&claimedCandidateCount!==submittedCandidates.length){await removeUploaded(req);return res.status(400).json({error:`The claim quantity (${claimedCandidateCount}) must equal the number of candidates in the attached score sheet (${submittedCandidates.length}). Correct the claim count or score sheet before submitting.`});}
     const indexesWithoutScore=scoreResult.rows.filter(row=>cleanHumanText(row?.registrationNo)&&!(row?.scoreValues||[]).some(value=>cleanHumanText(value)));
     if(indexesWithoutScore.length){await removeUploaded(req);return res.status(400).json({error:`Every registration number must have at least one score. Add the missing score for ${indexesWithoutScore.slice(0,8).map(row=>cleanHumanText(row.registrationNo)).join(', ')} and submit again.`});}
-    const claimantName=buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'middleName'),text(req,'lastName')),claimantCertification=newClaimantCertification({name:claimantName,email:text(req,'email'),staffId:text(req,'staffId')});
+    const claimantName=buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'middleName'),text(req,'lastName')),claimantCertification=scoreOnly?null:newClaimantCertification({name:claimantName,email:text(req,'email'),staffId:text(req,'staffId')});
     const record = {
-      id: crypto.randomUUID(), portalType: 'field-experience', claimQuantityBasis:'approved-candidates', department, departmentName: DEPARTMENTS[department].name,
+      id: crypto.randomUUID(), portalType: 'field-experience', submissionPurpose:scoreOnly?'scores-only':'scores-and-claim',claimQuantityBasis:scoreOnly?'scores-only':'approved-candidates', department, departmentName: DEPARTMENTS[department].name,
       reference: makeReference('FIELD'), submittedAt: new Date().toISOString(),
       assessmentType, assessmentLabel:assessmentSpec.label,
       title:text(req,'title'), firstName:text(req,'firstName'), middleName:text(req,'middleName'), lastName:text(req,'lastName'),
       fullName:claimantName,
-      phone: text(req,'phone'), email: text(req,'email'), staffId:text(req,'staffId'), claimantCertification:claimantCertification.certification, groupCount: text(req,'groupCount'), claimedCandidateCount, studyCentres:selectedCentres, studyCentre:selectedCentres.join(' | '), studentStream, projectStream:studentStream, classificationVersion:0, classificationHistory:[],
+      phone: text(req,'phone'), email: text(req,'email'), staffId:text(req,'staffId'), claimantCertification:claimantCertification?.certification||null, groupCount:scoreOnly?String(submittedCandidates.length):text(req,'groupCount'),submittedCandidateCount:submittedCandidates.length, claimedCandidateCount, studyCentres:selectedCentres, studyCentre:selectedCentres.join(' | '), studentStream, projectStream:studentStream, classificationVersion:0, classificationHistory:[],
       scoreSheet: {
         worksheet: scoreResult.sheetName,
         headerRow: scoreResult.headerRow,
@@ -4078,19 +4090,19 @@ app.post('/api/field-experience', upload.fields([
     };
     record.fieldValidation={...fieldClaimValidation(record),validatedAt:new Date().toISOString()};
     await saveRecord(record);
-    const certificationDelivery=await dispatchClaimantCertification(record,claimantCertification.token,req);
+    const certificationDelivery=scoreOnly?{emailSent:false}:await dispatchClaimantCertification(record,claimantCertification.token,req);
     res.status(201).json({
       ok:true,
       reference:record.reference,
       submittedAt:record.submittedAt,
       departmentName:record.departmentName,
-      assessmentType,
+      assessmentType,...fieldPaymentPolicy(record),submissionPurpose:record.submissionPurpose,submissionNote:scoreOnly?fieldPaymentPolicy(record).paymentPolicyLabel:'',
       assessmentLabel:assessmentSpec.label,
       scoreRowsIncluded:scoreResult.rows.length,
       studyCentres:selectedCentres,
       studentStream,
       reviewStatus:'pending',
-      reviewStatusLabel:'Pending Verification',warningCount:record.fieldValidation.issues.length,warnings:record.fieldValidation.issues,claimantCertificationStatus:'pending',certificationEmailSent:certificationDelivery.emailSent,certificationEmailError:certificationDelivery.emailError||null
+      reviewStatusLabel:'Pending Verification',warningCount:record.fieldValidation.issues.length,warnings:record.fieldValidation.issues,claimantCertificationStatus:scoreOnly?null:'pending',certificationEmailSent:certificationDelivery.emailSent,certificationEmailError:certificationDelivery.emailError||null
     });
   } catch (e) {
     console.error(e);
@@ -4794,7 +4806,7 @@ function projectApprovedRegisterAoA(records, stream='all') {
   const body=approvedProjectRegisterRecords(records,stream).map((r,i)=>{const gv=projectGroupValidation(r);const claim=Array.isArray(r.files?.claimForm)?r.files.claimForm[0]:r.files?.claimForm;return [i+1,r.reference,r.reviewedAt||'',claimName(r),r.phone,r.email,studyCentreDisplay(r),projectStream(r)==='non-residential'?'Non-Residential (Regular)':'Distance',r.groupCount||'',gv.claimedGroupCount||'',gv.scoreSheetGroupCount,gv.completedProjectWorkCount,approvedProjectScoreRows(r).length,claim?.originalName||'',gv.valid?'MATCH':'REQUIRES RECONCILIATION',r.reviewedBy||''];});
   return [h,...body];
 }
-function paymentConsolidationApproved(record){return record?.portalType==='assessor'?assessorClaimReviewStatus(record)==='approved':projectReviewStatus(record)==='approved';}
+function paymentConsolidationApproved(record){return !fieldScoreOnly(record)&&(record?.portalType==='assessor'?assessorClaimReviewStatus(record)==='approved':projectReviewStatus(record)==='approved');}
 function fieldCandidateClaim(record){return record?.portalType==='field-experience'&&record.claimQuantityBasis==='approved-candidates';}
 function fieldCandidateUnits(record){
   const map=new Map();
@@ -4816,6 +4828,7 @@ function attachedClaimQuantity(record){
   return projectGroupValidation(record,{approved:true}).completedProjectWorkCount;
 }
 function rawPaymentUnitData(record){
+  if(fieldScoreOnly(record))return {units:[],claimedQuantity:0,actualQuantity:0,maxPayable:0,validation:paymentClaimValidation(record),quantityBasisLabel:'Score sheet only'};
   if(record?.portalType==='assessor'){
     const works=Array.isArray(record.works)?record.works:[],units=works.map((work,index)=>{const ready=Boolean(work?.files?.reportFile&&work?.files?.scoreSheet&&work?.files?.claimForm);return {key:`work:${index}:${normalizeIndexNumber(work?.indexNumber)||index+1}`,label:`Work ${work?.workNo||index+1} · ${work?.studentName||work?.indexNumber||'Student'}`,eligible:ready,reason:ready?'':'Report, score sheet or claim form is missing'};}),claimedQuantity=Math.max(0,Number(record.workCount||works.length||0));return {units,claimedQuantity,maxPayable:Math.min(claimedQuantity,units.filter(unit=>unit.eligible).length),validation:paymentClaimValidation(record)};
   }
@@ -4947,7 +4960,7 @@ function duplicatePaymentMessage(info){
   const issue=info.matchType==='exact-student-results'?'Duplicate student results detected':info.matchType==='same-students-different-results'?'Repeated students with different results detected':info.matchType==='overlapping-students'?'Some students also appear in another claim':'Repeated completed work attachments detected';
   return `${issue}. Retained reference: ${info.canonicalReference}. ${info.financeReviewRequired?'This claim was already paid. Finance must investigate and record any recovery separately.':'Payment is held until the repeated submission is reconciled.'}`;
 }
-function paymentDuplicateFields(record,records){const duplicateClaim=duplicateClaimInfo(record,records);return {duplicateClaim,paymentHold:duplicateClaim.duplicate,paymentHoldReason:duplicateClaim.duplicate?duplicatePaymentMessage(duplicateClaim):''};}
+function paymentDuplicateFields(record,records){const duplicateClaim=duplicateClaimInfo(record,records),policy=fieldPaymentPolicy(record);return {...policy,duplicateClaim,paymentHold:policy.scoreOnly||duplicateClaim.duplicate,paymentHoldReason:policy.scoreOnly?policy.paymentPolicyLabel:duplicateClaim.duplicate?duplicatePaymentMessage(duplicateClaim):''};}
 function claimantSortName(value){return String(value||'').replace(/^(?:(?:prof(?:essor)?|dr|mr|mrs|ms|miss|rev)\.?\s+)+/i,'').trim();}
 const HOD_CLAIM_CATEGORIES=Object.freeze({'project-distance':'Project Work, Distance','project-non-residential':'Project Work, Non-Residential','field-experience':'Field Experience','teaching-practice':'Teaching Practice',assessor:'Assessment / Vetting'});
 function hodClaimCategory(record){
@@ -4986,6 +4999,7 @@ function reconcileWaivedAttachmentQuantity(record,{actor,authorityRole,now,reaso
 function waiverReconciliationNeeded(record){const validation=paymentUnitData(record).validation||{};return claimantCertificationView(record).status==='waived'&&!attachmentQuantityReconciliation(record)&&(Number(paymentUnitData(record).claimedQuantity||0)!==verifiedClaimQuantity(record)||validation.requiresCentreReview||record.portalType==='field-experience'&&fieldClaimValidation(record).requiresCentreReview);}
 function hodForwardReadiness(record,records=[]){
   const payment=paymentUnitData(record),workflow=paymentWorkflowView(record),validation=payment.validation||paymentClaimValidation(record),reasons=[];
+  if(fieldScoreOnly(record))reasons.push(fieldPaymentPolicy(record).paymentPolicyLabel);
   const claimedQuantity=Number(payment.claimedQuantity||0),actualAttachedQuantity=Number(payment.actualQuantity??payment.maxPayable??attachedClaimQuantity(record));
   if(!paymentConsolidationApproved(record))reasons.push('Submission is not approved for consolidation.');
   if(!['verified','waived'].includes(claimantCertificationView(record).status))reasons.push('Claimant electronic certification is not verified or formally waived.');
@@ -5064,7 +5078,7 @@ function payrollClaimRow(record){
   const activityKey=isAssessor?`dissertation-${reportType}`:(isField?(record.assessmentType||'field-experience'): 'project-work');
   const category=isAssessor?(reportType==='vetting'?'Vetting Report':'Assessment Report'):(isField?fieldAssessmentLabel(record):(projectStream(record)==='non-residential'?'Non-Residential (Regular)':'Distance'));
   const claimFormPresent=claims.length>0&&claims.every(storedClaimFilePresent)&&(!isAssessor||claims.length===validation.claimedQuantity),approval=paymentApprovalView(record),currentDocument=approval.documents.find(document=>document.id===approval.currentDocumentId)||approval.documents.at(-1)||null;
-  return {id:record.id,submittedAt:record.submittedAt||null,claimCategory:hodClaimCategory(record),claimCategoryLabel:HOD_CLAIM_CATEGORIES[hodClaimCategory(record)],department:record.department,departmentName:record.departmentName||DEPARTMENTS[record.department]?.name||record.department,portalType:isAssessor?'assessor':(isField?'field-experience':'project-work'),activityKey,activityGroup:isAssessor?'dissertation':(isField?'field-experience':'project-work'),workType,reference:record.reference,approvedAt:departmentPaymentApprovedAt(record),approvedBy:departmentPaymentApprovedBy(record),supervisorName:claimName(record),claimantName:claimNameView(record),originalClaimForms:originalClaimForms(record,'admin'),priorPayment:priorPaymentSummary(record),payableQuantity:paymentUnitData(record).maxPayable,email:record.email||'',phone:record.phone||'',studyCentres:isAssessor?'':studyCentreDisplay(record),contextLabel:isAssessor?([record.studentName,record.programme].filter(Boolean).join(' · ')) : studyCentreDisplay(record),category,studentStream:category,claimedGroupsRaw:record.groupCount||record.workCount||'',claimedGroupCount:validation.claimedQuantity,scoreSheetGroupCount:validation.scoreSheetQuantity,completedProjectWorkCount:validation.supportingWorkCount,claimedQuantity:validation.claimedQuantity,actualAttachedQuantity:Number(validation.actualAttachedQuantity??attachedClaimQuantity(record)),quantityBasisLabel:claimQuantityLabel(record),optionalEvidenceCount:fieldCandidateClaim(record)?paymentRecordFiles(record,'completedWork').length:null,departmentApprovedQuantity:approval.approvedQuantity,paymentType:approval.paymentType,adjustmentReason:approval.adjustmentReason,scoreSheetQuantity:validation.scoreSheetQuantity,supportingWorkCount:validation.supportingWorkCount,groupValidation:validation,validation,approvedScoreRows:isAssessor?validation.scoreSheetQuantity:(isField?approvedFieldExperienceScoreRows(record).length:approvedProjectScoreRows(record).length),claimFormName:claims.map(item=>item.originalName||'Claim form').join(', '),claimFormCount:claims.length,claimFormPresent,claimantCertificationStatus:certification.status,claimantCertificationLabel:certification.status==='verified'?'Electronically Certified':certification.status==='waived'?'Certification Waived':'Not Verified',certificationWaiverReasons:(certification.waiverReasons||[]).join(' '),certificationWaivedBy:certification.waivedBy||'',certificationWaivedByRole:certification.waivedByRole||'',certificationWaivedAt:certification.waivedAt||null,certificationWaiverEvidenceSource:certification.waiverEvidenceSource||'',hasCertificationWaiverEvidence:Boolean(certification.waiverEvidence),claimPreviewUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/claim-preview`,departmentPaymentStatus:approval.status,departmentPaymentStatusLabel:{approved:'Approved for Payment',returned:'Returned by Payroll',invalidated:'Approval Invalidated',pending:'Pending HoD Approval'}[approval.status]||approval.status,approvedClaimUrl:currentDocument?.downloadUrl||'',approvedClaimName:currentDocument?.originalName||'',verificationCode:approval.verificationCode||currentDocument?.verificationCode||'',auditUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/claim-audit`,payrollStatus:String(record?.payroll?.status||'pending'),payrollStatusLabel:payrollStatusLabel(record),payrollNote:record?.payroll?.note||'',payrollUpdatedAt:record?.payroll?.updatedAt||null,payrollUpdatedBy:record?.payroll?.updatedBy||''};
+  return {...fieldPaymentPolicy(record),id:record.id,submittedAt:record.submittedAt||null,claimCategory:hodClaimCategory(record),claimCategoryLabel:HOD_CLAIM_CATEGORIES[hodClaimCategory(record)],department:record.department,departmentName:record.departmentName||DEPARTMENTS[record.department]?.name||record.department,portalType:isAssessor?'assessor':(isField?'field-experience':'project-work'),activityKey,activityGroup:isAssessor?'dissertation':(isField?'field-experience':'project-work'),workType,reference:record.reference,approvedAt:departmentPaymentApprovedAt(record),approvedBy:departmentPaymentApprovedBy(record),supervisorName:claimName(record),claimantName:claimNameView(record),originalClaimForms:originalClaimForms(record,'admin'),priorPayment:priorPaymentSummary(record),payableQuantity:paymentUnitData(record).maxPayable,email:record.email||'',phone:record.phone||'',studyCentres:isAssessor?'':studyCentreDisplay(record),contextLabel:isAssessor?([record.studentName,record.programme].filter(Boolean).join(' · ')) : studyCentreDisplay(record),category,studentStream:category,claimedGroupsRaw:record.groupCount||record.workCount||'',claimedGroupCount:validation.claimedQuantity,scoreSheetGroupCount:validation.scoreSheetQuantity,completedProjectWorkCount:validation.supportingWorkCount,claimedQuantity:validation.claimedQuantity,actualAttachedQuantity:Number(validation.actualAttachedQuantity??attachedClaimQuantity(record)),quantityBasisLabel:claimQuantityLabel(record),optionalEvidenceCount:fieldCandidateClaim(record)?paymentRecordFiles(record,'completedWork').length:null,departmentApprovedQuantity:approval.approvedQuantity,paymentType:approval.paymentType,adjustmentReason:approval.adjustmentReason,scoreSheetQuantity:validation.scoreSheetQuantity,supportingWorkCount:validation.supportingWorkCount,groupValidation:validation,validation,approvedScoreRows:isAssessor?validation.scoreSheetQuantity:(isField?approvedFieldExperienceScoreRows(record).length:approvedProjectScoreRows(record).length),claimFormName:claims.map(item=>item.originalName||'Claim form').join(', '),claimFormCount:claims.length,claimFormPresent,claimantCertificationStatus:certification.status,claimantCertificationLabel:certification.status==='verified'?'Electronically Certified':certification.status==='waived'?'Certification Waived':'Not Verified',certificationWaiverReasons:(certification.waiverReasons||[]).join(' '),certificationWaivedBy:certification.waivedBy||'',certificationWaivedByRole:certification.waivedByRole||'',certificationWaivedAt:certification.waivedAt||null,certificationWaiverEvidenceSource:certification.waiverEvidenceSource||'',hasCertificationWaiverEvidence:Boolean(certification.waiverEvidence),claimPreviewUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/claim-preview`,departmentPaymentStatus:approval.status,departmentPaymentStatusLabel:{approved:'Approved for Payment',returned:'Returned by Payroll',invalidated:'Approval Invalidated',pending:'Pending HoD Approval'}[approval.status]||approval.status,approvedClaimUrl:currentDocument?.downloadUrl||'',approvedClaimName:currentDocument?.originalName||'',verificationCode:approval.verificationCode||currentDocument?.verificationCode||'',auditUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/claim-audit`,payrollStatus:String(record?.payroll?.status||'pending'),payrollStatusLabel:payrollStatusLabel(record),payrollNote:record?.payroll?.note||'',payrollUpdatedAt:record?.payroll?.updatedAt||null,payrollUpdatedBy:record?.payroll?.updatedBy||''};
 }
 function payrollRegisterAoA(records,scope='payroll'){
   const h=['S/N','WORKFLOW','CATEGORY / STREAM','REFERENCE','DEPARTMENT APPROVED AT','DEPARTMENT APPROVED BY','CLAIMANT','EMAIL','PHONE','STUDY CENTRE / SUBMISSION','CLAIMED QUANTITY','DEPARTMENT PAYABLE QUANTITY','PAYMENT TYPE','ADJUSTMENT REASON','APPROVED SCORE QUANTITY','SUPPORTING DOCUMENTS','RECONCILIATION','CLAIM FORM','CLAIMANT CERTIFICATION','CERTIFICATION WAIVER REASONS','WAIVER APPROVED BY','WAIVER AUTHORITY','WAIVER DATE','WAIVER EVIDENCE','VERIFICATION CODE','DEPARTMENT PAYMENT STATUS','PAYROLL STATUS','PAYROLL NOTE','PAYROLL UPDATED AT','PAYROLL UPDATED BY','PAYMENT HOLD / EXCLUSION','RETAINED CLAIM REFERENCE','PREVIOUSLY PAID UNITS','REMAINING PAYABLE UNITS','PRIOR PAYMENT COMMENTS'];
@@ -5302,7 +5316,7 @@ function adminRecordsMap(records, assignments=[]) {
     const info=expectedAssignmentType?dissertationAssignmentInfo(r.id,assignments,expectedAssignmentType):{count:0,assessors:[]};
     const assignmentLimit=submissionType==='revised'?2:submissionType==='fresh'?3:0;
     return {
-      id:r.id,reference:r.reference,submittedAt:r.submittedAt,portalType:r.portalType||'project-work',
+      ...fieldPaymentPolicy(r),id:r.id,reference:r.reference,submittedAt:r.submittedAt,portalType:r.portalType||'project-work',
       name:r.portalType==='dissertation'?(r.studentName||''):claimName(r),claimantName:claimNameView(r),secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
       title:r.title||r.studentTitle||r.assessorTitle||'',firstName:r.firstName||r.studentFirstName||r.assessorFirstName||'',middleName:r.middleName||r.studentMiddleName||r.assessorMiddleName||'',lastName:r.lastName||r.studentLastName||r.assessorLastName||'',
       email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:(r.portalType==='project-work'||!r.portalType||r.portalType==='field-experience')?studyCentreDisplay(r):(r.studyCentre||''),studyCentres:(r.portalType==='project-work'||!r.portalType||r.portalType==='field-experience')?projectStudyCentres(r):[],studentStream:(r.portalType==='project-work'||!r.portalType||r.portalType==='field-experience')?studentStream(r):'',projectStream:(r.portalType==='project-work'||!r.portalType)?projectStream(r):'',classificationVersion:Number(r.classificationVersion||0),classificationHistory:Array.isArray(r.classificationHistory)?r.classificationHistory:[],assessmentType:r.portalType==='field-experience'?(r.assessmentType||'legacy'):'',assessmentLabel:r.portalType==='field-experience'?fieldAssessmentLabel(r):'',scoreRows:r.portalType==='field-experience'?fieldValidScoreRows(r).length:validScoreRows(r).length,scoreRowsIncluded:(r.portalType==='project-work'||!r.portalType)?approvedProjectScoreRows(r).length:(r.portalType==='field-experience'?approvedFieldExperienceScoreRows(r).length:validScoreRows(r).length),
@@ -5705,7 +5719,7 @@ app.get('/api/developer/chatbot-responses.xlsx', developerAuth, async(_req,res)=
 // PUBLIC FIELD EXPERIENCE / TEACHING PRACTICE SETTINGS
 app.get('/api/field-experience/settings', async(_req,res)=>{
   const settings=await readPortalSettings();
-  res.json({claimFormRequired:settings.fieldExperienceClaimFormRequired});
+  res.json({claimFormRequired:settings.fieldExperienceClaimFormRequired,scoreOnlyAssessmentTypes:FIELD_SCORE_ONLY_TYPES,claimFormRequiredByAssessment:Object.fromEntries(FIELD_ASSESSMENT_KEYS.map(type=>[type,!FIELD_SCORE_ONLY_TYPES.includes(type)]))});
 });
 
 // PUBLIC STUDY CENTRES + DEVELOPER ADMIN ACCOUNT / STUDY CENTRE MANAGEMENT
@@ -5720,7 +5734,7 @@ app.get('/api/developer/portal-settings', developerAuth, async(_req,res)=>{
 });
 app.patch('/api/developer/portal-settings', developerAuth, async(req,res)=>{
   const current=await readPortalSettings();
-  if(req.body?.fieldExperienceClaimFormRequired!==undefined&&req.body.fieldExperienceClaimFormRequired!==true)return res.status(400).json({error:'The claim form is compulsory for Field Experience and Teaching Practice. Supporting evidence is optional.'});
+  if(req.body?.fieldExperienceClaimFormRequired!==undefined&&req.body.fieldExperienceClaimFormRequired!==true)return res.status(400).json({error:'Claim forms remain compulsory for payable activities. Field Experience V and Micro-Teaching require only score sheets and do not create payment claims.'});
   current.fieldExperienceClaimFormRequired=true;
   if(req.body?.approvalOfficers&&typeof req.body.approvalOfficers==='object'){
     for(const key of CLAIM_OFFICER_KEYS){if(!Object.prototype.hasOwnProperty.call(req.body.approvalOfficers,key))continue;const item=req.body.approvalOfficers[key]||{},email=String(item.email||'').trim().toLowerCase(),phone=cleanHumanText(item.phone).slice(0,40);if(email&&!isEmail(email))return res.status(400).json({error:`Enter a valid email address for ${key}.`});if(phone&&!supportNormaliseMobile(phone))return res.status(400).json({error:`Enter a valid mobile number with country code for ${key}.`});current.approvalOfficers[key]={name:cleanHumanText(item.name).slice(0,180),email,phone};}
@@ -6183,10 +6197,10 @@ app.get('/api/staff/payment-claims',staffAuth,async(req,res)=>{
 });
 function categoryExportRecords(req,res,records){const category=String(req.query?.category||''),sort=String(req.query?.sort||'claimant');if(category&&!Object.hasOwn(HOD_CLAIM_CATEGORIES,category)||!['claimant','oldest','newest'].includes(sort)){res.status(400).json({error:'Choose a valid payment category and sort order.'});return null;}return records.filter(record=>!category||hodClaimCategory(record)===category);}
 function addPaymentCategorySheets(workbook,records,all,sort='claimant',mode='admin'){
-  const rows=sortHodRows(records.map(record=>claimWorkflowRow(record,all)),sort),header=['S/N','CATEGORY','CLAIMANT','EMAIL','REFERENCE','DEPARTMENT','CLAIMED QUANTITY','HOD APPROVED QUANTITY','CURRENT APPROVAL STAGE','PAYMENT STATUS'];
-  const table=items=>[header,...items.map((row,index)=>[index+1,row.claimCategoryLabel,row.supervisorName,row.email,row.reference,row.departmentName,row.claimedQuantity,row.departmentApprovedQuantity,row.stageLabel,row.payrollStatusLabel])];
-  addSheet(workbook,'All Payments by Category',table(rows),[8,34,35,32,27,38,24,26,40,32]);
-  for(const [category,label]of Object.entries(HOD_CLAIM_CATEGORIES)){const selected=rows.filter(row=>row.claimCategory===category);if(selected.length)addSheet(workbook,label.replace(/[,/]/g,'').slice(0,31),table(selected),[8,34,35,32,27,38,24,26,40,32]);}
+  const recordsById=new Map(records.map(record=>[record.id,record])),rows=sortHodRows(records.map(record=>claimWorkflowRow(record,all)),sort),header=['S/N','CATEGORY','CLAIMANT','EMAIL','REFERENCE','DEPARTMENT','CLAIMED QUANTITY','HOD APPROVED QUANTITY','CURRENT APPROVAL STAGE','PAYMENT STATUS','PAYABLE UNITS','PAYMENT HOLD / POLICY'];
+  const table=items=>[header,...items.map((row,index)=>[index+1,row.claimCategoryLabel,row.supervisorName,row.email,row.reference,row.departmentName,row.claimedQuantity,row.departmentApprovedQuantity,row.stageLabel,row.payrollStatusLabel,manualPackPayable(recordsById.get(row.id),all),row.paymentHoldReason||''])];
+  addSheet(workbook,'All Payments by Category',table(rows),[8,34,35,32,27,38,24,26,40,32,22,80]);
+  for(const [category,label]of Object.entries(HOD_CLAIM_CATEGORIES)){const selected=rows.filter(row=>row.claimCategory===category);if(selected.length)addSheet(workbook,label.replace(/[,/]/g,'').slice(0,31),table(selected),[8,34,35,32,27,38,24,26,40,32,22,80]);}
   workbook.SheetNames=['All Payments by Category',...workbook.SheetNames.filter(name=>name!=='All Payments by Category')];
   if(!workbook.Sheets['Source Claim Forms']){const forms=records.flatMap(record=>originalClaimForms(record,mode));addSheet(workbook,'Source Claim Forms',[['REFERENCE','CLAIM FORM','OPEN ORIGINAL'],...forms.map(form=>[form.reference,form.name,form.url])],[28,45,85]);forms.forEach((form,index)=>{workbook.Sheets['Source Claim Forms'][`C${index+2}`].l={Target:form.url};});}
 }
@@ -6226,6 +6240,7 @@ app.post('/api/staff/payment-claims/:id/decision' ,staffAuth,claimMutationLock,a
   const all=await readDb(),record=paymentClaimsForStaff(all,req.staffIdentity).find(item=>item.id===req.params.id);if(!record)return res.status(404).json({error:'This claim is not waiting in your current functional-unit register.'});
   const workflow=ensurePaymentWorkflow(record),currentStage=workflow.stage,currentUnit=CLAIM_APPROVAL_STAGE_UNITS[currentStage],identityUnits=new Set(normalizeStaffUnits(req.staffIdentity?.units));if(!currentUnit||!identityUnits.has(currentUnit)||currentUnit==='hod')return res.status(403).json({error:'This approval must be completed in the designated portal.'});
   if(claimWasPaid(record))return res.status(409).json({error:'This claim has already been paid. Its payment history cannot be reset or returned.'});
+  if(decision==='approve'&&fieldScoreOnly(record))return res.status(409).json({error:fieldPaymentPolicy(record).paymentPolicyLabel});
   if(decision==='approve'&&claimAttachmentIssues(record).length)return res.status(400).json({error:claimAttachmentIssues(record).join(' ')});
   if(decision==='approve'){await refreshClaimAttachmentDigests(all,record.department);const duplicateClaim=duplicateClaimInfo(record,all);if(duplicateClaim.duplicate)return res.status(409).json({error:duplicatePaymentMessage(duplicateClaim),duplicateClaim});}
   if(currentUnit==='finance-officer'&&(workflow.assignedFinanceOfficerId!==req.staffIdentity.id||!(await readAdminUsers()).some(account=>account.id===req.staffIdentity.id&&eligibleClaimFinanceOfficer(account,record))))return res.status(403).json({error:'This claim is assigned to another Finance Officer.'});
@@ -6787,6 +6802,7 @@ app.post('/api/admin/:department/claims/:id/payment-approval', departmentAuth,cl
   if(!record)return res.status(404).json({error:'Claim submission not found in this department.'});
   if(!requireRecordAccess(req,res,record,'administrator'))return;
   const attachmentIssues=claimAttachmentIssues(record);if(attachmentIssues.length)return res.status(400).json({error:attachmentIssues.join(' ')});
+  if(fieldScoreOnly(record))return res.status(409).json({error:fieldPaymentPolicy(record).paymentPolicyLabel});
   if(claimWasPaid(record))return res.status(409).json({error:'This claim has already been paid and cannot receive another payment approval.'});
   await hydrateClaimName(record);
   const hod=await hodAccountForRequest(req);if(hod.error)return res.status(403).json({error:hod.error});
@@ -7291,7 +7307,7 @@ app.get('/api/admin/:department/submissions/:id', departmentAuth, asyncRoute(asy
   if(!requireRecordAccess(req,res,r,'viewer'))return;
   await readClaimNameForReview(r);
   const paymentData=['project-work','field-experience','assessor'].includes(r.portalType||'project-work')?paymentUnitData(r):null;
-  const common={...r,claimantName:claimNameView(r),claimantCertification:claimantCertificationView(r),paymentApproval:paymentApprovalView(r),paymentWorkflow:paymentWorkflowView(r),paymentUnits:paymentData?.units||[],maximumPayableQuantity:paymentData?.maxPayable||0,priorPayment:priorPaymentSummary(r),actualAttachedQuantity:Number(paymentData?.actualQuantity??paymentData?.maxPayable??0),hodForwardReadiness:hodForwardReadiness(r,records),claimAudit:claimAuditView(r)};
+  const common={...r,...fieldPaymentPolicy(r),claimantName:claimNameView(r),claimantCertification:claimantCertificationView(r),paymentApproval:paymentApprovalView(r),paymentWorkflow:paymentWorkflowView(r),paymentUnits:paymentData?.units||[],maximumPayableQuantity:paymentData?.maxPayable||0,priorPayment:priorPaymentSummary(r),actualAttachedQuantity:Number(paymentData?.actualQuantity??paymentData?.maxPayable??0),hodForwardReadiness:hodForwardReadiness(r,records),claimAudit:claimAuditView(r)};
   if((r.portalType||'project-work')==='project-work'){
     return res.json({...common,reviewScoreRows:validScoreRowsWithMeta(r).map((row,i)=>({reviewNo:i+1,sourceIndex:row.sourceIndex,originalSn:row.originalSn,name:row.name,registrationNo:row.registrationNo,groupNo:row.groupNo,totalScore:row.totalScore,included:row.included})),groupValidation:projectGroupValidation(r),duplicateReconciliation:projectDuplicateReconciliation(r,records)});
   }
@@ -7549,7 +7565,7 @@ async function sendManualPaymentPack(req,res,visible,all){
   const groups=new Map();for(const record of records){const key=`${hodClaimCategory(record)}:${record.department}:${record.staffId||String(record.email||claimName(record)).toLowerCase()}`;if(!groups.has(key))groups.set(key,{category:HOD_CLAIM_CATEGORIES[hodClaimCategory(record)],name:claimName(record),email:record.email||'',department:record.departmentName||record.department,stated:0,verified:0,approved:0,payable:0,references:[]});const row=groups.get(key),payment=paymentUnitData(record);row.stated+=Number(payment.claimedQuantity||0);row.verified+=Number(payment.actualQuantity??payment.maxPayable);row.approved+=Number(record.paymentApproval?.approvedQuantity||0);row.payable+=manualPackPayable(record,all);row.references.push(record.reference);}
   const rows=[...groups.values()],total=rows.reduce((sum,row)=>sum+row.payable,0),wb=XLSX.utils.book_new(),header=['S/N','CLAIMANT','EMAIL','DEPARTMENT','CLAIMED QUANTITY','VERIFIED QUANTITY','HOD APPROVED QUANTITY','PROPOSED / APPROVED PAYABLE QUANTITY','REFERENCES','CATEGORY'];
   addSheet(wb,'Payment Register',manualPaymentTable(rows),[8,35,30,38,20,20,24,30,70,32]);
-  addSheet(wb,'Claim Details',[['REFERENCE','CLAIMANT','ACTIVITY','CLAIMED','PAYABLE','DIRECTOR PORTALS','CURRENT STAGE','HOD APPROVAL','ORIGINAL CLAIM FORMS','PAYMENT STATUS','DOCUMENT / PAYMENT HOLD NOTES'],...records.map(record=>[record.reference,claimName(record),payrollClaimRow(record).workType,paymentUnitData(record).claimedQuantity,manualPackPayable(record,all),selectedDirectorUnits(record).map(unit=>STAFF_UNITS[unit].label).join(' then '),paymentWorkflowView(record).stageLabel,departmentPaymentApprovalStatus(record)==='approved'?'Approved':'Awaiting HoD approval',paymentRecordFiles(record,'claimForm').map(file=>file.originalName).join(' | '),payrollStatusLabel(record),[claimWasPaid(record)?'Already paid. Do not pay again.':'',...claimAttachmentIssues(record),duplicateClaimInfo(record,all).duplicate?duplicatePaymentMessage(duplicateClaimInfo(record,all)):''].filter(Boolean).join(' ')])],[28,35,38,16,16,65,40,30,65]);
+  addSheet(wb,'Claim Details',[['REFERENCE','CLAIMANT','ACTIVITY','CLAIMED','PAYABLE','DIRECTOR PORTALS','CURRENT STAGE','HOD APPROVAL','ORIGINAL CLAIM FORMS','PAYMENT STATUS','DOCUMENT / PAYMENT HOLD NOTES'],...records.map(record=>[record.reference,claimName(record),payrollClaimRow(record).workType,paymentUnitData(record).claimedQuantity,manualPackPayable(record,all),selectedDirectorUnits(record).map(unit=>STAFF_UNITS[unit].label).join(' then '),paymentWorkflowView(record).stageLabel,departmentPaymentApprovalStatus(record)==='approved'?'Approved':'Awaiting HoD approval',paymentRecordFiles(record,'claimForm').map(file=>file.originalName).join(' | '),payrollStatusLabel(record),[fieldPaymentPolicy(record).paymentPolicyLabel,claimWasPaid(record)?'Already paid. Do not pay again.':'',...claimAttachmentIssues(record),duplicateClaimInfo(record,all).duplicate?duplicatePaymentMessage(duplicateClaimInfo(record,all)):''].filter(Boolean).join(' ')])],[28,35,38,16,16,65,40,30,65]);
   const categoryGroups=Object.entries(HOD_CLAIM_CATEGORIES).map(([key,label])=>({key,label,rows:rows.filter(row=>row.category===label),records:records.filter(record=>hodClaimCategory(record)===key)})).filter(group=>group.records.length),uniqueClaimants=new Set(rows.map(row=>`${row.department}:${row.email||row.name}`)).size;
   addSheet(wb,'Category Totals',[['CATEGORY','CLAIMANT GROUPS','SUBMISSIONS','CLAIMED QUANTITY','VERIFIED QUANTITY','HOD APPROVED QUANTITY','PAYABLE QUANTITY'],...categoryGroups.map(group=>[group.label,group.rows.length,group.records.length,...['stated','verified','approved','payable'].map(key=>group.rows.reduce((sum,row)=>sum+row[key],0))])],[34,22,18,22,22,26,22]);
   for(const group of categoryGroups)addSheet(wb,group.label.replace(/[,/]/g,'').slice(0,31),manualPaymentTable(group.rows),[8,35,30,38,20,20,24,30,70,32]);
@@ -7598,6 +7614,7 @@ app.post('/api/payroll/:department/claims/:id/status', departmentAuth,claimMutat
   const all=await readDb();const record=all.find(r=>r.id===req.params.id&&r.department===req.adminDepartment&&['project-work','field-experience','assessor'].includes(r.portalType||'project-work'));
   if(!record)return res.status(404).json({error:'Approved departmental claim not found.'});
   if(claimWasPaid(record))return res.status(409).json({error:'This claim has already been paid. Its payment record must remain unchanged; Finance must handle any recovery separately.'});
+  if(fieldScoreOnly(record)&&['verified','approved-for-payment','paid'].includes(status))return res.status(409).json({error:fieldPaymentPolicy(record).paymentPolicyLabel});
   if(['verified','approved-for-payment','paid'].includes(status)){await refreshClaimAttachmentDigests(all,record.department);const duplicateClaim=duplicateClaimInfo(record,all);if(duplicateClaim.duplicate)return res.status(409).json({error:duplicatePaymentMessage(duplicateClaim),duplicateClaim});}
   if(departmentPaymentApprovalStatus(record)!=='approved'&&status!=='pending')return res.status(400).json({error:'Only a current HoD-approved claim can be processed for payment.'});
   const validation=paymentClaimValidation(record);

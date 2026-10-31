@@ -1,3 +1,11 @@
+## v69, 31 October 2026
+
+- Field Experience V and Micro-Teaching now accept score-sheet-only submissions because tutors were paid during face-to-face sessions. No claim form, payment count, claimant declaration or certification email is required for those activities. Candidate counts are derived from the uploaded score sheet.
+- Field Experience I & II, III & IV and Reflections retain their claim forms and candidate-count validation. Macro-Teaching retains its existing claim requirement pending a separate policy instruction.
+- Exclude score-only activities from new HoD payment registers, consolidation and processing packs. Block new payment approval at HoD, Director, Provost, College Finance, assigned Finance Officer, Payroll and Audit stages, including existing unpaid submissions.
+- Preserve academic score approval, consolidation and exports, along with original documents and recorded payment history. Historical score-only claims have zero payable units and an explicit policy note in payment registers and All Payments packs.
+- Show the score-only policy in the public form, departmental review and developer settings.
+
 ## v68, 28 October 2026
 
 - Renamed the HoD Approval List to HoD Claim Review List and explained that it includes ready, held and forwarded submissions.
