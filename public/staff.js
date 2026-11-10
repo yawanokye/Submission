@@ -58,7 +58,7 @@
   function unitCard(unit, staff) {
     let action = '<span class="staff-restricted">Cases assigned to this unit appear in Shared referrals below.</span>';
     if (unit.id === 'student-support') action = '<a class="btn" href="/support-admin">Open Student Support queue</a>';
-    else if(unit.id === 'hod' && staff.departments.length) action = `<div class="quick-service-links">${staff.departments.map(department=>`<a href="/admin/${encodeURIComponent(department)}?view=hod">Open ${esc(department.replaceAll('-',' '))} HoD approval portal</a>`).join('')}<a href="#claim-approvals">View consolidated HoD register</a></div>`;
+    else if(unit.id === 'hod' && staff.departments.length) action = `<div class="quick-service-links">${(staff.hodDepartments?.length?staff.hodDepartments:staff.departments).map(department=>`<a href="/admin/${encodeURIComponent(department)}?view=hod">Open ${esc(department.replaceAll('-',' '))} HoD approval portal</a>`).join('')}<a href="#claim-approvals">View consolidated HoD register</a></div>`;
     else if(['directorate-education-business','directorate-arts-stem','provost','college-finance','finance-officer','payroll','auditor'].includes(unit.id)) action = '<a class="btn" href="#claim-approvals">Open claims approval register</a>';
     else if (['coordinator','regional-administrator'].includes(unit.id) && staff.role !== 'viewer') action = '<a class="btn" href="/centre-coordinators.html">Open assisted submission</a>';
     return `<article class="staff-unit-card"><span class="service-tag">${esc(roleLabels[staff.role] || staff.role)}</span><h3>${esc(unit.label)}</h3><p>${esc(unit.summary)}</p>${action}</article>`;

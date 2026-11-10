@@ -701,7 +701,7 @@ function publicAdminUser(user) {
   const invitationExpired=Boolean(invitationExpiresAt && new Date(invitationExpiresAt).getTime() <= Date.now());
   return {
     id:user.id, name:user.name || user.username, firstName:user.firstName || '', middleName:user.middleName || '', lastName:user.lastName || '', username:user.username, email:user.email || '',
-    role:user.role || 'viewer', departments:user.departments || [], hodDepartments:normalizeHodDepartments(user.hodDepartments,user.departments), sections:user.sections || [], units:normalizeStaffUnits(user.units),
+    role:user.role || 'viewer', departments:user.departments || [], hodDepartments:normalizeHodDepartments(user.hodDepartments,user.departments), sections:user.sections || [], units:normalizeStaffUnits(user.units),fullHodAccess:user.role==='administrator'&&normalizeHodDepartments(user.hodDepartments,user.departments).length>0&&normalizeStaffUnits(user.units).includes('hod')&&HOD_ACCOUNT_SECTIONS.every(section=>normalizeAdminSections(user.sections).includes(section)),
     active:user.active !== false, createdAt:user.createdAt || null,
     hasHodSignature:Boolean(user.hodSignature?.storedName), signatureUpdatedAt:user.hodSignature?.uploadedAt || null,
     passwordSet, passwordSetAt:user.passwordSetAt || null,
@@ -950,11 +950,22 @@ function requireSupportRole(minimumRole='viewer') {
     ? next() : res.status(403).json({error:'Your Student Support account does not have permission for this action.'});
 }
 
-function applyHodAssignment(account){
+const HOD_ACCOUNT_SECTIONS=Object.freeze(['project-work','field-experience','dissertation','assessor','payroll']);
+function applyHodAssignment(account,hodDepartments=account.hodDepartments?.length?account.hodDepartments:account.departments){
   account.role='administrator';
+  account.hodDepartments=normalizeAdminDepartments(hodDepartments);
+  account.departments=[...new Set([...normalizeAdminDepartments(account.departments),...account.hodDepartments])];
   account.units=[...new Set([...normalizeStaffUnits(account.units),'hod'])];
-  account.sections=[...new Set([...normalizeAdminSections(account.sections),'project-work','field-experience','assessor','payroll'])];
+  account.sections=[...new Set([...normalizeAdminSections(account.sections),...HOD_ACCOUNT_SECTIONS])];
   return account;
+}
+function refreshAdminAccountSessions(account){
+  for(const session of supportDatabase.prepare('SELECT token_hash, identity_json FROM portal_sessions WHERE expires_at > ?').all(Date.now())){
+    let identity;try{identity=JSON.parse(session.identity_json);}catch{continue;}
+    if(identity?.id!==account.id||identity.developerPreview||identity.master)continue;
+    if(account.active===false){supportDatabase.prepare('DELETE FROM portal_sessions WHERE token_hash = ?').run(session.token_hash);continue;}
+    supportDatabase.prepare('UPDATE portal_sessions SET identity_json = ?, updated_at = ? WHERE token_hash = ?').run(JSON.stringify({...identity,...publicAdminUser(account),master:false}),new Date().toISOString(),session.token_hash);
+  }
 }
 const DEVELOPER_PREVIEW_PROFILES = {
   'hod-viewer': {label:'HoD Claims Viewer',role:'viewer',sections:['project-work','field-experience','assessor','payroll']},
@@ -5882,8 +5893,12 @@ app.post('/api/developer/admin-users', developerAuth, async(req,res)=>{
   const name=(buildDisplayName('',firstName,middleName,lastName)||cleanHumanText(req.body?.name)).slice(0,160),email=cleanHumanText(req.body?.email).toLowerCase().slice(0,254);
   const requestedUsername=cleanHumanText(req.body?.username).toLowerCase().slice(0,100);
   const username=requestedUsername || email;
-  const requestedRole=String(req.body?.role||'viewer').trim(),role=requestedRole==='hod'?'administrator':requestedRole;const departments=normalizeAdminDepartments(req.body?.departments);const hodDepartments=role==='administrator'?normalizeHodDepartments(req.body?.hodDepartments?.length?req.body.hodDepartments:requestedRole==='hod'?departments:[],departments):[];const permissions=requestedRole==='hod'?applyHodAssignment({sections:req.body?.sections,units:req.body?.units}):{sections:normalizeAdminSections(req.body?.sections),units:normalizeStaffUnits(req.body?.units)},sections=permissions.sections,units=permissions.units;
-  if(requestedRole==='hod'&&!hodDepartments.length)return res.status(400).json({error:'Select at least one department for the HoD role.'});
+  const requestedRole=String(req.body?.role||'viewer').trim();
+  if(!ADMIN_ROLES.has(requestedRole)&&requestedRole!=='hod')return res.status(400).json({error:'Select a valid role.'});
+  const permissions={role:requestedRole,departments:normalizeAdminDepartments(req.body?.departments),hodDepartments:normalizeAdminDepartments(req.body?.hodDepartments),sections:normalizeAdminSections(req.body?.sections),units:normalizeStaffUnits(req.body?.units)};
+  const fullHodRequested=requestedRole==='hod'||permissions.units.includes('hod')||permissions.hodDepartments.length>0;
+  if(fullHodRequested){const authority=permissions.hodDepartments.length?permissions.hodDepartments:permissions.departments;if(!authority.length)return res.status(400).json({error:'Select at least one department for the HoD role.'});applyHodAssignment(permissions,authority);}
+  const {role,departments,hodDepartments,sections,units}=permissions;
   if((firstName||middleName||lastName)&&(!firstName||!lastName))return res.status(400).json({error:'The staff member’s first name and surname are required.'});
   if(!name||!isEmail(email)||!username)return res.status(400).json({error:'Administrator first name, surname and a valid email address are required.'});
   if(!/^[a-z0-9._@-]+$/i.test(username))return res.status(400).json({error:'Username may contain letters, numbers, dots, underscores, @ and hyphens only.'});
@@ -5894,6 +5909,7 @@ app.post('/api/developer/admin-users', developerAuth, async(req,res)=>{
     if(list.some(a=>String(a.username||'').toLowerCase()===username)){error='That administrator username already exists.';return null;}
     if(list.some(a=>String(a.email||'').toLowerCase()===email)){error='That administrator email address already has an account.';return null;}
     created={id:crypto.randomUUID(),firstName,middleName,lastName,name,email,username,role,departments,hodDepartments,sections,units,active:true,createdAt:new Date().toISOString(),invitationTokenHash:invitation.tokenHash,invitationExpiresAt:invitation.expiresAt,invitationEmailStatus:'pending'};
+    if(fullHodRequested)created.accessHistory=[{action:'hod-access-granted',departments:hodDepartments,at:created.createdAt,by:'Developer'}];
     list.push(created);return created;
   });
   if(error)return res.status(400).json({error});
@@ -5929,12 +5945,43 @@ app.post('/api/developer/admin-users/:id/resend-invitation', developerAuth, asyn
   }
 });
 app.patch('/api/developer/admin-users/:id', developerAuth, async(req,res)=>{
-  const role=req.body?.role?String(req.body.role).trim():null;const departments=req.body?.departments!==undefined?normalizeAdminDepartments(req.body.departments):null;const sections=req.body?.sections!==undefined?normalizeAdminSections(req.body.sections):null;const units=req.body?.units!==undefined?normalizeStaffUnits(req.body.units):null;const requestedHodDepartments=req.body?.hodDepartments!==undefined?normalizeAdminDepartments(req.body.hodDepartments):null;
+  const role=req.body?.role?String(req.body.role).trim():null,departments=req.body?.departments!==undefined?normalizeAdminDepartments(req.body.departments):null,sections=req.body?.sections!==undefined?normalizeAdminSections(req.body.sections):null,units=req.body?.units!==undefined?normalizeStaffUnits(req.body.units):null,requestedHodDepartments=req.body?.hodDepartments!==undefined?normalizeAdminDepartments(req.body.hodDepartments):null;
   if(role&&!ADMIN_ROLES.has(role)&&role!=='hod')return res.status(400).json({error:'Select a valid role.'});
-  const currentAccount=(await readAdminUsers()).find(item=>item.id===req.params.id);if(!currentAccount)return res.status(404).json({error:'Administrator account not found.'});if(!(departments??currentAccount.departments??[]).length&&!(units??normalizeStaffUnits(currentAccount.units)).length)return res.status(400).json({error:'Retain at least one functional unit or department for this account.'});
-  if(role==='hod'){const existing=(await readAdminUsers()).find(item=>item.id===req.params.id),allowed=departments??existing?.departments??[];if(!normalizeHodDepartments(requestedHodDepartments??allowed,allowed).length)return res.status(400).json({error:'Select at least one department for the HoD role.'});}
-  let item=null;await mutateAdminUsers(list=>{const a=list.find(x=>x.id===req.params.id);if(!a)return null;if(role&&ADMIN_ROLES.has(role))a.role=role;if(departments!==null)a.departments=departments;if(sections!==null)a.sections=sections;if(units!==null)a.units=units;if(requestedHodDepartments!==null)a.hodDepartments=requestedHodDepartments;if(req.body?.active!==undefined)a.active=Boolean(req.body.active);if(role==='hod'){applyHodAssignment(a);a.hodDepartments=normalizeHodDepartments(requestedHodDepartments??a.departments,a.departments);}a.hodDepartments=a.role==='administrator'?normalizeHodDepartments(a.hodDepartments,a.departments):[];if(!(a.departments||[]).length&&!normalizeStaffUnits(a.units).length)return null;item=publicAdminUser(a);return item;});
-  if(!item)return res.status(404).json({error:'Administrator account not found.'});res.json({ok:true,user:item});
+  if(req.body?.hodAccess!==undefined&&typeof req.body.hodAccess!=='boolean')return res.status(400).json({error:'Choose whether to add or remove HoD access.'});
+  const grantHod=role==='hod'||req.body?.hodAccess===true||Boolean(requestedHodDepartments?.length),removeHod=req.body?.hodAccess===false;
+  if(removeHod&&(role==='hod'||requestedHodDepartments?.length))return res.status(400).json({error:'Choose either HoD departments or removal of HoD access.'});
+  let item=null,error='';
+  await mutateAdminUsers(list=>{
+    const account=list.find(entry=>entry.id===req.params.id);if(!account)return null;
+    const next={...account};
+    if(role&&ADMIN_ROLES.has(role))next.role=role;
+    if(departments!==null)next.departments=departments;
+    if(sections!==null)next.sections=sections;
+    if(units!==null)next.units=units;
+    if(requestedHodDepartments!==null)next.hodDepartments=requestedHodDepartments;
+    if(req.body?.active!==undefined)next.active=Boolean(req.body.active);
+    if(grantHod){
+      const authority=requestedHodDepartments??departments??normalizeHodDepartments(account.hodDepartments,account.departments);
+      const target=authority.length?authority:requestedHodDepartments===null&&departments===null?normalizeAdminDepartments(account.departments):[];
+      if(!target.length){error='Select at least one department for the HoD role.';return null;}
+      next.departments=[...new Set([...normalizeAdminDepartments(account.departments),...normalizeAdminDepartments(next.departments)])];
+      next.sections=[...new Set([...normalizeAdminSections(account.sections),...normalizeAdminSections(next.sections)])];
+      next.units=[...new Set([...normalizeStaffUnits(account.units),...normalizeStaffUnits(next.units)])];
+      applyHodAssignment(next,target);
+    }else{
+      next.hodDepartments=next.role==='administrator'&&!removeHod?normalizeHodDepartments(next.hodDepartments,next.departments):[];
+      if(next.hodDepartments.length)applyHodAssignment(next,next.hodDepartments);
+      else if(removeHod||requestedHodDepartments!==null||role&&role!=='administrator')next.units=normalizeStaffUnits(next.units).filter(unit=>unit!=='hod');
+    }
+    if(!normalizeAdminDepartments(next.departments).length&&!normalizeStaffUnits(next.units).length){error='Retain at least one functional unit or department for this account.';return null;}
+    const previous=normalizeHodDepartments(account.hodDepartments,account.departments),authority=normalizeHodDepartments(next.hodDepartments,next.departments);
+    if(grantHod||removeHod||JSON.stringify(previous)!==JSON.stringify(authority))next.accessHistory=[...(account.accessHistory||[]),{action:authority.length?(previous.length?'hod-access-updated':'hod-access-granted'):'hod-access-removed',departments:authority,previousDepartments:previous,at:new Date().toISOString(),by:'Developer'}];
+    Object.assign(account,next);item=publicAdminUser(account);return item;
+  });
+  if(error)return res.status(400).json({error});
+  if(!item)return res.status(404).json({error:'Administrator account not found.'});
+  const updated=(await readAdminUsers()).find(account=>account.id===req.params.id);if(updated)refreshAdminAccountSessions(updated);
+  res.json({ok:true,user:item});
 });
 app.delete('/api/developer/admin-users/:id', developerAuth, async(req,res)=>{let removed=false;await mutateAdminUsers(list=>{const i=list.findIndex(x=>x.id===req.params.id);if(i>=0){list.splice(i,1);removed=true;}return removed;});if(!removed)return res.status(404).json({error:'Administrator account not found.'});res.json({ok:true});});
 

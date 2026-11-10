@@ -1,3 +1,11 @@
+## v70, 10 November 2026
+
+- Added an explicit Create Full HoD Account option and Full HoD role in Developer Administration > Administrators. Choosing HoD departments automatically supplies department access, academic and claim sections, signature management and HoD payment authority.
+- Added Add / Manage Full HoD Access to every existing account. HoD access can be added without replacing existing units, sections, department assignments, credentials or stored signatures.
+- Added clear Full HoD account badges, department-scoped HoD portal links and validation against incomplete assignments. HoD grant, update and removal actions are recorded in account access history.
+- Refresh active account sessions after permission changes. Disabled accounts lose their sessions, and developer preview sessions retain their separate restrictions.
+- Added onboarding, signature, scope, session, preservation, revocation and browser checks for new and existing HoD accounts.
+
 ## v69, 31 October 2026
 
 - Field Experience V and Micro-Teaching now accept score-sheet-only submissions because tutors were paid during face-to-face sessions. No claim form, payment count, claimant declaration or certification email is required for those activities. Candidate counts are derived from the uploaded score sheet.

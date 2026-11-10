@@ -1,6 +1,6 @@
 {
   "name": "ucc-code-eservices",
-  "version": "69.0.0",
+  "version": "70.0.0",
   "private": true,
   "description": "UCC-CoDE eServices portal for submissions, claims, student support and centre coordination",
   "main": "server.js",
@@ -26,7 +26,8 @@
     "test:field-upload-policy": "node scripts/test-v65-field-upload-policy.js",
     "test:hod-intake": "node scripts/test-v66-hod-and-intake.js",
     "test:hod-categories": "node scripts/test-v67-hod-categories.js",
-    "test:field-payment-policy": "node scripts/test-v69-field-payment-policy.js"
+    "test:field-payment-policy": "node scripts/test-v69-field-payment-policy.js",
+    "test:hod-accounts": "node scripts/test-v70-hod-accounts.js"
   },
   "engines": {
     "node": ">=24.14.1 <25"
