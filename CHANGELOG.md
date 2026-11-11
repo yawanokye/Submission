@@ -1,3 +1,7 @@
+## v73.0.2, 11 November 2026
+
+- Recover the claim-review window from temporary Render restart pages. Parse API errors safely, retry read-only loads after temporary 502/503/504 responses and interrupted connections, and offer Retry and sign-in actions. Preserve verification choices and never automatically resubmit an approval or rejection after an uncertain response.
+
 ## v73.0.1, 11 November 2026
 
 - Keep read-only developer content checks separate from saved departmental audits. An administrator can run and save a full review after a developer preview without reusing an unsaved preview result. Added a regression check that preview audits leave submission records unchanged and administrator audits use a separate job.
