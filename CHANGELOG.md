@@ -1,3 +1,11 @@
+## 78.0.0
+
+- Automatically retain a new expanded or corrected Project Work or Field Experience upload when it fully contains an earlier unpaid submission in the same category. Return affected approval registers for fresh review without changing paid ledgers.
+- Treat confirmed expanded or corrected submissions as versions of one current record. Move covered earlier unpaid copies into accessible version history and hide them from normal submission and claim lists.
+- Add a visible Use this updated version form before academic approval. Retain original files, score rows, references and audit events, and require fresh HoD payment approval.
+- Use only the retained version in current consolidated scores. Preserve earlier score values for historical review.
+- Protect paid claims, active approval registers, partial overlaps, separate categories and stale replacement decisions.
+
 ## 77.0.0
 
 - Download all selected claims as one matching PDF and Excel pack, with a separate pair for every category and a selection summary.

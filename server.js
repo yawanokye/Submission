@@ -2204,6 +2204,7 @@ function fieldValidScoreRows(record) {
   return fieldValidScoreRowsWithMeta(record).map(({sourceIndex,included,...row})=>row);
 }
 function approvedFieldExperienceScoreRows(record) {
+  if(isSupersededSubmission(record))return [];
   return fieldValidScoreRowsWithMeta(record).filter(row=>row.included!==false).map(({sourceIndex,included,...row})=>row);
 }
 function fieldCentreDecisionMap(record){
@@ -2380,7 +2381,9 @@ function validateDepartment(req) {
 async function saveRecord(record) {
   await hydrateClaimName(record);
   await refreshClaimAttachmentDigests([record]);
-  return mutateDb(records => { records.push(record); return record; });
+  const saved=await mutateDb(records => { records.push(record);applyAutomaticSubmissionVersion(record,records);return record; });
+  if(saved.automaticVersionUpdate?.replacedIds?.length){try{await claimRegisterService?.returnForRevision(saved.automaticVersionUpdate.replacedIds,`An unpaid submission was updated by ${saved.reference}. Review the latest version and prepare a fresh register.`);}catch(error){console.error('Automatic revision register return requires retry:',error.message);}}
+  return saved;
 }
 
 const SUPPORT_CATEGORIES = Object.freeze({
@@ -3996,7 +3999,7 @@ app.post('/api/claim-certification/:token/confirm', async(req,res)=>{
 app.post('/api/project-work', upload.fields([
   { name: 'claimForm', maxCount: 1 }, { name: 'reportFile', maxCount: 1 },
   { name: 'completedWork', maxCount: 25 }, { name: 'scoresFile', maxCount: 1 }
-]), async (req, res) => {
+]), claimMutationLock, async (req, res) => {
   try {
     if(await rejectEmptyClaimUploads(req,res))return;
     const department = validateDepartment(req);
@@ -4052,7 +4055,7 @@ app.post('/api/project-work', upload.fields([
     await saveRecord(record);
     const submissionWarnings=projectSubmissionWarnings(record,await readDb()),reconciliationWarnings=record.groupValidation.valid?[]:record.groupValidation.issues;
     const certificationDelivery=await dispatchClaimantCertification(record,claimantCertification.token,req);
-    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, scoreRowsIncluded:scoreResult.rows.length, studentStream:record.studentStream, projectStream:record.projectStream, reviewStatus:'pending', reviewStatusLabel:'Pending Verification',reconciliationWarningCount:reconciliationWarnings.length,reconciliationWarnings,warningCount:submissionWarnings.length,warnings:submissionWarnings.map(item=>item.message),claimantCertificationStatus:'pending',certificationEmailSent:certificationDelivery.emailSent,certificationEmailError:certificationDelivery.emailError||null });
+    res.status(201).json({ ok:true, reference:record.reference,automaticVersionUpdate:record.automaticVersionUpdate||null, submittedAt:record.submittedAt, departmentName:record.departmentName, scoreRowsIncluded:scoreResult.rows.length, studentStream:record.studentStream, projectStream:record.projectStream, reviewStatus:'pending', reviewStatusLabel:'Pending Verification',reconciliationWarningCount:reconciliationWarnings.length,reconciliationWarnings,warningCount:submissionWarnings.length,warnings:submissionWarnings.map(item=>item.message),claimantCertificationStatus:'pending',certificationEmailSent:certificationDelivery.emailSent,certificationEmailError:certificationDelivery.emailError||null });
   } catch (e) { console.error(e); await removeUploaded(req).catch(()=>{}); res.status(500).json({ error:'The project work submission could not be saved.' }); }
 });
 
@@ -4061,7 +4064,7 @@ app.post('/api/field-experience', upload.fields([
   { name: 'scoresFile', maxCount: 1 },
   { name: 'claimForm', maxCount: 1 },
   { name: 'completedWork', maxCount: 100 }
-]), async (req, res) => {
+]), claimMutationLock, async (req, res) => {
   try {
     if(await rejectEmptyClaimUploads(req,res))return;
     const department = validateDepartment(req);
@@ -4121,7 +4124,7 @@ app.post('/api/field-experience', upload.fields([
     const certificationDelivery=scoreOnly?{emailSent:false}:await dispatchClaimantCertification(record,claimantCertification.token,req);
     res.status(201).json({
       ok:true,
-      reference:record.reference,
+      reference:record.reference,automaticVersionUpdate:record.automaticVersionUpdate||null,
       submittedAt:record.submittedAt,
       departmentName:record.departmentName,
       assessmentType,...fieldPaymentPolicy(record),submissionPurpose:record.submissionPurpose,submissionNote:scoreOnly?fieldPaymentPolicy(record).paymentPolicyLabel:'',
@@ -4559,7 +4562,7 @@ function projectDuplicateReconciliation(record, records) {
   if(!record) return [];
   const stream=projectStream(record);
   const projects=projectRecords(records||[]).filter(r=>projectStream(r)===stream);
-  const others=projects.filter(r=>r.id!==record.id&&projectReviewStatus(r)==='approved');
+  const others=projects.filter(r=>r.id!==record.id&&!isSupersededSubmission(r)&&projectReviewStatus(r)==='approved');
   const byRegistration=new Map();
   for(const other of others){
     for(const row of validScoreRowsWithMeta(other).filter(x=>x.included!==false)){
@@ -4591,7 +4594,7 @@ function fieldDuplicateReconciliation(record, records) {
   if(!record) return [];
   const assessmentType=String(record.assessmentType||'');
   const stream=studentStream(record);
-  const others=fieldExperienceRecords(records||[]).filter(r=>r.id!==record.id&&studentStream(r)===stream&&projectReviewStatus(r)==='approved'&&String(r.assessmentType||'')===assessmentType);
+  const others=fieldExperienceRecords(records||[]).filter(r=>r.id!==record.id&&!isSupersededSubmission(r)&&studentStream(r)===stream&&projectReviewStatus(r)==='approved'&&String(r.assessmentType||'')===assessmentType);
   const byRegistration=new Map();
   for(const other of others){
     for(const row of fieldValidScoreRowsWithMeta(other).filter(item=>item.included!==false)){
@@ -4685,9 +4688,11 @@ function validScoreRows(record) {
   return validScoreRowsWithMeta(record).map(({sourceIndex,included,...row})=>row);
 }
 function approvedProjectScoreRows(record) {
+  if(isSupersededSubmission(record))return [];
   return validScoreRowsWithMeta(record).filter(row=>row.included).map(({sourceIndex,included,...row})=>row);
 }
 function approvedProjectScoreRowsWithMeta(record) {
+  if(isSupersededSubmission(record))return [];
   return validScoreRowsWithMeta(record).filter(row=>row.included);
 }
 function registrationSortValue(value) {
@@ -4956,11 +4961,28 @@ function duplicateClaimInfo(record,records=[]){
 }
 function claimStudentKeys(record){return new Set(claimResultMap(record).keys());}
 function sameClaimant(a,b){a=claimWasPaid(a)&&a.paidClaimSnapshot?a.paidClaimSnapshot:a;b=claimWasPaid(b)&&b.paidClaimSnapshot?b.paidClaimSnapshot:b;const aStaff=cleanHumanText(a.staffId).toLowerCase(),bStaff=cleanHumanText(b.staffId).toLowerCase(),aEmail=cleanHumanText(a.email).toLowerCase(),bEmail=cleanHumanText(b.email).toLowerCase();return Boolean(aStaff&&bStaff?aStaff===bStaff:aEmail&&aEmail===bEmail);}
+function isSupersededSubmission(record){return !claimWasPaid(record)&&record?.paymentDuplicateResolution?.status==='excluded'&&record.paymentDuplicateResolution.matchType==='superseded-by-final'&&Boolean(record.paymentDuplicateResolution.canonicalId);}
+function applyAutomaticSubmissionVersion(record,records){
+  if(!['project-work','field-experience'].includes(record.portalType||'project-work')||claimWasPaid(record))return;
+  const earlier=replacementClaims(record,records).filter(old=>!claimWasPaid(old));if(!earlier.length)return;
+  const now=new Date().toISOString(),by='System, automatic unpaid submission update',note=`Updated version ${record.reference} automatically replaces covered unpaid submission(s) ${earlier.map(old=>old.reference).join(', ')}. Original files and decisions are retained in version history.`,reasonCodes=['corrected-resubmission'];
+  for(const old of earlier){old.paymentDuplicateResolution={status:'excluded',canonicalId:record.id,canonicalReference:record.reference,matchType:'superseded-by-final',reasonCodes,details:note,at:now,by};old.archiveInboxOverride=false;old.archivedAt=now;old.submissionVersion={status:'superseded',currentId:record.id,currentReference:record.reference,at:now,by,automatic:true};old.paymentDuplicateHistory=Array.isArray(old.paymentDuplicateHistory)?old.paymentDuplicateHistory:[];old.paymentDuplicateHistory.push({action:'Automatically replaced by updated submission',note,at:now,by});invalidateDepartmentPaymentApproval(old,by,now,note,'superseded-by-final');}
+  record.automaticVersionUpdate={replacedIds:earlier.map(old=>old.id),replacedReferences:earlier.map(old=>old.reference),at:now,by};record.finalSubmissionDecision={...record.automaticVersionUpdate,automatic:true,reasonCodes,details:note};record.paymentDuplicateHistory=Array.isArray(record.paymentDuplicateHistory)?record.paymentDuplicateHistory:[];record.paymentDuplicateHistory.push({action:'Updated unpaid submission retained automatically',note,at:now,by});
+}
+function submissionVersionFingerprint(records){return crypto.createHash('sha256').update(JSON.stringify(records.map(record=>[record.id,semiManualProjection(record),record.reviewStatus,record.paymentDuplicateResolution,record.paymentWorkflow,record.paymentApproval,record.payroll]).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))))).digest('hex');}
+function submissionVersions(record,records){
+  if(!['project-work','field-experience'].includes(record.portalType||'project-work'))return {history:[],candidates:[],canReplace:false};
+  const inScope=other=>other.department===record.department&&(other.portalType||'project-work')===(record.portalType||'project-work')&&sameClaimant(record,other),scoped=records.filter(inScope),byId=new Map(scoped.map(other=>[other.id,other]));let current=record;const seen=new Set();
+  while(isSupersededSubmission(current)&&!seen.has(current.id)){seen.add(current.id);const next=byId.get(current.paymentDuplicateResolution.canonicalId);if(!next||seen.has(next.id))break;current=next;}
+  const reaches=other=>{const visited=new Set();while(other&&isSupersededSubmission(other)&&!visited.has(other.id)){visited.add(other.id);if(other.paymentDuplicateResolution.canonicalId===current.id)return true;other=byId.get(other.paymentDuplicateResolution.canonicalId);}return false;},history=scoped.filter(other=>other.id!==current.id&&reaches(other)),candidates=isSupersededSubmission(record)?[]:replacementClaims(record,records),summary=other=>({id:other.id,reference:other.reference,submittedAt:other.submittedAt,claimedQuantity:parseFlexiblePositiveCount(other.groupCount),studentCount:new Set((other.portalType==='field-experience'?fieldValidScoreRowsWithMeta(other):validScoreRowsWithMeta(other)).filter(row=>row.included!==false).map(row=>normalizeIndexNumber(row.registrationNo)).filter(Boolean)).size,alreadyPaid:claimWasPaid(other)});
+  return {current:summary(current),history:history.sort((a,b)=>String(b.submittedAt).localeCompare(String(a.submittedAt))).map(summary),candidates:candidates.map(summary),canReplace:candidates.length>0&&!claimWasPaid(record)&&!candidates.some(claimWasPaid)&&!isSupersededSubmission(record),expectedFingerprint:submissionVersionFingerprint([record,...candidates])};
+}
 function replacementClaims(record,records){
   if(!['project-work','field-experience'].includes(record.portalType||'project-work'))return [];
   const finalStudents=claimStudentKeys(record),finalDigests=new Set((record.paymentAttachmentScan?.digests||[]).filter(item=>item.sha256!=='MISSING').map(item=>item.sha256));
   return records.filter(other=>{
     if(other.id===record.id||other.department!==record.department||(other.portalType||'project-work')!==(record.portalType||'project-work')||other.paymentDuplicateResolution?.status==='excluded'||!sameClaimant(record,other)||String(other.submittedAt||'')>=String(record.submittedAt||''))return false;
+    if(studentStream(record)!==studentStream(other))return false;
     if(record.portalType==='field-experience'&&((other.assessmentType||other.assessmentLabel)!==(record.assessmentType||record.assessmentLabel)||String(other.academicYear||other.academicSession||other.submittedAt?.slice(0,4))!==String(record.academicYear||record.academicSession||record.submittedAt?.slice(0,4))))return false;
     const earlierStudents=claimStudentKeys(other);if(earlierStudents.size)return [...earlierStudents].every(key=>finalStudents.has(key));
     const previous=(other.paymentAttachmentScan?.digests||[]).filter(item=>item.sha256&&item.sha256!=='MISSING');return previous.length>0&&previous.every(item=>finalDigests.has(item.sha256));
@@ -5344,6 +5366,7 @@ function feedbackAdminInfoForWork(work, records, department){
 }
 function submissionArchiveState(record) {
   const type=record.portalType||'project-work';
+  if(isSupersededSubmission(record))return {archived:true,archiveEligible:false,archivedAt:record.paymentDuplicateResolution.at||null,archiveReason:'Earlier submission version',supersededBy:record.paymentDuplicateResolution.canonicalId};
   const complete=type==='dissertation'?record.processingStatus!=='returned'&&(['approved','completed','archived'].includes(record.processingStatus)||record.reviewStatus==='approved'):type==='assessor'?assessorClaimReviewStatus(record)==='approved':projectReviewStatus(record)==='approved';
   const archived=complete&&record.archiveInboxOverride!==true;
   return {archived,archiveEligible:complete,archivedAt:archived?(record.archivedAt||record.claimReviewedAt||record.reviewedAt||record.submittedAt||null):null,archiveReason:archived?(type==='dissertation'?'Department processing completed':'Department approved'):''};
@@ -6680,6 +6703,7 @@ app.get('/admin',(_req,res)=>res.sendFile(path.join(__dirname,'admin','chooser.h
 app.get('/admin/admin.css',(_req,res)=>res.set('Cache-Control','no-store').sendFile(path.join(__dirname,'admin','admin.css')));
 app.get('/admin/admin.js',(_req,res)=>res.set('Cache-Control','no-store').sendFile(path.join(__dirname,'admin','admin.js')));
 app.get('/admin/project-evidence.js',(_req,res)=>res.set('Cache-Control','no-store').sendFile(path.join(__dirname,'admin','project-evidence.js')));
+app.get('/admin/submission-versions.js',(_req,res)=>res.set('Cache-Control','no-store').sendFile(path.join(__dirname,'admin','submission-versions.js')));
 app.get('/admin/workspace.js',(_req,res)=>res.set('Cache-Control','no-store').sendFile(path.join(__dirname,'admin','workspace.js')));
 app.get('/admin/copy-review.js',(_req,res)=>res.set('Cache-Control','no-store').sendFile(path.join(__dirname,'admin','copy-review.js')));
 app.get('/admin/bulk-approval.js',(_req,res)=>res.set('Cache-Control','no-store').sendFile(path.join(__dirname,'admin','bulk-approval.js')));
@@ -6819,17 +6843,18 @@ app.post('/api/admin/:department/claims/:id/prior-payment-reconciliation',depart
 app.post('/api/admin/:department/claims/:id/use-final-submission',departmentAuth,claimMutationLock,asyncRoute(async(req,res)=>{
   const records=await readDb(),record=records.find(item=>item.id===req.params.id&&item.department===req.adminDepartment);
   if(!record)return res.status(404).json({error:'Final claim not found in this department.'});if(!requireRecordAccess(req,res,record,'administrator'))return;
-  if(!paymentConsolidationApproved(record))return res.status(409).json({error:'Approve the final submission for consolidation before selecting it for payment.'});
   await refreshClaimAttachmentDigests(records,req.adminDepartment);const previous=replacementClaims(record,records);
   if(claimWasPaid(record)||previous.some(claimWasPaid))return res.status(409).json({error:'The earlier or final claim was already paid. Submit only the additional unpaid work for separate review; previously paid work cannot be paid again.'});
   if(!previous.length||record.paymentDuplicateResolution?.status==='excluded')return res.status(409).json({error:'No earlier unpaid submission by this claimant is fully covered by this final submission.'});
+  for(const source of [record,...previous])if(await claimRegisterService?.locked(source.id))return res.status(409).json({error:'Return the active payment register to the department before replacing a submission version.'});
+  if(req.body.expectedFingerprint&&req.body.expectedFingerprint!==submissionVersionFingerprint([record,...previous]))return res.status(409).json({error:'A submission version changed. Reload the record before confirming replacement.'});
   for(const source of previous)if(!requireRecordAccess(req,res,source,'administrator'))return;
   const reasonCodes=[...new Set((Array.isArray(req.body?.reasonCodes)?req.body.reasonCodes:[]).map(String).filter(code=>['additional-work','corrected-resubmission','final-version-checked'].includes(code)))];if(!reasonCodes.length)return res.status(400).json({error:'Tick a reason for using the final submission.'});
   const details=cleanHumanText(req.body?.details).slice(0,1000),now=new Date().toISOString(),by=adminActorLabel(req,'Department administrator'),note=`Use final submission ${record.reference}; supersede unpaid references ${previous.map(item=>item.reference).join(', ')}. ${details}`.trim();
-  const result=await mutateDb(all=>{const target=all.find(item=>item.id===record.id);if(!target||claimWasPaid(target)||target.paymentDuplicateResolution?.status==='excluded'||!paymentConsolidationApproved(target))return false;
-    const earlier=replacementClaims(target,all);if(!earlier.length||earlier.some(claimWasPaid)||earlier.map(item=>item.id).sort().join('|')!==previous.map(item=>item.id).sort().join('|'))return false;
+  const result=await mutateDb(all=>{const target=all.find(item=>item.id===record.id);if(!target||claimWasPaid(target)||target.paymentDuplicateResolution?.status==='excluded')return false;
+    const earlier=replacementClaims(target,all);if(req.body.expectedFingerprint&&req.body.expectedFingerprint!==submissionVersionFingerprint([target,...earlier]))return false;if(!earlier.length||earlier.some(claimWasPaid)||earlier.map(item=>item.id).sort().join('|')!==previous.map(item=>item.id).sort().join('|'))return false;
     for(const source of records){const current=all.find(item=>item.id===source.id);if(current&&source.paymentAttachmentScan&&duplicateFileSignature(current)===source.paymentAttachmentScan.fileSignature){current.paymentAttachmentScan=source.paymentAttachmentScan;if(source.paidClaimSnapshot&&!current.paidClaimSnapshot)current.paidClaimSnapshot=source.paidClaimSnapshot;}}
-    for(const old of earlier){old.paymentDuplicateResolution={status:'excluded',canonicalId:target.id,canonicalReference:target.reference,matchType:'superseded-by-final',reasonCodes,details,at:now,by};old.paymentDuplicateHistory=Array.isArray(old.paymentDuplicateHistory)?old.paymentDuplicateHistory:[];old.paymentDuplicateHistory.push({action:'Superseded by final submission',note,at:now,by,reasonCodes});invalidateDepartmentPaymentApproval(old,by,now,note,'superseded-by-final');}
+    for(const old of earlier){old.paymentDuplicateResolution={status:'excluded',canonicalId:target.id,canonicalReference:target.reference,matchType:'superseded-by-final',reasonCodes,details,at:now,by};old.paymentDuplicateHistory=Array.isArray(old.paymentDuplicateHistory)?old.paymentDuplicateHistory:[];old.archiveInboxOverride=false;old.archivedAt=now;old.submissionVersion={status:'superseded',currentId:target.id,currentReference:target.reference,at:now,by};old.paymentDuplicateHistory.push({action:'Superseded by final submission',note,at:now,by,reasonCodes});invalidateDepartmentPaymentApproval(old,by,now,note,'superseded-by-final');}
     resetPayrollAfterDepartmentChange(target,by,now,note);const workflow=ensurePaymentWorkflow(target);workflow.stage='department-review';workflow.history.push({stage:'department-review',action:'final-submission-selected',note,at:now,by});
     target.finalSubmissionDecision={replacedIds:earlier.map(item=>item.id),replacedReferences:earlier.map(item=>item.reference),at:now,by,reasonCodes,details};target.paymentDuplicateHistory=Array.isArray(target.paymentDuplicateHistory)?target.paymentDuplicateHistory:[];target.paymentDuplicateHistory.push({action:'Final submission retained',note,at:now,by,reasonCodes});return true;
   });
@@ -7376,6 +7401,7 @@ app.post('/api/admin/:department/submissions/:id/archive',departmentAuth,claimMu
   if(!record)return res.status(404).json({error:'Submission not found in this department.'});
   if(!requireRecordAccess(req,res,record,'administrator'))return;
   const before=submissionArchiveState(record);
+  if(isSupersededSubmission(record))return res.status(409).json({error:'This earlier copy is retained in the current submission’s version history. Open the current version for processing.'});
   if(action==='restore'&&!before.archived)return res.status(409).json({error:'This submission is already in active submissions.'});
   if(action==='archive'&&!before.archiveEligible&&record.portalType!=='dissertation')return res.status(409).json({error:'Approve this submission before archiving it.'});
   const now=new Date().toISOString(),actor=adminActorLabel(req,'Department administrator');
@@ -7414,7 +7440,7 @@ app.get('/api/admin/:department/submissions/:id', departmentAuth, asyncRoute(asy
   if(!requireRecordAccess(req,res,r,'viewer'))return;
   await readClaimNameForReview(r);
   const paymentData=['project-work','field-experience','assessor'].includes(r.portalType||'project-work')?paymentUnitData(r):null;
-  const common={...r,...fieldPaymentPolicy(r),...submissionArchiveState(r),claimantName:claimNameView(r),claimantCertification:claimantCertificationView(r),paymentApproval:paymentApprovalView(r),paymentWorkflow:paymentWorkflowView(r),paymentUnits:paymentData?.units||[],maximumPayableQuantity:paymentData?.maxPayable||0,priorPayment:priorPaymentSummary(r),actualAttachedQuantity:Number(paymentData?.actualQuantity??paymentData?.maxPayable??0),hodForwardReadiness:hodForwardReadiness(r,records),claimAudit:claimAuditView(r)};
+  const common={...r,submissionVersions:submissionVersions(r,records),...fieldPaymentPolicy(r),...submissionArchiveState(r),claimantName:claimNameView(r),claimantCertification:claimantCertificationView(r),paymentApproval:paymentApprovalView(r),paymentWorkflow:paymentWorkflowView(r),paymentUnits:paymentData?.units||[],maximumPayableQuantity:paymentData?.maxPayable||0,priorPayment:priorPaymentSummary(r),actualAttachedQuantity:Number(paymentData?.actualQuantity??paymentData?.maxPayable??0),hodForwardReadiness:hodForwardReadiness(r,records),claimAudit:claimAuditView(r)};
   if((r.portalType||'project-work')==='project-work'){
     return res.json({...common,reviewScoreRows:validScoreRowsWithMeta(r).map((row,i)=>({reviewNo:i+1,sourceIndex:row.sourceIndex,originalSn:row.originalSn,name:row.name,registrationNo:row.registrationNo,groupNo:row.groupNo,totalScore:row.totalScore,included:row.included})),groupValidation:projectGroupValidation(r),duplicateReconciliation:projectDuplicateReconciliation(r,records)});
   }
