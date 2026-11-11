@@ -1,3 +1,10 @@
+## 77.0.0
+
+- Download all selected claims as one matching PDF and Excel pack, with a separate pair for every category and a selection summary.
+- Show selected submission count, aggregated claimant/category rows and claim units together. Include every source submission in the Excel detail sheet.
+- Reject stale export and forwarding selections and invalid or newly ineligible IDs instead of silently downloading a smaller register.
+- Reconcile grouped claimant identity consistently in the screen, PDF and Excel register.
+
 ## 76.0.0
 
 - Add a visible Resolve study centres action and one form to save all chosen programme/group decisions with an administrator reason and audit history.
