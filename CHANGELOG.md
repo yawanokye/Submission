@@ -1,3 +1,14 @@
+## v72, 11 November 2026
+
+- Added an on-demand document evidence check for project-work reconciliation. It compares student names and index numbers in uploaded DOCX, DOC and searchable PDF works with the current score sheet and approved submissions containing repeated indexes. The report shows source passages, PDF pages, group membership matches, different-name conflicts and identical project files.
+- Run bounded text extraction in a separate process with progress reporting. Unreadable, image-only, incomplete and ambiguous evidence remains for manual review. Checks do not change names, scores, index numbers, centre decisions, approvals or payment holds.
+- Map the submitter-selected study centre names or codes through the centre directory and use them to guide reporting-centre suggestions. Unknown or ambiguous mappings remain for manual confirmation. Authorised centre decisions retain every original student index and can use a selected reporting centre outside the index-code clusters.
+- Let HoDs select the submissions to process, preview only those in an A4 PDF and forward a separate signed payment register containing only the chosen claims and documents. Remaining submissions stay pending with HoD and retain their own current document pack.
+- Explain that conflicting rows require administrator permission when viewed by an account without correction authority.
+- Split selected approved claims into separate registers and approval journeys for Project Work, Distance, Project Work, Non-Residential, Field Experience, Teaching Practice and Assessment / Vetting. Each category has separate prepared PDF and Excel downloads. HoD selection can separate an earlier mixed register into category-specific onward registers. A payment register forwarded by HoD accepts one category at a time.
+- Reserve a HoD signature line, name, date and official stamp area beneath every A4 portrait PDF page. Apply an uploaded HoD signature to every endorsed page. Category totals and claimant rows remain above the signing area, with separate category pages even in combined previews.
+- Added document parsing, identity ambiguity, mixed-centre membership, permissions, browser, category routing, selected-only forwarding, centre-guide decisions and multi-page PDF layout checks.
+
 ## v71, 11 November 2026
 
 - Added automatic preparation of grouped registers from approved, unpaid submissions. Claimants are sorted within Project Work, Distance, Project Work, Non-Residential, Field Experience, Teaching Practice and Assessment / Vetting categories. Held quantities and incomplete evidence remain visible for correction.

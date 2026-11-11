@@ -1,12 +1,12 @@
 {
   "name": "ucc-code-eservices",
-  "version": "71.0.0",
+  "version": "72.0.0",
   "private": true,
   "description": "UCC-CoDE eServices portal for submissions, claims, student support and centre coordination",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check admin/admin.js && node --check public/common.js && node --check public/student-support.js && node --check public/support-admin.js && node --check public/staff.js && node --check public/support-knowledge-base.js && node --check developer/developer.js && node --check operations/payroll.js && node --check operations/auditor.js && node --check lib/claim-register-workflow.js && node --check lib/claim-register-pdf.js && node --check public/claim-registers.js && node --check public/register-login.js && node scripts/check-dom-contracts.js",
+    "check": "node --check server.js && node --check admin/admin.js && node --check public/common.js && node --check public/student-support.js && node --check public/support-admin.js && node --check public/staff.js && node --check public/support-knowledge-base.js && node --check developer/developer.js && node --check operations/payroll.js && node --check operations/auditor.js && node --check lib/claim-register-workflow.js && node --check lib/claim-register-pdf.js && node --check public/claim-registers.js && node --check public/register-login.js && node --check lib/project-work-evidence.js && node --check lib/project-evidence-routes.js && node --check lib/project-evidence-worker.js && node --check admin/project-evidence.js && node --check lib/project-centre-guide.js && node scripts/check-dom-contracts.js",
     "test:portals": "node scripts/test-portal-previews.js",
     "test:payments": "node scripts/test-v43-payment-workflow.js",
     "test:duplicates": "node scripts/test-v44-duplicate-policy.js",
@@ -29,7 +29,11 @@
     "test:field-payment-policy": "node scripts/test-v69-field-payment-policy.js",
     "test:hod-accounts": "node scripts/test-v70-hod-accounts.js",
     "test:claim-registers": "node scripts/test-v71-claim-registers.js",
-    "test:submission-archive": "node scripts/test-v71-submission-archive.js"
+    "test:submission-archive": "node scripts/test-v71-submission-archive.js",
+    "test:project-evidence": "node scripts/test-v72-project-evidence.js",
+    "test:register-layout": "node scripts/test-v72-register-layout.js",
+    "test:centre-guide": "node scripts/test-v72-centre-guide.js",
+    "test:hod-selection": "node scripts/test-v72-hod-selection.js"
   },
   "engines": {
     "node": ">=24.14.1 <25"
