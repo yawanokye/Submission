@@ -1,3 +1,12 @@
+## v74, 11 November 2026
+
+- Made project completeness and chapter checking optional. Reconciled approved claims can be selected and forwarded without opening uploaded works, running a content scan or recording a separate document-review declaration. Unrun, unreadable, unmatched or incomplete optional checks no longer create mandatory payment holds.
+- Reconcile submission details, claimed quantities, attached work or candidate counts and recorded student results automatically. Show the recommended payable quantity and any genuine reconciliation exceptions in the claims workspace.
+- Added Approve Selected for Project Work, Field Experience / Teaching Practice and Assessment / Vetting. A single batch summary shows student counts, claim quantities and exceptions before the administrator approves eligible submissions together. Already approved or paid records keep their existing approval and payment history. Successful approvals archive automatically.
+- Put Select all eligible approved and Forward selected to HoD in the claims workspace. Selections from submission lists transfer only eligible approved claims into the category-register preparation step, with an explicit count of records that still need attention. Preserve category separation and selected-only HoD forwarding.
+- Keep original files, scores, student rows, duplicate exclusions and prior-payment decisions unchanged. Actual duplicate / paid-work findings, invalid quantities, missing records and source-integrity checks still protect payment processing. Applying a reduced optional recommendation or rejecting a claim remains an explicit recorded administrator decision.
+- Tested bulk approval without document-opening declarations, optional incomplete-chapter findings, automatic counts, selection, skipped records, stale data, department/section permissions, preserved paid and active-register records, duplicate holds, grouped forwarding, selected HoD processing, portal roles and temporary-error recovery.
+
 ## v73.0.2, 11 November 2026
 
 - Recover the claim-review window from temporary Render restart pages. Parse API errors safely, retry read-only loads after temporary 502/503/504 responses and interrupted connections, and offer Retry and sign-in actions. Preserve verification choices and never automatically resubmit an approval or rejection after an uncertain response.
