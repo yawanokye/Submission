@@ -1,3 +1,7 @@
+## v73.0.1, 11 November 2026
+
+- Keep read-only developer content checks separate from saved departmental audits. An administrator can run and save a full review after a developer preview without reusing an unsaved preview result. Added a regression check that preview audits leave submission records unchanged and administrator audits use a separate job.
+
 ## v73, 11 November 2026
 
 - Organised department administration into Review submissions, Claims & payments, Reports & batches and Archive. Every approved claim remains searchable, including archived, held, forwarded, paid and excluded records. Show academic approval separately from payment readiness, with the current reason and a direct next action. Category filters and explicit selection start with no claims selected.
