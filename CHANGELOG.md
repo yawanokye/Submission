@@ -1,3 +1,10 @@
+## 76.0.0
+
+- Add a visible Resolve study centres action and one form to save all chosen programme/group decisions with an administrator reason and audit history.
+- Count every student in score-sheet group blocks where the group number is written once. Preserve source rows, original index numbers and exclusions.
+- Allow the selected Directorate, Provost, College Finance, Payroll and Audit to verify the immutable supporting pack as soon as the HoD forwards it. Approval actions remain restricted to the current stage.
+- Number uploaded project works in submission details and grouped registers, including existing registers where source metadata remains available.
+
 ## v75, 11 November 2026
 
 - Show an explicit Open retained claim action on submissions excluded from payment as duplicates. Follow superseded references to the current retained record, show the recorded decision and preserve access to the original excluded record. Missing, circular and cross-department links are not followed.

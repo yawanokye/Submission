@@ -1941,7 +1941,13 @@ function projectCentreDecisionMap(record){
 }
 function projectGroupAnalysis(record={},options={}){
   const suppliedRows=Array.isArray(options.rows)?options.rows:null;
-  const sourceRows=(suppliedRows||validScoreRowsWithMeta(record).filter(row=>row.included!==false)).map((row,index)=>({...row,sourceIndex:Number.isInteger(row?.sourceIndex)?row.sourceIndex:index}));
+  // Score templates often show the group only on the first student row. Carry it
+  // through that block before exclusions, while keeping the uploaded rows intact.
+  let currentGroup='';
+  const sourceRows=(suppliedRows||validScoreRowsWithMeta(record)).map((row,index)=>{
+    if(cleanHumanText(row?.groupNo))currentGroup=row.groupNo;
+    return {...row,groupNo:cleanHumanText(row?.groupNo)||currentGroup,sourceIndex:Number.isInteger(row?.sourceIndex)?row.sourceIndex:index};
+  }).filter(row=>row.included!==false);
   const buckets=new Map(),decisions=projectCentreDecisionMap(record),submittedGuide=projectSubmittedCentreGuide(record);
   for(const row of sourceRows){
     const rawGroup=cleanHumanText(row?.groupNo),groupNumber=projectGroupNumberValue(rawGroup),groupKey=normalizeProjectGroupNumber(rawGroup);if(!groupKey)continue;
@@ -7008,20 +7014,25 @@ app.get('/api/admin/:department/project-student-search', departmentAuth, require
   results.sort((a,b)=>String(a.studentName||a.registrationNo).localeCompare(String(b.studentName||b.registrationNo),undefined,{numeric:true,sensitivity:'base'}));
   res.json({ok:true,query,total:results.length,truncated:results.length>200,results:results.slice(0,200)});
 });
-app.post('/api/admin/:department/project-work/:id/centre-decision',departmentAuth,claimMutationLock,requireAdminAccess('project-work','administrator'),async(req,res)=>{
+app.post(['/api/admin/:department/project-work/:id/centre-decision','/api/admin/:department/project-work/:id/centre-decisions'],departmentAuth,claimMutationLock,requireAdminAccess('project-work','administrator'),async(req,res)=>{
   const all=await readDb(),record=all.find(item=>item.id===req.params.id&&item.department===req.adminDepartment&&(item.portalType==='project-work'||!item.portalType));
   if(!record)return res.status(404).json({error:'Project work submission not found in this department.'});
-  const caseKey=cleanHumanText(req.body?.caseKey),action=String(req.body?.action||'').trim().toLowerCase(),reason=cleanHumanText(req.body?.reason).slice(0,500),reasonCodes=[...new Set((Array.isArray(req.body?.reasonCodes)?req.body.reasonCodes:[]).map(value=>String(value||'').trim()).filter(Boolean))].slice(0,20);
+  const bulk=req.path.endsWith('/centre-decisions'),inputs=bulk?req.body?.decisions:[req.body],reason=cleanHumanText(req.body?.reason).slice(0,500),reasonCodes=[...new Set((Array.isArray(req.body?.reasonCodes)?req.body.reasonCodes:[]).map(value=>String(value||'').trim()).filter(Boolean))].slice(0,20);
+  if(!Array.isArray(inputs)||!inputs.length||inputs.length>200)return res.status(400).json({error:'Choose at least one study-centre decision, up to 200 at once.'});
+  if(new Set(inputs.map(input=>input?.caseKey)).size!==inputs.length)return res.status(400).json({error:'Choose one decision per programme/group.'});
+  const now=new Date().toISOString(),by=adminActorLabel(req,'Department administrator'),oldVersion=batchVersion(record),oldStatus=projectReviewStatus(record),savedDecisions=[];
+  for(const input of inputs){
+  const caseKey=cleanHumanText(input?.caseKey),action=String(input?.action||'').trim().toLowerCase();
   if(!caseKey||!['keep-distinct','merge-predominant','apply-suggested-correction'].includes(action))return res.status(400).json({error:'Choose a valid centre decision.'});
   if(!reason)return res.status(400).json({error:'Enter the reason or evidence for this centre decision.'});
   const before=projectGroupAnalysis(record,{approved:true}),reviewCase=before.centreReviewCases.find(item=>item.caseKey===caseKey),automaticCase=before.transferExceptions.find(item=>item.caseKey===caseKey),sourceCase=reviewCase||automaticCase;
   if(!sourceCase)return res.status(409).json({error:'This centre pattern has changed or no longer requires a decision. Refresh the record and review it again.'});
+  if(bulk&&input.centreSignature!==sourceCase.centreSignature)return res.status(409).json({error:'The students or centre pattern changed. Reload the claim before saving these decisions.'});
   if(action==='apply-suggested-correction'&&!(sourceCase.registrationCorrections||[]).length)return res.status(400).json({error:'No safe registration/index-number correction is available for this centre pattern.'});
   if(action==='merge-predominant'&&!sourceCase.canMergePredominant&&!sourceCase.canAdminMerge)return res.status(400).json({error:'This group cannot be merged: the final group must contain three to six students and use one of the identified centre codes.'});
-  const requestedCentre=normalizeCentreCode(req.body?.reportingCentreCode),reportingCentreCode=action==='merge-predominant'?(requestedCentre||sourceCase.suggestedReportingCentreCode||sourceCase.reportingCentreCode):'';
+  const requestedCentre=normalizeCentreCode(input?.reportingCentreCode),reportingCentreCode=action==='merge-predominant'?(requestedCentre||sourceCase.suggestedReportingCentreCode||sourceCase.reportingCentreCode):'';
   const allowedReportingCentres=new Set(sourceCase.reportingCentreOptions||sourceCase.sourceCentres||[sourceCase.reportingCentreCode].filter(Boolean));
   if(action==='merge-predominant'&&(!reportingCentreCode||!allowedReportingCentres.has(reportingCentreCode)))return res.status(400).json({error:'Choose one of the identified study-centre codes as the reporting centre.'});
-  const now=new Date().toISOString(),by=adminActorLabel(req,'Department administrator'),oldVersion=batchVersion(record),oldStatus=projectReviewStatus(record);
   record.projectCentreDecisions=Array.isArray(record.projectCentreDecisions)?record.projectCentreDecisions:[];
   record.projectCentreDecisions=record.projectCentreDecisions.filter(item=>item.caseKey!==caseKey);
   const appliedCorrections=[];
@@ -7039,12 +7050,15 @@ app.post('/api/admin/:department/project-work/:id/centre-decision',departmentAut
   const submittedGuide=projectSubmittedCentreGuide(record);const decision={caseKey,centreSignature:sourceCase.centreSignature,action,reportingCentreCode,reportingCentreSource:submittedGuide.codes.includes(reportingCentreCode)?'submitter-guide':'index-centre-review',submittedCentreGuide:submittedGuide,reason,reasonCodes,corrections:appliedCorrections,decidedAt:now,decidedBy:by};
   if(action!=='apply-suggested-correction')record.projectCentreDecisions.push(decision);
   record.projectCentreDecisionHistory=Array.isArray(record.projectCentreDecisionHistory)?record.projectCentreDecisionHistory:[];record.projectCentreDecisionHistory.push(decision);if(record.projectCentreDecisionHistory.length>200)record.projectCentreDecisionHistory=record.projectCentreDecisionHistory.slice(-200);
+  savedDecisions.push(decision);
+  }
+  const decision=savedDecisions[0];
   record.classificationVersion=oldVersion+1;
   const validation=projectGroupValidation(record,{approved:true});record.groupValidation={...validation,validatedAt:now};
   const reconciliationStatus=validation.valid?'resolved':'in-progress';
   record.projectReconciliation={status:reconciliationStatus,validForFurtherProcessing:validation.valid,updatedAt:now,updatedBy:by,lastComment:reason,resolvedAt:validation.valid?now:null,resolvedBy:validation.valid?by:'',remainingWarnings:validation.issues};
   record.projectReconciliationHistory=Array.isArray(record.projectReconciliationHistory)?record.projectReconciliationHistory:[];
-  record.projectReconciliationHistory.push({status:reconciliationStatus,action,caseKey,reportingCentreCode,comment:reason,remainingWarnings:validation.issues,at:now,by});if(record.projectReconciliationHistory.length>200)record.projectReconciliationHistory=record.projectReconciliationHistory.slice(-200);
+  for(const saved of savedDecisions)record.projectReconciliationHistory.push({status:reconciliationStatus,action:saved.action,caseKey:saved.caseKey,reportingCentreCode:saved.reportingCentreCode,comment:reason,remainingWarnings:validation.issues,at:now,by});if(record.projectReconciliationHistory.length>200)record.projectReconciliationHistory=record.projectReconciliationHistory.slice(-200);
   let newSnapshotRows=[];if(oldStatus==='approved')newSnapshotRows=projectScoreRowsForStream([record],projectStream(record));
   if(oldStatus==='approved'){
     record.reviewStatus='pending';record.reviewNote='Reporting-centre decision requires renewed consolidation approval.';record.reviewedAt=now;record.reviewedBy=by;record.reviewHistory=Array.isArray(record.reviewHistory)?record.reviewHistory:[];record.reviewHistory.push({status:'pending',note:record.reviewNote,reviewedAt:now,reviewedBy:by});
@@ -7054,12 +7068,12 @@ app.post('/api/admin/:department/project-work/:id/centre-decision',departmentAut
   for(const batch of batches){
     if(batch.department!==req.adminDepartment||batch.portalType!=='project-work')continue;
     const item=(batch.items||[]).find(candidate=>candidate.submissionId===record.id&&Number(candidate.classificationVersion||0)===oldVersion);if(!item)continue;
-    const toLabel=action==='keep-distinct'?'Keep centre groups distinct':action==='apply-suggested-correction'?'Apply suggested registration/index-number correction':`Report under predominant centre ${reportingCentreCode}`;
+    const toLabel=savedDecisions.map(saved=>`${saved.caseKey}: ${saved.action==='keep-distinct'?'Keep centre groups distinct':saved.action==='apply-suggested-correction'?'Apply suggested registration/index-number correction':`Report under centre ${saved.reportingCentreCode}`}`).join('; ');
     batch.corrections=Array.isArray(batch.corrections)?batch.corrections:[];batch.corrections.push({submissionId:record.id,reference:record.reference,fromLabel:'Previous Project Work centre allocation',toLabel,reason,at:now,by,oldSnapshotRows:item.snapshotRows||[],newSnapshotRows});affectedBatches++;
   }
   if(affectedBatches)await writeScoreBatches(batches);
   const message=validation.valid?'Reconciliation resolved. The warning has been cleared and the submission is valid for consolidation, claim verification and later processing.':`Decision saved. ${validation.centreReviewCases.length} centre/group case${validation.centreReviewCases.length===1?' remains':'s remain'} to be resolved.`;
-  res.json({ok:true,decision,groupValidation:record.groupValidation,reconciliationStatus,validForFurtherProcessing:validation.valid,message,reviewStatus:projectReviewStatus(record),classificationVersion:record.classificationVersion,affectedBatches});
+  res.json({ok:true,decision,decisions:savedDecisions,groupValidation:record.groupValidation,reconciliationStatus,validForFurtherProcessing:validation.valid,message,reviewStatus:projectReviewStatus(record),classificationVersion:record.classificationVersion,affectedBatches});
 });
 app.post('/api/admin/:department/project-work/:id/review', departmentAuth,claimMutationLock, requireAdminAccess('project-work','administrator'), async(req,res)=>{
   const status=String(req.body?.status||'').trim().toLowerCase();
@@ -7075,7 +7089,7 @@ app.post('/api/admin/:department/project-work/:id/review', departmentAuth,claimM
   }
   if(status==='approved'&&!approvedProjectScoreRows(target).length)return res.status(400).json({error:'At least one score row must remain included before this submission can be approved.'});
   const groupValidation=projectGroupValidation(target,{approved:true});target.groupValidation={...groupValidation,validatedAt:new Date().toISOString()};
-  if(status==='approved'&&groupValidation.requiresCentreReview)return res.status(409).json({error:'Resolve every programme/group centre-review case before approving this submission for consolidation.'});
+  if(status==='approved'&&groupValidation.requiresCentreReview)return res.status(409).json({error:'Save the reporting-centre decisions in Resolve study centres, then approve the scores / reports.',code:'CENTRE_RECONCILIATION_REQUIRED'});
   const now=new Date().toISOString();
   const reviewer=adminActorLabel(req,'Department administrator');
   resetPayrollAfterDepartmentChange(target,reviewer,now,'Departmental Project Work review changed.');
