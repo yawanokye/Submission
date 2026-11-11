@@ -1,3 +1,10 @@
+## v75, 11 November 2026
+
+- Show an explicit Open retained claim action on submissions excluded from payment as duplicates. Follow superseded references to the current retained record, show the recorded decision and preserve access to the original excluded record. Missing, circular and cross-department links are not followed.
+- Label ready claims Add to HoD payment register and explain that excluded copies already approved for reports are processed through the retained reference. Already-paid retained claims lead to payment history rather than a new payment action.
+- Re-enable saving selected score rows when an administrator changes the included rows on an already approved Project Work or Field Experience submission. Restoring the original checkbox selection restores the approved state. Saving academic score changes preserves duplicate-payment exclusions and all existing payment checks.
+- Tested retained-reference navigation, supersession chains, invalid links, decision visibility, score-selection save/revert and preservation of duplicate exclusions.
+
 ## v74, 11 November 2026
 
 - Made project completeness and chapter checking optional. Reconciled approved claims can be selected and forwarded without opening uploaded works, running a content scan or recording a separate document-review declaration. Unrun, unreadable, unmatched or incomplete optional checks no longer create mandatory payment holds.
