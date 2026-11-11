@@ -7,7 +7,7 @@
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <title>UCC Payroll Portal</title>
   <link rel="stylesheet" href="/operations/portal.css?v=65">
-</head>
+<link rel="stylesheet" href="/portal-workspace.css?v=73"><link rel="stylesheet" href="/claim-registers.css"></head>
 <body class="operations-page payroll-page">
 <header class="topbar">
   <div class="brand"><img src="/ucc-logo.png" alt="UCC logo"><div><h1>Payroll Portal</h1><small id="departmentName">Department-Approved Claims</small></div></div>
@@ -18,7 +18,7 @@
     <div><div class="eyebrow">HoD-approved claims only</div><h2>Claims Processing</h2><p>Payroll receives the immutable approved PDF, payable quantity and full audit history. Return a claim to the department when reconciliation is required.</p></div>
     <div class="actions"><button id="downloadCategoryPack" class="btn" type="button">Download Grouped Category Pack</button><button id="downloadAllPacks" class="btn" type="button">Download All Payments Pack</button><a id="approvedRegister" class="btn primary" href="#">Payroll Approved for Payment Register</a><a id="payrollRegister" class="btn" href="#">All Department-Signed Claims Register</a></div>
   </section>
-  <section class="card operations-card">
+  <section id="grouped-claim-registers" data-claim-register-root class="claim-register-app"><p>Loading category registers...</p></section><section class="card operations-card">
     <div class="operations-filters">
       <label>Department<select id="departmentFilter"></select></label>
       <label>Payment category<select id="categoryFilter"><option value="">All payment categories</option><option value="project-distance">Project Work, Distance</option><option value="project-non-residential">Project Work, Non-Residential</option><option value="field-experience">Field Experience</option><option value="teaching-practice">Teaching Practice</option><option value="assessor">Assessment / Vetting</option></select></label><label>Sort by<select id="categorySort"><option value="claimant">Claimant, A–Z</option><option value="oldest">Oldest submission first</option><option value="newest">Newest submission first</option></select></label><label>Activity<select id="activityFilter">
@@ -54,6 +54,6 @@
 </main>
 <dialog id="claimDialog" class="modal"><div class="modal-head"><strong id="claimTitle">Claim Form</strong><button id="closeClaim" class="close" type="button">×</button></div><iframe id="claimFrame" title="Claim form preview"></iframe></dialog>
 <dialog id="auditDialog" class="modal audit-modal"><div class="modal-head"><strong id="auditTitle">Claim Audit History</strong><button id="closeAudit" class="close" type="button">×</button></div><div id="auditBody" class="audit-body"></div></dialog>
-<script src="/operations/payroll.js?v=65"></script>
-</body>
+<script src="/operations/payroll.js?v=73"></script>
+<script src="/vendor/xlsx.full.min.js"></script><script src="/claim-registers.js?v=73"></script><script src="/portal-workspace.js?v=73"></script></body>
 </html>

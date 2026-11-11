@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="icon" href="/favicon.ico">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>Dissertation Submission</title><link rel="stylesheet" href="/styles.css"></head><body>
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>Dissertation Submission</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/portal-workspace.css?v=73"></head><body>
 <header class="topbar"><div class="brand"><img src="/ucc-logo.png" alt="UCC logo"><div><h1>Dissertation Submission</h1><small>Student Submission Portal</small></div></div><div class="top-actions"><a class="navlink" href="/">← All portals</a><a class="navlink login-link" href="/admin-login.html">Login</a></div></header>
 <main class="page-wrap portal-page"><div class="page-intro"><div class="eyebrow">Public Portal 3</div><h2>Submit Your Dissertation</h2><p>Submit a fresh, revised or final dissertation and the required supporting documents.</p></div>
 <div class="submission-layout"><form id="form" class="form-card">
@@ -24,4 +24,4 @@ function syncSubmissionType(){const v=type.value;fresh.hidden=v!=='fresh';revise
 type.addEventListener('change',syncSubmissionType);syncSubmissionType();
 const dissertationDepartment=document.getElementById('departmentSelect');if(dissertationDepartment)dissertationDepartment.addEventListener('change',()=>loadPortalResources('dissertation','resourcesSection','resourceList',dissertationDepartment.value));
 form.addEventListener('submit',async e=>{e.preventDefault();if(!form.reportValidity())return;try{const d=await submitForm(form,'/api/dissertation',status,btn);if(d.titleChangedFromPrevious)status.textContent+=' The current title differs from the previous stage and has been accepted because it matches the uploaded work.';type.value='fresh';syncSubmissionType();}catch{}});
-</script></body></html>
+</script><script src="/portal-workspace.js?v=73"></script></body></html>

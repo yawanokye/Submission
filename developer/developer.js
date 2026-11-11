@@ -12,7 +12,7 @@ async function getJson(url,opt){const r=await fetch(url,opt),d=await r.json().ca
 
 // v27: developer/system-admin sections are tabbed to reduce page clutter.
 const devTabs=[...document.querySelectorAll('.developer-tab')],devPanels=[...document.querySelectorAll('.developer-panel')];
-function activateDeveloperTab(tab){const valid=devTabs.map(b=>b.dataset.devTab);if(!valid.includes(tab))tab='resources';devTabs.forEach(b=>b.classList.toggle('active',b.dataset.devTab===tab));devPanels.forEach(p=>p.classList.toggle('hidden',p.dataset.devPanel!==tab));history.replaceState(null,'',`${location.pathname}${location.search}#${tab}`);}
+function activateDeveloperTab(tab){const valid=devTabs.map(b=>b.dataset.devTab);if(!valid.includes(tab))tab='preview';devTabs.forEach(b=>b.classList.toggle('active',b.dataset.devTab===tab));devPanels.forEach(p=>p.classList.toggle('hidden',p.dataset.devPanel!==tab));history.replaceState(null,'',`${location.pathname}${location.search}#${tab}`);}
 devTabs.forEach(b=>b.addEventListener('click',()=>activateDeveloperTab(b.dataset.devTab)));
 
 let previewOptions={departments:[],staffUnits:[],profiles:[],accounts:[]};
@@ -176,4 +176,4 @@ chatbotImportForm?.addEventListener('submit',async event=>{event.preventDefault(
 document.getElementById('refreshResources').onclick=()=>loadResources().catch(e=>alert(e.message));
 document.getElementById('refreshAdmins').onclick=()=>loadAdmins().catch(e=>alert(e.message));
 document.getElementById('refreshChatbotResponses').onclick=()=>loadChatbotResponses().catch(e=>alert(e.message));
-loadAll().then(()=>activateDeveloperTab((location.hash||'').replace('#','')||'resources')).catch(e=>{console.error(e);resourceStatus.className='status bad';resourceStatus.textContent=e.message||'Could not load developer data.';});
+loadAll().then(()=>activateDeveloperTab((location.hash||'').replace('#','')||'preview')).catch(e=>{console.error(e);resourceStatus.className='status bad';resourceStatus.textContent=e.message||'Could not load developer data.';});

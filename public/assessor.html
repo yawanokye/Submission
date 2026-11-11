@@ -7,7 +7,7 @@
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <title>Assessment / Vetting Report Submission</title>
   <link rel="stylesheet" href="/styles.css">
-</head>
+<link rel="stylesheet" href="/portal-workspace.css?v=73"></head>
 <body>
 <header class="topbar"><div class="brand"><img src="/ucc-logo.png" alt="UCC logo"><div><h1>Assessment / Vetting Report Submission</h1><small>Assessor / Vetter Submission Portal</small></div></div><div class="top-actions"><a class="navlink" href="/">← All portals</a><a class="navlink login-link" href="/admin-login.html">Login</a></div></header>
 <main class="page-wrap portal-page">
@@ -57,4 +57,4 @@ workCount.addEventListener('input',renderWorkEntries);workCount.addEventListener
 form.addEventListener('submit',async e=>{e.preventDefault();if(!form.reportValidity())return;try{await submitForm(form,'/api/assessor',status,btn);if(!assignmentContext){workCount.value='1';renderWorkEntries();}}catch{}});
 loadAssignmentContext();
 </script>
-</body></html>
+<script src="/portal-workspace.js?v=73"></script></body></html>
