@@ -1,3 +1,10 @@
+## 79.0.0
+
+- Allow authorised departmental administrator previews to select ready claims and forward them to HoD, with Developer Preview recorded in the audit history. HoD signatures and downstream approvals continue to require their authorised individual accounts.
+- Explain view-only forwarding restrictions directly beside the ready register controls.
+- Download sent registers as one consolidated PDF for each category, with an index of register references and approval stages. Preserve original saved register pages and check each source hash.
+- Include current sent registers by default, with an option to add returned or replaced historical registers. Restrict exports to the viewer's authorised workflow.
+
 ## 78.0.0
 
 - Automatically retain a new expanded or corrected Project Work or Field Experience upload when it fully contains an earlier unpaid submission in the same category. Return affected approval registers for fresh review without changing paid ledgers.

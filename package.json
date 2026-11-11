@@ -1,12 +1,12 @@
 {
   "name": "ucc-code-eservices",
-  "version": "78.0.0",
+  "version": "79.0.0",
   "private": true,
   "description": "UCC-CoDE eServices portal for submissions, claims, student support and centre coordination",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check admin/admin.js && node --check public/common.js && node --check public/student-support.js && node --check public/support-admin.js && node --check public/staff.js && node --check public/support-knowledge-base.js && node --check developer/developer.js && node --check operations/payroll.js && node --check operations/auditor.js && node --check lib/claim-register-workflow.js && node --check lib/claim-register-pdf.js && node --check public/claim-registers.js && node --check public/register-login.js && node --check lib/project-work-evidence.js && node --check lib/project-evidence-routes.js && node --check lib/project-evidence-worker.js && node --check admin/project-evidence.js && node --check lib/project-centre-guide.js && node --check admin/submission-versions.js && node --check admin/workspace.js && node --check admin/copy-review.js && node --check lib/claim-workspace.js && node --check lib/claim-copy-review.js && node --check public/portal-workspace.js && node --check lib/work-verification.js && node --check lib/project-completion.js && node --check lib/project-content-review.js && node --check lib/bulk-submission-review.js && node --check admin/bulk-approval.js && node scripts/check-dom-contracts.js",
+    "check": "node --check server.js && node --check admin/admin.js && node --check public/common.js && node --check public/student-support.js && node --check public/support-admin.js && node --check public/staff.js && node --check public/support-knowledge-base.js && node --check developer/developer.js && node --check operations/payroll.js && node --check operations/auditor.js && node --check lib/claim-register-combined-pdf.js && node --check lib/claim-register-workflow.js && node --check lib/claim-register-pdf.js && node --check public/claim-registers.js && node --check public/register-login.js && node --check lib/project-work-evidence.js && node --check lib/project-evidence-routes.js && node --check lib/project-evidence-worker.js && node --check admin/project-evidence.js && node --check lib/project-centre-guide.js && node --check admin/submission-versions.js && node --check admin/workspace.js && node --check admin/copy-review.js && node --check lib/claim-workspace.js && node --check lib/claim-copy-review.js && node --check public/portal-workspace.js && node --check lib/work-verification.js && node --check lib/project-completion.js && node --check lib/project-content-review.js && node --check lib/bulk-submission-review.js && node --check admin/bulk-approval.js && node scripts/check-dom-contracts.js",
     "test:portals": "node scripts/test-portal-previews.js",
     "test:payments": "node scripts/test-v43-payment-workflow.js",
     "test:duplicates": "node scripts/test-v44-duplicate-policy.js",
@@ -41,7 +41,8 @@
     "test:payment-entry": "node scripts/test-v75-payment-entry.js",
     "test:centre-resolution": "node scripts/test-v76-centre-resolution.js",
     "test:register-export": "node scripts/test-v77-register-export.js",
-    "test:submission-versions": "node scripts/test-v78-submission-versions.js"
+    "test:submission-versions": "node scripts/test-v78-submission-versions.js",
+    "test:sent-registers": "node scripts/test-v79-sent-registers.js"
   },
   "engines": {
     "node": ">=24.14.1 <25"
@@ -50,6 +51,7 @@
     "express": "^4.21.2",
     "mammoth": "^1.12.0",
     "multer": "^2.0.2",
+    "pdf-lib": "^1.17.1",
     "pdf-parse": "2.4.5",
     "pdfkit": "^0.17.2",
     "word-extractor": "^1.0.4",
