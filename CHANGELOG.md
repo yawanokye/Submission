@@ -1,3 +1,13 @@
+## v71, 11 November 2026
+
+- Added automatic preparation of grouped registers from approved, unpaid submissions. Claimants are sorted within Project Work, Distance, Project Work, Non-Residential, Field Experience, Teaching Practice and Assessment / Vetting categories. Held quantities and incomplete evidence remain visible for correction.
+- Added prepared claim forms, A4 portrait PDF registers with names and claim counts, Excel and CSV registers, and complete document ZIP packs. The HoD's protected signature endorses the register and each prepared claim form after password confirmation. Official covering letters remain part of the manual process.
+- Added read-only register routing from HoD to the selected Directorate, Provost, College Finance Officer, Payroll and Audit. Officers can return a register to HoD or the department with a recorded reason. Corrected department submissions create a revised register while preserving earlier documents and decisions.
+- Copy and verify supporting documents at preparation, check source changes before approval, prevent split individual approval or deletion of grouped claims, and retain payout controls and existing claim-verification records. Existing individual workflows remain available for earlier claims.
+- Added Payroll template imports and configurable Excel / CSV columns, protected document sign-in links, receiving-unit email and SMS messages, delivery history and an animated Action required indicator with reduced-motion support.
+- Approved submissions now leave the active admin lists automatically across all categories. Active, Archive and All views retain original documents, claims, exports and audit history. Administrators can restore a record to active work, or complete dissertation processing and archive it without recording an academic result.
+- Added isolated approval-chain, browser, export, document-integrity, notification, permission, payout and archive tests. Reviewed multi-page A4 portrait PDF layout with long claimant names and a signature.
+
 ## v70, 10 November 2026
 
 - Added an explicit Create Full HoD Account option and Full HoD role in Developer Administration > Administrators. Choosing HoD departments automatically supplies department access, academic and claim sections, signature management and HoD payment authority.

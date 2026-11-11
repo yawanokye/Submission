@@ -20,6 +20,8 @@ const asyncRoute=handler=>(req,res,next)=>{res.setHeader('Cache-Control','no-sto
 // Serialize authorised claim mutations so a concurrent payment action cannot
 // restore an earlier approval after a final-version or duplicate decision.
 let claimActionQueue=Promise.resolve();
+let claimRegisterService=null;
+async function guardIndividualClaimRoute(req,res,next){try{const packet=await claimRegisterService?.locked(req.params.id);if(packet&&!claimRegisterService.canView(packet,req.adminIdentity||req.staffIdentity,req.adminDepartment||false))return res.status(404).json({error:'Claim not found in your authorised workflow.'});if(packet)return res.status(409).json({error:`This submission is part of ${packet.reference}. Record the decision on its grouped register.`,registerUrl:`/claim-registers/${packet.id}`});next();}catch(exception){next(exception);}}
 function claimMutationLock(req,res,next){let release;const gate=new Promise(resolve=>release=resolve),previous=claimActionQueue.catch(()=>{});claimActionQueue=previous.then(()=>gate);res.once('finish',release);res.once('close',release);previous.then(()=>{if(res.destroyed)release();else next();});}
 app.set('trust proxy', 1);
 
@@ -5320,6 +5322,12 @@ function feedbackAdminInfoForWork(work, records, department){
   const state=!email?'unavailable':feedbackState(work?.feedback);
   return {state,email,studentSubmissionId:student?.id||work?.studentSubmissionId||null,studentSubmissionType:student?.submissionType||work?.studentSubmissionType||'',sentAt:work?.feedback?.sentAt||null,downloadedAt:work?.feedback?.downloadedAt||null,downloadCount:Number(work?.feedback?.downloadCount||0),lastEmailError:work?.feedback?.lastEmailError||''};
 }
+function submissionArchiveState(record) {
+  const type=record.portalType||'project-work';
+  const complete=type==='dissertation'?record.processingStatus!=='returned'&&(['approved','completed','archived'].includes(record.processingStatus)||record.reviewStatus==='approved'):type==='assessor'?assessorClaimReviewStatus(record)==='approved':projectReviewStatus(record)==='approved';
+  const archived=complete&&record.archiveInboxOverride!==true;
+  return {archived,archiveEligible:complete,archivedAt:archived?(record.archivedAt||record.claimReviewedAt||record.reviewedAt||record.submittedAt||null):null,archiveReason:archived?(type==='dissertation'?'Department processing completed':'Department approved'):''};
+}
 function adminRecordsMap(records, assignments=[]) {
   return records.slice().reverse().map(r=>{
     const submissionType=r.submissionType||'fresh';
@@ -5327,7 +5335,7 @@ function adminRecordsMap(records, assignments=[]) {
     const info=expectedAssignmentType?dissertationAssignmentInfo(r.id,assignments,expectedAssignmentType):{count:0,assessors:[]};
     const assignmentLimit=submissionType==='revised'?2:submissionType==='fresh'?3:0;
     return {
-      ...fieldPaymentPolicy(r),id:r.id,reference:r.reference,submittedAt:r.submittedAt,portalType:r.portalType||'project-work',
+      ...fieldPaymentPolicy(r),...submissionArchiveState(r),id:r.id,reference:r.reference,submittedAt:r.submittedAt,portalType:r.portalType||'project-work',
       name:r.portalType==='dissertation'?(r.studentName||''):claimName(r),claimantName:claimNameView(r),secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
       title:r.title||r.studentTitle||r.assessorTitle||'',firstName:r.firstName||r.studentFirstName||r.assessorFirstName||'',middleName:r.middleName||r.studentMiddleName||r.assessorMiddleName||'',lastName:r.lastName||r.studentLastName||r.assessorLastName||'',
       email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:(r.portalType==='project-work'||!r.portalType||r.portalType==='field-experience')?studyCentreDisplay(r):(r.studyCentre||''),studyCentres:(r.portalType==='project-work'||!r.portalType||r.portalType==='field-experience')?projectStudyCentres(r):[],studentStream:(r.portalType==='project-work'||!r.portalType||r.portalType==='field-experience')?studentStream(r):'',projectStream:(r.portalType==='project-work'||!r.portalType)?projectStream(r):'',classificationVersion:Number(r.classificationVersion||0),classificationHistory:Array.isArray(r.classificationHistory)?r.classificationHistory:[],assessmentType:r.portalType==='field-experience'?(r.assessmentType||'legacy'):'',assessmentLabel:r.portalType==='field-experience'?fieldAssessmentLabel(r):'',scoreRows:r.portalType==='field-experience'?fieldValidScoreRows(r).length:validScoreRows(r).length,scoreRowsIncluded:(r.portalType==='project-work'||!r.portalType)?approvedProjectScoreRows(r).length:(r.portalType==='field-experience'?approvedFieldExperienceScoreRows(r).length:validScoreRows(r).length),
@@ -5369,7 +5377,7 @@ async function deleteDepartmentSubmissions(department, ids) {
   const all=await readDb();
   const targets=all.filter(r=>r.department===department && unique.includes(r.id));
   if(!targets.length) return {deleted:0, records:[]};
-  const protectedRecords=targets.filter(record=>claimWasPaid(record)||paymentApprovalDocuments(record).length||record.priorPaymentReconciliation||record.paymentDuplicateResolution||all.some(other=>other.paymentDuplicateResolution?.canonicalId===record.id));
+  const protectedRecords=targets.filter(record=>record.claimRegisterId||claimWasPaid(record)||paymentApprovalDocuments(record).length||record.priorPaymentReconciliation||record.paymentDuplicateResolution||all.some(other=>other.paymentDuplicateResolution?.canonicalId===record.id));
   if(protectedRecords.length)return {deleted:0,error:'These claims contain payment or duplicate-reconciliation history. Keep them for audit and exclude repeated claims from payment instead.',references:protectedRecords.map(record=>record.reference)};
   const targetIds=new Set(targets.map(r=>r.id));
   await writeDb(all.filter(r=>!targetIds.has(r.id)));
@@ -6281,7 +6289,7 @@ app.get('/api/staff/payment-claims/:id/processing-options',staffAuth,asyncRoute(
   if(!record||paymentWorkflowView(record).stage!=='pending-college-finance'||!normalizeStaffUnits(req.staffIdentity.units).includes('college-finance')||(ROLE_RANK[req.staffIdentity.role]||0)<ROLE_RANK.officer)return res.status(403).json({error:'Only the College Finance Officer can assign claim processing at this stage.'});
   res.json({officers:(await readAdminUsers()).filter(account=>eligibleClaimFinanceOfficer(account,record)).map(account=>({id:account.id,name:account.name||account.username,email:account.email||''}))});
 }));
-app.post('/api/staff/payment-claims/:id/decision' ,staffAuth,claimMutationLock,asyncRoute(async(req,res)=>{
+app.post('/api/staff/payment-claims/:id/decision' ,staffAuth,claimMutationLock,guardIndividualClaimRoute,asyncRoute(async(req,res)=>{
   if((ROLE_RANK[req.staffIdentity?.role]||0)<ROLE_RANK.officer)return res.status(403).json({error:'Officer or administrator access is required to record an approval decision.'});
   const decision=String(req.body?.decision||'').trim().toLowerCase(),note=cleanHumanText(req.body?.note).slice(0,1500),reasonCodes=[...new Set((Array.isArray(req.body?.reasonCodes)?req.body.reasonCodes:[]).map(value=>String(value||'').trim()).filter(Boolean))].slice(0,20),reasonDetails=cleanHumanText(req.body?.reasonDetails).slice(0,1000);if(!['approve','return'].includes(decision))return res.status(400).json({error:'Choose Approve or Return to Department.'});if(decision==='return'&&!note)return res.status(400).json({error:'Enter the reason for returning the claim.'});
   const all=await readDb(),record=paymentClaimsForStaff(all,req.staffIdentity).find(item=>item.id===req.params.id);if(!record)return res.status(404).json({error:'This claim is not waiting in your current functional-unit register.'});
@@ -6837,14 +6845,14 @@ app.post('/api/admin/:department/claims/forward-approved-to-hod',departmentAuth,
   const note=cleanHumanText(req.body?.note).slice(0,1000);for(const record of records)forwardClaimRecordToHod(record,req,note,all);await writeDb(all);
   const deliveries=[];for(const record of records){const sent=await dispatchClaimApprovalNotification(record,'pending-hod',req).catch(error=>[{channel:'notification',status:'failed',error:String(error.message||error),at:new Date().toISOString()}]);deliveries.push({reference:record.reference,deliveries:sent});await mutateRecordById(record.id,target=>{const workflow=ensurePaymentWorkflow(target);workflow.notifications=Array.isArray(workflow.notifications)?workflow.notifications:[];workflow.notifications.push(...sent);return true;});}
   res.json({ok:true,count:records.length,totalQuantity:records.reduce((sum,record)=>sum+Number(paymentUnitData(record).maxPayable||0),0),references:records.map(record=>record.reference),notificationDeliveries:deliveries});}));
-app.post('/api/admin/:department/claims/:id/forward-for-payment',departmentAuth,claimMutationLock,asyncRoute(async(req,res)=>{
+app.post('/api/admin/:department/claims/:id/forward-for-payment',departmentAuth,claimMutationLock,guardIndividualClaimRoute,asyncRoute(async(req,res)=>{
   const all=await readDb(),record=all.find(item=>item.id===req.params.id&&item.department===req.adminDepartment&&['project-work','field-experience','assessor'].includes(item.portalType||'project-work'));
   if(!record)return res.status(404).json({error:'Claim submission not found in this department.'});if(!requireRecordAccess(req,res,record,'administrator'))return;
   await refreshClaimAttachmentDigests(all,req.adminDepartment);
   const result=forwardClaimRecordToHod(record,req,req.body?.note,all);if(!result.ready)return res.status(400).json({error:result.reasons.join(' '),reasons:result.reasons,claimedQuantity:result.claimedQuantity,actualAttachedQuantity:result.actualAttachedQuantity});
   await writeDb(all);const deliveries=await dispatchClaimApprovalNotification(record,'pending-hod',req).catch(error=>[{channel:'notification',status:'failed',error:String(error.message||error),at:new Date().toISOString()}]);await mutateRecordById(record.id,target=>{const wf=ensurePaymentWorkflow(target);wf.notifications=Array.isArray(wf.notifications)?wf.notifications:[];wf.notifications.push(...deliveries);return true;});
   res.json({ok:true,paymentWorkflow:paymentWorkflowView(record),actualAttachedQuantity:result.actualAttachedQuantity,statedClaimQuantity:result.claimedQuantity,notificationDeliveries:deliveries});}));
-app.post('/api/admin/:department/claims/:id/payment-approval', departmentAuth,claimMutationLock, asyncRoute(async(req,res)=>{
+app.post('/api/admin/:department/claims/:id/payment-approval', departmentAuth,claimMutationLock,guardIndividualClaimRoute, asyncRoute(async(req,res)=>{
   const all=await readDb(),record=all.find(item=>item.id===req.params.id&&item.department===req.adminDepartment&&['project-work','field-experience','assessor'].includes(item.portalType||'project-work'));
   if(!record)return res.status(404).json({error:'Claim submission not found in this department.'});
   if(!requireRecordAccess(req,res,record,'administrator'))return;
@@ -7052,7 +7060,7 @@ app.post('/api/admin/:department/project-work/:id/review', departmentAuth,claimM
   const now=new Date().toISOString();
   const reviewer=adminActorLabel(req,'Department administrator');
   resetPayrollAfterDepartmentChange(target,reviewer,now,'Departmental Project Work review changed.');
-  target.reviewStatus=status; target.reviewNote=note; target.reviewedAt=now; target.reviewedBy=reviewer;
+  target.reviewStatus=status; if(status==='approved'){target.archiveInboxOverride=false;target.archivedAt=now;} target.reviewNote=note; target.reviewedAt=now; target.reviewedBy=reviewer;
   target.reviewHistory=Array.isArray(target.reviewHistory)?target.reviewHistory:[];
   target.reviewHistory.push({status,note,reasonCodes,reasonDetails,reviewedAt:now,reviewedBy:reviewer});
   if(target.reviewHistory.length>50) target.reviewHistory=target.reviewHistory.slice(-50);
@@ -7130,7 +7138,7 @@ app.post('/api/admin/:department/project-work/:id/reconcile-duplicates', departm
       const record=all.find(r=>r.id===id&&r.department===req.adminDepartment&&(r.portalType==='project-work'||!r.portalType));
       if(!record)continue;
       if(!approvedProjectScoreRows(record).length)return res.status(400).json({error:`${record.reference||record.id} would have no approved score rows. Delete the whole submission instead, or keep at least one row.`});
-      record.reviewStatus='approved';record.reviewedAt=now;record.reviewedBy=reviewer;
+      record.reviewStatus='approved';record.archiveInboxOverride=false;record.archivedAt=now;record.reviewedAt=now;record.reviewedBy=reviewer;
       record.reviewNote=`Re-approved after duplicate reconciliation. ${audit.length} correction(s), ${removedAudit.length} row removal(s).`;
       record.reviewHistory=Array.isArray(record.reviewHistory)?record.reviewHistory:[];
       record.reviewHistory.push({status:'approved',note:record.reviewNote,reviewedAt:now,reviewedBy:reviewer,action:'duplicate-reconciliation'});
@@ -7205,7 +7213,7 @@ app.post('/api/admin/:department/field-experience/:id/review', departmentAuth,cl
   const now=new Date().toISOString();
   const reviewer=adminActorLabel(req,'Department administrator');
   resetPayrollAfterDepartmentChange(target,reviewer,now,'Departmental Field Experience and Teaching Practice review changed.');
-  target.reviewStatus=status; target.reviewNote=note; target.reviewedAt=now; target.reviewedBy=reviewer;
+  target.reviewStatus=status; if(status==='approved'){target.archiveInboxOverride=false;target.archivedAt=now;} target.reviewNote=note; target.reviewedAt=now; target.reviewedBy=reviewer;
   target.reviewHistory=Array.isArray(target.reviewHistory)?target.reviewHistory:[];
   target.reviewHistory.push({status,note,reasonCodes,reasonDetails,reviewedAt:now,reviewedBy:reviewer});
   if(target.reviewHistory.length>50) target.reviewHistory=target.reviewHistory.slice(-50);
@@ -7268,7 +7276,7 @@ app.post('/api/admin/:department/field-experience/:id/reconcile-duplicates', dep
       const record=all.find(r=>r.id===id&&r.department===req.adminDepartment&&r.portalType==='field-experience'&&String(r.assessmentType||'')===assessmentType);
       if(!record)continue;
       if(!approvedFieldExperienceScoreRows(record).length)return res.status(400).json({error:`${record.reference||record.id} would have no approved score rows. Delete the whole submission instead, or keep at least one row.`});
-      record.reviewStatus='approved';record.reviewedAt=now;record.reviewedBy=reviewer;record.reviewNote=`Re-approved after duplicate reconciliation. ${audit.length} correction(s), ${removedAudit.length} row removal(s).`;
+      record.reviewStatus='approved';record.archiveInboxOverride=false;record.archivedAt=now;record.reviewedAt=now;record.reviewedBy=reviewer;record.reviewNote=`Re-approved after duplicate reconciliation. ${audit.length} correction(s), ${removedAudit.length} row removal(s).`;
       record.reviewHistory=Array.isArray(record.reviewHistory)?record.reviewHistory:[];
       record.reviewHistory.push({status:'approved',note:record.reviewNote,reviewedAt:now,reviewedBy:reviewer,action:'duplicate-reconciliation'});
       if(record.reviewHistory.length>50)record.reviewHistory=record.reviewHistory.slice(-50);
@@ -7303,7 +7311,7 @@ app.post('/api/admin/:department/assessor/:id/claim-review', departmentAuth,clai
   const validation=paymentClaimValidation(record),claims=paymentRecordFiles(record,'claimForm');
   if(status==='approved'&&(!validation.valid||claims.length<validation.claimedQuantity))return res.status(400).json({error:'Every claimed dissertation activity must have one report, score sheet and claim form before department approval.'});
   const now=new Date().toISOString(),reviewer=adminActorLabel(req,'Department administrator');
-  record.claimReviewStatus=status;record.claimReviewNote=note;record.claimReviewedAt=now;record.claimReviewedBy=reviewer;
+  record.claimReviewStatus=status;if(status==='approved'){record.archiveInboxOverride=false;record.archivedAt=now;}record.claimReviewNote=note;record.claimReviewedAt=now;record.claimReviewedBy=reviewer;
   record.claimReviewHistory=Array.isArray(record.claimReviewHistory)?record.claimReviewHistory:[];
   record.claimReviewHistory.push({status,note,reasonCodes,reasonDetails,reviewedAt:now,reviewedBy:reviewer});
   if(record.claimReviewHistory.length>50)record.claimReviewHistory=record.claimReviewHistory.slice(-50);
@@ -7328,6 +7336,25 @@ app.post('/api/admin/:department/dissertations/:id/return-to-student', departmen
   }catch(e){const fresh=await readDb();const target=fresh.find(r=>r.id===record.id);if(target){target.returnEmailStatus='failed';target.returnEmailError=String(e.message||e).slice(0,500);await writeDb(fresh);}return res.status(502).json({error:`The dissertation was marked Returned to Student, but the email could not be sent: ${e.message||e}`});}
 });
 
+app.post('/api/admin/:department/submissions/:id/archive',departmentAuth,claimMutationLock,asyncRoute(async(req,res)=>{
+  const action=String(req.body?.action||'');
+  if(!['archive','restore'].includes(action))return res.status(400).json({error:'Choose Archive or Restore to active submissions.'});
+  const records=await readDb(),record=records.find(item=>item.id===req.params.id&&item.department===req.adminDepartment);
+  if(!record)return res.status(404).json({error:'Submission not found in this department.'});
+  if(!requireRecordAccess(req,res,record,'administrator'))return;
+  const before=submissionArchiveState(record);
+  if(action==='restore'&&!before.archived)return res.status(409).json({error:'This submission is already in active submissions.'});
+  if(action==='archive'&&!before.archiveEligible&&record.portalType!=='dissertation')return res.status(409).json({error:'Approve this submission before archiving it.'});
+  const now=new Date().toISOString(),actor=adminActorLabel(req,'Department administrator');
+  if(action==='archive'){
+    if(record.portalType==='dissertation'&&!before.archiveEligible){record.processingStatus='completed';record.processingCompletedAt=now;record.processingCompletedBy=actor;}
+    record.archiveInboxOverride=false;record.archivedAt=now;
+  }else record.archiveInboxOverride=true;
+  record.archiveHistory=Array.isArray(record.archiveHistory)?record.archiveHistory:[];
+  record.archiveHistory.push({action,at:now,by:actor});
+  await writeDb(records);
+  res.json({ok:true,...submissionArchiveState(record)});
+}));
 app.delete('/api/admin/:department/submissions/:id', departmentAuth,claimMutationLock, async(req,res)=>{
   const records=await readDepartmentClaims(req.adminDepartment);const target=records.find(r=>r.id===req.params.id);
   if(!target)return res.status(404).json({error:'Submission not found in this department.'});
@@ -7354,7 +7381,7 @@ app.get('/api/admin/:department/submissions/:id', departmentAuth, asyncRoute(asy
   if(!requireRecordAccess(req,res,r,'viewer'))return;
   await readClaimNameForReview(r);
   const paymentData=['project-work','field-experience','assessor'].includes(r.portalType||'project-work')?paymentUnitData(r):null;
-  const common={...r,...fieldPaymentPolicy(r),claimantName:claimNameView(r),claimantCertification:claimantCertificationView(r),paymentApproval:paymentApprovalView(r),paymentWorkflow:paymentWorkflowView(r),paymentUnits:paymentData?.units||[],maximumPayableQuantity:paymentData?.maxPayable||0,priorPayment:priorPaymentSummary(r),actualAttachedQuantity:Number(paymentData?.actualQuantity??paymentData?.maxPayable??0),hodForwardReadiness:hodForwardReadiness(r,records),claimAudit:claimAuditView(r)};
+  const common={...r,...fieldPaymentPolicy(r),...submissionArchiveState(r),claimantName:claimNameView(r),claimantCertification:claimantCertificationView(r),paymentApproval:paymentApprovalView(r),paymentWorkflow:paymentWorkflowView(r),paymentUnits:paymentData?.units||[],maximumPayableQuantity:paymentData?.maxPayable||0,priorPayment:priorPaymentSummary(r),actualAttachedQuantity:Number(paymentData?.actualQuantity??paymentData?.maxPayable??0),hodForwardReadiness:hodForwardReadiness(r,records),claimAudit:claimAuditView(r)};
   if((r.portalType||'project-work')==='project-work'){
     return res.json({...common,reviewScoreRows:validScoreRowsWithMeta(r).map((row,i)=>({reviewNo:i+1,sourceIndex:row.sourceIndex,originalSn:row.originalSn,name:row.name,registrationNo:row.registrationNo,groupNo:row.groupNo,totalScore:row.totalScore,included:row.included})),groupValidation:projectGroupValidation(r),duplicateReconciliation:projectDuplicateReconciliation(r,records)});
   }
@@ -7662,6 +7689,8 @@ app.post('/api/payroll/:department/claims/:id/status', departmentAuth,claimMutat
   if(!record)return res.status(404).json({error:'Approved departmental claim not found.'});
   if(claimWasPaid(record))return res.status(409).json({error:'This claim has already been paid. Its payment record must remain unchanged; Finance must handle any recovery separately.'});
   if(fieldScoreOnly(record)&&['verified','approved-for-payment','paid'].includes(status))return res.status(409).json({error:fieldPaymentPolicy(record).paymentPolicyLabel});
+  if(record.claimRegisterId&&status==='paid'){const packet=(await claimRegisterService.read()).find(packet=>packet.id===record.claimRegisterId);if(!packet||packet.stage!=='completed')return res.status(409).json({error:'Complete the grouped register approval through Audit before recording payment.'});}
+  if(record.claimRegisterId&&status!=='paid')return res.status(409).json({error:'Record approval and return decisions on the grouped claim register.'});
   if(['verified','approved-for-payment','paid'].includes(status)){await refreshClaimAttachmentDigests(all,record.department);const duplicateClaim=duplicateClaimInfo(record,all);if(duplicateClaim.duplicate)return res.status(409).json({error:duplicatePaymentMessage(duplicateClaim),duplicateClaim});}
   if(departmentPaymentApprovalStatus(record)!=='approved'&&status!=='pending')return res.status(400).json({error:'Only a current HoD-approved claim can be processed for payment.'});
   const validation=paymentClaimValidation(record);
@@ -7756,16 +7785,7 @@ app.get('/api/admin/:department/summary',departmentAuth,asyncRoute(async(req,res
 app.get('/health',async(_req,res)=>{const admins=await readAdminUsers(),centreCatalogue=await readStudyCentreCatalogue(),centreDirectory=await readStudyCentreDirectory(),supportTickets=await readSupportTickets();const centreCount=Object.values(centreCatalogue).reduce((n,list)=>n+(Array.isArray(list)?list.length:0),0);const activeSessions=Number(supportDatabase.prepare('SELECT COUNT(*) AS count FROM portal_sessions WHERE expires_at > ?').get(Date.now())?.count||0);res.json({ok:true,appName:'UCC-CoDE eServices',departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',smsConfigured:supportMobileChannelConfigured('sms'),smsProvider:supportMobileChannelConfigured('sms')?'arkesel':'',resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:admins.length,pendingAdminInvitations:admins.filter(a=>!a.passwordHash&&a.invitationTokenHash).length,studyCentres:centreCount,studyCentreDirectory:centreDirectory.length,supportTickets:supportTickets.length,sessionStore:'sqlite',persistentSessions:true,activeSessions,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'});});
 app.get('/vendor/xlsx.full.min.js', (_req,res)=>res.sendFile(path.join(__dirname,'node_modules','xlsx','dist','xlsx.full.min.js')));
 app.use(express.static(path.join(__dirname,'public'),{extensions:['html']}));
-app.use((err,req,res,_next)=>{
-  console.error(err);
-  if(err instanceof multer.MulterError){
-    const secureAssignment=req.path.startsWith('/secure/support-assignment/');
-    const message=err.code==='LIMIT_FILE_SIZE'?(secureAssignment?'An uploaded evidence file exceeds the 15 MB limit.':'A file exceeds the 100 MB server limit.'):err.code==='LIMIT_FILE_COUNT'?(secureAssignment?'No more than 10 evidence files may be uploaded.':'Too many files were uploaded.'):err.message;
-    if(secureAssignment)return res.status(400).type('html').send(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:32px"><h1>Upload not completed</h1><p>${htmlEscape(message)}</p><p><a href="${htmlEscape(req.originalUrl.replace(/\/resolve$/,''))}">Return to the assigned case</a></p></body></html>`);
-    return res.status(400).json({error:message});
-  }
-  res.status(500).json({error:'Unexpected server error.'});
-});
+
 
 async function supportLifecycleRecipients(ticket) {
   const accounts = (await readAdminUsers()).filter(account => account.active !== false && (ROLE_RANK[account.role] || 0) >= ROLE_RANK.officer && isEmail(account.email));
@@ -7868,6 +7888,42 @@ async function refreshSupportLifecycle() {
 
 const supportLifecycleTimer = setInterval(() => refreshSupportLifecycle().catch(error => console.error('Support lifecycle refresh failed:', error.message)), 15 * 60 * 1000);
 supportLifecycleTimer.unref();
+function semiManualProjection(record){
+  const fields=['reference','department','portalType','email','staffId','groupCount','workCount','claimedGroupCount','claimedCandidateCount','claimQuantityBasis','studentStream','projectStream','assessmentType','reviewStatus','claimReviewStatus','scoreSheet','scoreReviewExcludedRows','projectScoreReviewExcludedRows','fieldScoreReviewExcludedRows','projectCentreDecisions','fieldCentreDecisions','claimQuantityReconciliation','priorPaymentReconciliation','files'];
+  return {...Object.fromEntries(fields.map(key=>[key,record[key]])),name:claimName(record),works:(record.works||[]).map(work=>({studentName:work.studentName,indexNumber:work.indexNumber,files:work.files}))};
+}
+function evaluateSemiManualClaim(record,all){
+  const payment=paymentUnitData(record),duplicate=duplicateClaimInfo(record,all),actual=Number(payment.actualQuantity??payment.maxPayable),claimed=Number(payment.claimedQuantity||0),reasons=claimAttachmentIssues(record).filter(reason=>!/^Claim form /i.test(reason)),validation=payment.validation||{},reconciled=attachmentQuantityReconciliation(record);
+  if(duplicate.duplicate)reasons.push(duplicatePaymentMessage(duplicate));
+  if(actual<1||payment.maxPayable<1)reasons.push('No eligible unpaid claim units are available.');
+  if(actual!==claimed&&!reconciled)reasons.push(`The stated claim quantity (${claimed}) must match verified works or candidates (${actual}).`);
+  if(validation.requiresScoreReview)reasons.push('Resolve missing or conflicting candidate scores.');
+  if(validation.requiresCentreReview&&!reconciled)reasons.push('Complete the study-centre reconciliation.');
+  return {reasons,item:{id:record.id,reference:record.reference,portalType:record.portalType||'project-work',departmentName:record.departmentName||DEPARTMENTS[record.department]?.name,name:claimName(record),email:record.email||'',staffId:record.staffId||'',category:hodClaimCategory(record),categoryLabel:HOD_CLAIM_CATEGORIES[hodClaimCategory(record)],statedQuantity:claimed,quantity:Number(payment.maxPayable||0),previouslyPaidQuantity:payment.previouslyPaidQuantity||0,approvedUnits:payment.units.filter(unit=>unit.eligible!==false).map(unit=>({key:unit.key,label:unit.label}))}};
+}
+async function claimRegisterRecipients(unit,department,creatorId){
+  const accounts=await readAdminUsers(),settings=await readPortalSettings(),contacts=[];
+  for(const account of accounts){if(account.active===false||(ROLE_RANK[account.role]||0)<ROLE_RANK.officer)continue;const departmentAllowed=!(account.departments||[]).length||(account.departments||[]).includes(department),hasUnit=unit==='department'?(account.id===creatorId||account.role==='administrator'&&(account.departments||[]).includes(department)):unit==='hod'?account.role==='administrator'&&normalizeHodDepartments(account.hodDepartments,account.departments).includes(department):departmentAllowed&&normalizeStaffUnits(account.units).includes(unit);if(hasUnit)contacts.push({name:account.name||account.username,email:account.email||'',phone:account.phone||''});}
+  const configured=settings.approvalOfficers?.[unit==='hod'?`hod-${department}`:unit];if(configured)contacts.push(configured);
+  const seen=new Set();return contacts.filter(contact=>{const key=String(contact.email||contact.phone||'').toLowerCase();if(!key||seen.has(key))return false;seen.add(key);return true;});
+}
+claimRegisterService=require('./lib/claim-register-workflow')(app,{
+  root:__dirname,dataDir:DATA_DIR,filesDir:FILES_DIR,lock:claimMutationLock,departmentAuth,loginLimit:supportRateLimit(15),createSession:createAdminSession,sessionTtl:ADMIN_SESSION_TTL_MS,categories:HOD_CLAIM_CATEGORIES,departmentName:department=>DEPARTMENTS[department]?.name||department,
+  readDb,writeDb,refreshDigests:refreshClaimAttachmentDigests,ensureWorkflow:ensurePaymentWorkflow,isApproved:paymentConsolidationApproved,scoreOnly:fieldScoreOnly,wasPaid:claimWasPaid,evaluate:evaluateSemiManualClaim,projection:semiManualProjection,fingerprint:claimSourceFingerprint,
+  canSection:(identity,section,role)=>adminCan({adminIdentity:identity},section,role),hodAccount:hodAccountForRequest,verifyPassword,zip:streamZipArchive,baseUrl:baseUrlFor,recipients:claimRegisterRecipients,
+  authenticate:async req=>{const session=readPortalSession(parseCookies(req).ucc_admin_session);if(session){touchPortalSession(session);if(session.identity.developerPreview||session.identity.master)return session.identity;const current=(await readAdminUsers()).find(account=>account.id===session.identity.id&&account.active!==false);return current?{...publicAdminUser(current),master:false}:null;}const header=req.headers.authorization||'';if(!header.startsWith('Basic '))return null;const decoded=Buffer.from(header.slice(6),'base64').toString('utf8'),index=decoded.indexOf(':'),username=decoded.slice(0,index),password=decoded.slice(index+1),account=(await readAdminUsers()).find(account=>account.active!==false&&String(account.username||'').toLowerCase()===username.toLowerCase());return account&&verifyPassword(password,account.passwordSalt,account.passwordHash)?{...publicAdminUser(account),master:false}:null;},
+  email:async(recipient,packet,url)=>{if(!gmailConfigured())throw new Error('Email delivery is not configured.');return sendGmailHtmlEmail({to:recipient.email,subject:`Action required - ${packet.reference}`,html:`<div style="font-family:Arial,sans-serif;line-height:1.5"><h2>Claim register: action required</h2><p>Dear ${htmlEscape(recipient.name||'Approving Officer')},</p><p>${htmlEscape(packet.reference)} from ${htmlEscape(packet.departmentName)} is awaiting your review. It includes ${packet.items.length} approved submissions and their supporting documents.</p><p><a href="${htmlEscape(url)}">Open the claim register and required action</a></p><p>Sign in with your authorised individual staff account. Review the read-only register and documents, then approve and forward or return with a reason.</p></div>`});},sms:sendArkeselSupportSms
+});
+app.use((err,req,res,_next)=>{
+  console.error(err);
+  if(err instanceof multer.MulterError){
+    const secureAssignment=req.path.startsWith('/secure/support-assignment/');
+    const message=err.code==='LIMIT_FILE_SIZE'?(secureAssignment?'An uploaded evidence file exceeds the 15 MB limit.':'A file exceeds the 100 MB server limit.'):err.code==='LIMIT_FILE_COUNT'?(secureAssignment?'No more than 10 evidence files may be uploaded.':'Too many files were uploaded.'):err.message;
+    if(secureAssignment)return res.status(400).type('html').send(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:32px"><h1>Upload not completed</h1><p>${htmlEscape(message)}</p><p><a href="${htmlEscape(req.originalUrl.replace(/\/resolve$/,''))}">Return to the assigned case</a></p></body></html>`);
+    return res.status(400).json({error:message});
+  }
+  res.status(500).json({error:'Unexpected server error.'});
+});
 app.listen(PORT,'0.0.0.0',()=>{
   console.log(`UCC submission portals listening on ${PORT}`);
   refreshSupportLifecycle().catch(error => console.error('Initial support lifecycle refresh failed:', error.message));

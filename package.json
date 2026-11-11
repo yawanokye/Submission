@@ -1,12 +1,12 @@
 {
   "name": "ucc-code-eservices",
-  "version": "70.0.0",
+  "version": "71.0.0",
   "private": true,
   "description": "UCC-CoDE eServices portal for submissions, claims, student support and centre coordination",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check admin/admin.js && node --check public/common.js && node --check public/student-support.js && node --check public/support-admin.js && node --check public/staff.js && node --check public/support-knowledge-base.js && node --check developer/developer.js && node --check operations/payroll.js && node --check operations/auditor.js && node scripts/check-dom-contracts.js",
+    "check": "node --check server.js && node --check admin/admin.js && node --check public/common.js && node --check public/student-support.js && node --check public/support-admin.js && node --check public/staff.js && node --check public/support-knowledge-base.js && node --check developer/developer.js && node --check operations/payroll.js && node --check operations/auditor.js && node --check lib/claim-register-workflow.js && node --check lib/claim-register-pdf.js && node --check public/claim-registers.js && node --check public/register-login.js && node scripts/check-dom-contracts.js",
     "test:portals": "node scripts/test-portal-previews.js",
     "test:payments": "node scripts/test-v43-payment-workflow.js",
     "test:duplicates": "node scripts/test-v44-duplicate-policy.js",
@@ -27,7 +27,9 @@
     "test:hod-intake": "node scripts/test-v66-hod-and-intake.js",
     "test:hod-categories": "node scripts/test-v67-hod-categories.js",
     "test:field-payment-policy": "node scripts/test-v69-field-payment-policy.js",
-    "test:hod-accounts": "node scripts/test-v70-hod-accounts.js"
+    "test:hod-accounts": "node scripts/test-v70-hod-accounts.js",
+    "test:claim-registers": "node scripts/test-v71-claim-registers.js",
+    "test:submission-archive": "node scripts/test-v71-submission-archive.js"
   },
   "engines": {
     "node": ">=24.14.1 <25"
@@ -37,6 +39,7 @@
     "mammoth": "^1.12.0",
     "multer": "^2.0.2",
     "pdf-parse": "2.4.5",
+    "pdfkit": "^0.17.2",
     "word-extractor": "^1.0.4",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
