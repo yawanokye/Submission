@@ -1,3 +1,9 @@
+## 80.0.0
+
+- Replace appended sent-register pages with one continuous claimant table per category. Combine each claimant's distinct source submissions and number every row from 1 to the end across page breaks.
+- Deduplicate repeated submission IDs across current and returned registers, prefer current snapshots, and omit formally excluded payment copies.
+- Include a category total and HoD signature/stamp space on every A4 portrait page. Preserve all original source approval PDFs and their audit histories.
+
 ## 79.0.0
 
 - Allow authorised departmental administrator previews to select ready claims and forward them to HoD, with Developer Preview recorded in the audit history. HoD signatures and downstream approvals continue to require their authorised individual accounts.

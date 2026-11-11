@@ -1,6 +1,6 @@
 {
   "name": "ucc-code-eservices",
-  "version": "79.0.0",
+  "version": "80.0.0",
   "private": true,
   "description": "UCC-CoDE eServices portal for submissions, claims, student support and centre coordination",
   "main": "server.js",
@@ -42,7 +42,8 @@
     "test:centre-resolution": "node scripts/test-v76-centre-resolution.js",
     "test:register-export": "node scripts/test-v77-register-export.js",
     "test:submission-versions": "node scripts/test-v78-submission-versions.js",
-    "test:sent-registers": "node scripts/test-v79-sent-registers.js"
+    "test:sent-registers": "node scripts/test-v79-sent-registers.js",
+    "test:continuous-register": "node scripts/test-v80-continuous-register.js"
   },
   "engines": {
     "node": ">=24.14.1 <25"
