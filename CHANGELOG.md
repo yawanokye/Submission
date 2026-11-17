@@ -1,3 +1,9 @@
+## 80.0.3
+
+- Place a prominent claim-register PDF download at the top of the approval workspace and individual register pages.
+- Automatically exclude claims recorded as paid from the current consolidated list while preserving original signed registers. Allow paid history to be reviewed separately and label it unsuitable for payment.
+- Keep paid and unpaid work separate in history and require the source payment record to be available before generating a current list.
+
 ## 80.0.2
 
 - Combine Project Work submissions only for the same claimant, department, mode and activity. Keep other activities and modes separate.
