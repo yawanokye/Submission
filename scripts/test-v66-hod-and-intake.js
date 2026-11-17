@@ -40,7 +40,7 @@ async function main(){
   const bulk=document.querySelector('[data-forward-submissions="field"]');assert.ok(bulk);assert.equal(bulk.hidden,false);
   // Exercise the button with the same selection set populated by table checkboxes.
   for(const id of ids.slice(0,2)){const check=document.querySelector(`.field-check[data-id="${id}"]`);assert.ok(check);check.click();}assert.equal(bulk.disabled,false);
-  let forwarded;dom.window.handleHodAction=async(scope,action,selectedIds)=>{forwarded={scope,action,selectedIds};};bulk.click();assert.equal(forwarded.action,'forward');assert.deepEqual([...forwarded.selectedIds],ids.slice(0,2));dom.window.close();
+  let forwarded;dom.window.selectApprovedClaimsForHod=selectedIds=>{forwarded=selectedIds;};bulk.click();assert.deepEqual([...forwarded],ids.slice(0,2));dom.window.close();
   const {body:sent}=await get('/api/admin/education/claims/forward-approved-to-hod',post({ids:ids.slice(0,2)}));assert.equal(sent.count,2);assert.equal(sent.totalQuantity,4);
   const {body:queue}=await get('/api/admin/education/hod-forward-register',{headers});assert.equal(queue.rows.filter(row=>row.stage==='pending-hod').length,2);await get('/api/admin/education/claims/forward-approved-to-hod',post({ids:ids.slice(0,2)}),400);
   for(const row of queue.rows.filter(row=>row.stage==='pending-hod')){assert.equal(row.hodReviewStatus,'forwarded');assert.equal(row.hodReviewLabel,'Awaiting HoD approval');assert.equal(row.payableClaimQuantity,2);assert.deepEqual(row.paymentReviewReasons,[],'routing progress alone must not be presented as a payment hold');}

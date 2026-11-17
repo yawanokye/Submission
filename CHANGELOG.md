@@ -1,3 +1,9 @@
+## 80.0.1
+
+- Keep differently named payees, different departments and entries without a staff ID or email separate in claim registers and exports.
+- Require matching claimant names before automatically replacing an unpaid submission. Preserve uncertain overlaps for administrator reconciliation and keep paid history intact.
+- Update older batch and forwarding tests to use the current centre and claims workflows.
+
 ## 80.0.0
 
 - Replace appended sent-register pages with one continuous claimant table per category. Combine each claimant's distinct source submissions and number every row from 1 to the end across page breaks.
