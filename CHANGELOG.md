@@ -1,3 +1,9 @@
+## 80.0.2
+
+- Combine Project Work submissions only for the same claimant, department, mode and activity. Keep other activities and modes separate.
+- Organise category PDF and spreadsheet registers by department, mode and activity, preserve serial numbers, source references and individual approval selections.
+- Add an individual-submission verification PDF for existing and new registers without changing saved signed approval documents.
+
 ## 80.0.1
 
 - Keep differently named payees, different departments and entries without a staff ID or email separate in claim registers and exports.

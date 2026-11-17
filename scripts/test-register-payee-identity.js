@@ -16,8 +16,8 @@ const items=[
   item('G','Unverified Person','',{quantity:9})
 ];
 const rows=claimantRows(items);
-assert.equal(rows.length,7,'only records with a matching name, identity, category and department should combine');
-assert.deepEqual(rows.find(row=>row.references==='A1 | A2').quantity,5);
+assert.equal(rows.length,7,'matching project work combines while different payees and departments stay separate');
+assert.equal(rows.find(row=>row.references==='A1 | A2').quantity,5);
 for(const [id,quantity] of [['B',4],['C',5],['D',6],['E',7],['F',8],['G',9]])assert.equal(rows.find(row=>row.references===id).quantity,quantity,`${id} must retain its own claims`);
 const csv=registerSpreadsheet({items},null,'csv').toString('utf8');
 assert.match(csv,/"Kofi Mensah","4"/);
@@ -28,6 +28,6 @@ assert.equal(claimantRows(combined.combinedModel(packets).items).length,2,'conso
 renderRegisterPdf({reference:'TEST',createdAt:'2026-11-17',departmentName:'Test departments',items}).then(bytes=>{
   const text=execFileSync('pdftotext',['-layout','-','-'],{input:bytes,encoding:'utf8'});
   for(const [name,quantity] of [['Kofi Mensah',4],['Esi Doe',5],['Kwame Doe',6]])assert.match(text,new RegExp(`${name}\\s+${quantity}`));
-  assert.match(text,/CATEGORY TOTAL CLAIMS\s+44/);
+  assert.match(text,/CATEGORY TOTAL CLAIMS:?\s+44/);
   console.log('Register payee grouping keeps different names, departments and unverified identities separate in PDF and spreadsheet rows.');
 }).catch(error=>{console.error(error);process.exitCode=1;});
